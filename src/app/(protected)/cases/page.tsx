@@ -60,6 +60,8 @@ export default async function CasesPage({
 
   if (params.status && CASE_STATUSES.includes(params.status as (typeof CASE_STATUSES)[number])) {
     dbQuery = dbQuery.eq("status", params.status as CaseStatus);
+  } else {
+    dbQuery = dbQuery.not("status", "in", "(Completed,Resolved,Closed)");
   }
 
   if (params.priority && PRIORITIES.includes(params.priority as (typeof PRIORITIES)[number])) {
@@ -103,11 +105,16 @@ export default async function CasesPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl">Customer and Case List</h1>
-          <p className="text-sm text-[#5a5a5a]">Search by customer, invoice, model, tracking context, and ownership.</p>
+          <p className="text-sm text-[#5a5a5a]">Search active cases by customer, invoice, model, tracking context, and ownership.</p>
         </div>
-        <Link href="/cases/new" className="btn-primary">
-          Create Case
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/cases/completed" className="btn-secondary">
+            Archived / Completed
+          </Link>
+          <Link href="/cases/new" className="btn-primary">
+            Create Case
+          </Link>
+        </div>
       </div>
 
       <form className="card grid gap-3 p-4 md:grid-cols-6">

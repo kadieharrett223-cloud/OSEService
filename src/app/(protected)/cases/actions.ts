@@ -76,7 +76,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
   const invoiceByNumberPromise = supabase
     .from("quickbooks_invoices")
     .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address")
-    .ilike("invoice_number", `%${query}%`)
+    .or(`invoice_number.ilike.%${query}%,quickbooks_invoice_id.ilike.%${query}%`)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -38,9 +38,10 @@ export async function GET(request: Request) {
   const [invoiceResult, customerResult] = await Promise.all([
     supabase
       .from("quickbooks_invoices")
-      .select("id, invoice_number, invoice_date, invoice_total, payment_status, quickbooks_customer_id")
+      .select("id, quickbooks_invoice_id, invoice_number, invoice_date, invoice_total, payment_status, quickbooks_customer_id")
       .or([
         `invoice_number.ilike.${like}`,
+        `quickbooks_invoice_id.ilike.${like}`,
         `quickbooks_customer_id.ilike.${like}`,
       ].join(","))
       .order("invoice_date", { ascending: false, nullsFirst: false })
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
     return {
       key: `invoice:${invoice.id}`,
       type: "invoice",
-      lookupQuery: String(invoice.invoice_number ?? invoice.quickbooks_customer_id ?? customerName),
+      lookupQuery: String(invoice.invoice_number ?? invoice.quickbooks_invoice_id ?? invoice.quickbooks_customer_id ?? customerName),
       primary: customerName,
       secondary: `Invoice #${number}`,
       invoiceNumber: invoice.invoice_number,

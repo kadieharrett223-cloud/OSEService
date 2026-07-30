@@ -52,14 +52,18 @@ Simple internal web app for customer service case tracking.
 	`supabase/migrations/202607300001_phase1_customer_service.sql`
 3. Run follow-up migration for access-code auth:
 	`supabase/migrations/202607300002_access_code_auth.sql`
-4. Confirm bucket `case-attachments` exists.
-5. In `/settings`, create at least one access user.
+4. Run case workflow migration:
+	`supabase/migrations/202607300003_case_workflow_updates.sql`
+5. Run QuickBooks connection migration:
+	`supabase/migrations/202607300004_quickbooks_connections.sql`
+6. Confirm bucket `case-attachments` exists.
+7. In `/settings`, create at least one access user.
 
 ## QuickBooks Autofill Behavior
 
-- The create-case page supports searching by QuickBooks customer name/customer ID/invoice number.
-- The current implementation autofills from stored data in `customers` and `quickbooks_invoices` tables.
-- Direct live QuickBooks API search remains a Phase 2 enhancement.
+- Connect QuickBooks from `/settings` using OAuth.
+- Initial connect and manual sync load invoice snapshots into `quickbooks_invoices`.
+- The create-case page searches snapshots by customer name/customer ID/invoice number.
 
 ## Vercel Deployment
 

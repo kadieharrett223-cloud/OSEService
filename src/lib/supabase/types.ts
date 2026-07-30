@@ -104,6 +104,55 @@ export type Database = {
         };
         Relationships: [];
       };
+      quickbooks_connections: {
+        Row: {
+          id: string;
+          realm_id: string;
+          environment: "sandbox" | "production";
+          status: "connected" | "disconnected" | "error";
+          encrypted_access_token: string | null;
+          encrypted_refresh_token: string | null;
+          access_token_expires_at: string | null;
+          refresh_token_expires_at: string | null;
+          last_sync_at: string | null;
+          last_sync_status: string | null;
+          last_sync_error: string | null;
+          connected_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          realm_id: string;
+          environment: "sandbox" | "production";
+          status?: "connected" | "disconnected" | "error";
+          encrypted_access_token?: string | null;
+          encrypted_refresh_token?: string | null;
+          access_token_expires_at?: string | null;
+          refresh_token_expires_at?: string | null;
+          last_sync_at?: string | null;
+          last_sync_status?: string | null;
+          last_sync_error?: string | null;
+          connected_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          realm_id?: string;
+          environment?: "sandbox" | "production";
+          status?: "connected" | "disconnected" | "error";
+          encrypted_access_token?: string | null;
+          encrypted_refresh_token?: string | null;
+          access_token_expires_at?: string | null;
+          refresh_token_expires_at?: string | null;
+          last_sync_at?: string | null;
+          last_sync_status?: string | null;
+          last_sync_error?: string | null;
+          connected_by?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       customer_service_cases: {
         Row: {
           id: string;

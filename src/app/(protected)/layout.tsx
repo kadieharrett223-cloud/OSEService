@@ -5,6 +5,7 @@ import { SidebarNav } from "@/app/(protected)/sidebar-nav";
 import { TopbarTools } from "@/app/(protected)/topbar-tools";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import Link from "next/link";
+import { getQuickbooksConnectionStatus } from "@/lib/quickbooks/integration";
 
 export default async function ProtectedLayout({
   children,
@@ -14,12 +15,16 @@ export default async function ProtectedLayout({
   const user = await requireUser();
   const userName = user.fullName ?? "Unknown User";
   const supabase = getSupabaseAdmin();
+  const quickbooksStatus = await getQuickbooksConnectionStatus();
 
   const { count: quickbooksSnapshotCount } = await supabase
     .from("quickbooks_invoices")
     .select("id", { count: "exact", head: true });
 
-  const isQboConnected = (quickbooksSnapshotCount ?? 0) > 0;
+  const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
+  const isQboConnected = quickbooksTableMissing
+    ? (quickbooksSnapshotCount ?? 0) > 0
+    : Boolean(quickbooksStatus.connection);
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f5f7fa]">

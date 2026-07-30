@@ -14,7 +14,8 @@
 - Autofill now carries fuller snapshot details (invoice date, total, payment status, billing/shipping address) into intake review fields.
 - Intake defaults to unassigned case creation and captures an explicit enter date for reporting timestamp fallback.
 - Protected app header now surfaces QuickBooks status as connected/disconnected using snapshot availability, with a Connect action when disconnected.
-- Lookup is read-only and does not call QuickBooks APIs directly yet.
+- Settings now includes live QuickBooks OAuth connect, disconnect, and manual invoice sync.
+- OAuth callback performs first sync to populate `quickbooks_invoices` and `customers` snapshots.
 
 ## Constraints
 
@@ -29,7 +30,8 @@
 3. Persist encrypted token material in quickbooks_connections (new table).
 4. Build "Find Invoice" UI in create case workflow.
 5. Store quickbooks_customer_id and quickbooks_invoice_id on case linkage.
-6. Add background sync job for refreshed invoice data if needed.
+6. Add manual sync from settings (implemented).
+7. Add background sync job for refreshed invoice data if needed.
 
 ## Test Plan
 

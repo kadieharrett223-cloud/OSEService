@@ -13,6 +13,10 @@ type DashboardCaseRow = {
   access_users: { full_name: string | null } | null;
 };
 
+type DashboardParams = {
+  status?: string;
+};
+
 function statusBadge(status: string) {
   if (status === "New" || status === "In Progress") return "bg-[#ecfdf3] text-[#166534]";
   if (status === "Waiting for Customer") return "bg-[#fff7ed] text-[#c2410c]";
@@ -45,11 +49,21 @@ async function getCountByStatus(status: CaseStatus) {
   return count ?? 0;
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<DashboardParams>;
+}) {
   await requireUser();
+  const params = await searchParams;
   const supabase = getSupabaseAdmin();
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const statusFilter = params.status === "resolved"
+    ? "resolved"
+    : params.status === "in-progress"
+      ? "in-progress"
+      : "all";
 
   const [{ count: openCases }, { count: highPriority }, { count: recentlyUpdated }, waitingForCustomer, partsNeeded, partsShipped] =
     await Promise.all([
@@ -71,13 +85,23 @@ export default async function DashboardPage() {
       getCountByStatus("Parts Shipped"),
     ]);
 
-  const { data: latestCases } = await supabase
+  let latestCasesQuery = supabase
     .from("customer_service_cases")
     .select(
       `id, case_number, status, priority, updated_at, customers(full_name, company_name), access_users:assigned_employee_id(full_name)`,
     )
     .order("updated_at", { ascending: false })
     .limit(10);
+
+  if (statusFilter === "in-progress") {
+    latestCasesQuery = latestCasesQuery.eq("status", "In Progress");
+  }
+
+  if (statusFilter === "resolved") {
+    latestCasesQuery = latestCasesQuery.in("status", ["Resolved", "Completed", "Closed"]);
+  }
+
+  const { data: latestCases } = await latestCasesQuery;
 
   const cards = [
     { label: "Open Cases", icon: "📋", value: openCases ?? 0, trend: `${recentlyUpdated ?? 0} updated this week`, action: { href: "/cases", label: "View Cases" } },
@@ -117,7 +141,29 @@ export default async function DashboardPage() {
       </section>
 
       <section className="card p-4">
-        <h2 className="text-base font-semibold text-[#111827]">Recently Updated Cases</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold text-[#111827]">Recently Updated Cases</h2>
+          <div className="flex gap-1">
+            <Link
+              href="/dashboard"
+              className={`rounded-md px-2 py-1 text-xs font-semibold ${statusFilter === "all" ? "bg-[#1f2937] text-white" : "bg-[#eef2f7] text-[#334155]"}`}
+            >
+              All
+            </Link>
+            <Link
+              href="/dashboard?status=in-progress"
+              className={`rounded-md px-2 py-1 text-xs font-semibold ${statusFilter === "in-progress" ? "bg-[#166534] text-white" : "bg-[#ecfdf3] text-[#166534]"}`}
+            >
+              In Progress
+            </Link>
+            <Link
+              href="/dashboard?status=resolved"
+              className={`rounded-md px-2 py-1 text-xs font-semibold ${statusFilter === "resolved" ? "bg-[#166534] text-white" : "bg-[#ecfdf3] text-[#166534]"}`}
+            >
+              Resolved
+            </Link>
+          </div>
+        </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead>

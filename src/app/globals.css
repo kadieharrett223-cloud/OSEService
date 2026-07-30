@@ -145,3 +145,9 @@ h6 {
   color: var(--oe-black);
   background: var(--oe-white);
 }
+
+.badge-complete {
+  color: #166534;
+  border-color: #86efac;
+  background: #ecfdf3;
+}

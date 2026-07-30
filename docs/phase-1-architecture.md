@@ -13,12 +13,14 @@ Phase 1 implements only internal customer service case tracking:
 - Case detail status is managed from a single Status control (Case Workflow section); issue-details edits no longer mutate status
 - Completed/Closed are treated as Resolved in operator-facing UI labels
 - Workflow event buttons append timeline entries only; they do not mutate case status
+- On case details, when status is Resolved the priority chip is replaced with a green Complete badge for at-a-glance closure state
 - Internal/customer notes
 - Attachment upload metadata and secure storage
 - Replacement part tracking
 - Immutable activity timeline entries
 - Workflow action controls that append timeline events (customer contacted, waiting states, warranty/parts/tracking updates)
 - Search and filtering for operations
+- Dashboard-level recent-case filter menu supports All, In Progress, and Resolved views
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status

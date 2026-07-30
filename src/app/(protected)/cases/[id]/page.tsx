@@ -220,6 +220,13 @@ export default async function CaseDetailsPage({
   const showAllTimeline = timeline === "all";
   const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
   const normalizedStatus = normalizeStatusLabel(caseRecord.status);
+  const isResolvedStatus = normalizedStatus === "Resolved";
+  const priorityBadgeLabel = isResolvedStatus ? "Complete" : caseRecord.priority;
+  const priorityBadgeClass = isResolvedStatus
+    ? "badge-complete"
+    : caseRecord.priority === "High"
+      ? "badge-priority-high"
+      : "badge-status";
   const statusOptions = CASE_STATUSES.filter((status) => status !== "Completed" && status !== "Closed");
   const latestTracking = allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.details?.tracking_number
     ?? allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.summary.split(":").slice(1).join(":").trim()
@@ -241,8 +248,8 @@ export default async function CaseDetailsPage({
         </div>
         <div className="flex gap-2">
           <span className="badge badge-status">{normalizedStatus}</span>
-          <span className={`badge ${caseRecord.priority === "High" ? "badge-priority-high" : "badge-status"}`}>
-            {caseRecord.priority}
+          <span className={`badge ${priorityBadgeClass}`}>
+            {priorityBadgeLabel}
           </span>
           <Link href="/cases" className="btn-secondary">Back to Cases</Link>
         </div>

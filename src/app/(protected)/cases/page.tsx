@@ -2,15 +2,18 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import {
   CASE_STATUSES,
+  CASE_TYPES,
   PRIORITIES,
   type CasePriority,
   type CaseStatus,
+  type CaseType,
 } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type CaseListRow = {
   id: string;
   case_number: string;
+  case_type: string;
   status: string;
   priority: string;
   updated_at: string;
@@ -31,6 +34,7 @@ type Params = {
   status?: string;
   priority?: string;
   employee?: string;
+  case_type?: string;
 };
 
 export default async function CasesPage({
@@ -47,7 +51,7 @@ export default async function CasesPage({
   let dbQuery = supabase
     .from("customer_service_cases")
     .select(
-      `id, case_number, status, priority, updated_at, quickbooks_invoice_number, product_model, serial_number,
+      `id, case_number, case_type, status, priority, updated_at, quickbooks_invoice_number, product_model, serial_number,
        customers(full_name, company_name, phone, email),
        assigned:access_users!customer_service_cases_assigned_employee_id_access_user_fkey(full_name)`,
     )
@@ -64,6 +68,10 @@ export default async function CasesPage({
 
   if (params.employee) {
     dbQuery = dbQuery.eq("assigned_employee_id", params.employee);
+  }
+
+  if (params.case_type && CASE_TYPES.includes(params.case_type as (typeof CASE_TYPES)[number])) {
+    dbQuery = dbQuery.eq("case_type", params.case_type as CaseType);
   }
 
   const [{ data: rows }, { data: employees }] = await Promise.all([
@@ -102,7 +110,7 @@ export default async function CasesPage({
         </Link>
       </div>
 
-      <form className="card grid gap-3 p-4 md:grid-cols-5">
+      <form className="card grid gap-3 p-4 md:grid-cols-6">
         <div className="md:col-span-2">
           <label htmlFor="q" className="label">
             Search
@@ -152,7 +160,21 @@ export default async function CasesPage({
           </select>
         </div>
 
-        <div className="md:col-span-5 flex gap-2">
+        <div>
+          <label htmlFor="case_type" className="label">
+            Case Type
+          </label>
+          <select id="case_type" name="case_type" defaultValue={params.case_type ?? ""} className="select">
+            <option value="">All</option>
+            {CASE_TYPES.map((caseType) => (
+              <option key={caseType} value={caseType}>
+                {caseType}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="md:col-span-6 flex gap-2">
           <button type="submit" className="btn-primary">
             Apply Filters
           </button>
@@ -167,6 +189,7 @@ export default async function CasesPage({
           <thead>
             <tr className="border-b border-[#ececec] text-[#5a5a5a]">
               <th className="px-2 py-2">Case</th>
+              <th className="px-2 py-2">Type</th>
               <th className="px-2 py-2">Customer</th>
               <th className="px-2 py-2">Invoice</th>
               <th className="px-2 py-2">Product</th>
@@ -184,6 +207,7 @@ export default async function CasesPage({
                     {row.case_number}
                   </Link>
                 </td>
+                <td className="px-2 py-2">{row.case_type ?? "General"}</td>
                 <td className="px-2 py-2">
                   {row.customers?.full_name}
                   <div className="text-xs text-[#6e6e6e]">{row.customers?.company_name ?? ""}</div>

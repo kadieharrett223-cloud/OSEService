@@ -7,12 +7,15 @@ Phase 1 implements only internal customer service case tracking:
 - Access-code login
 - Shared code with per-person login history
 - Customer/case creation
+- Case type routing (General, Warranty, Freight Damage)
 - Status and priority updates
+- Workflow shortcuts for In Progress, Completed, and Reopen
 - Internal/customer notes
 - Attachment upload metadata and secure storage
 - Replacement part tracking
 - Immutable activity timeline entries
 - Search and filtering for operations
+- Archived/completed case view with reopen support
 
 Out of scope for Phase 1:
 

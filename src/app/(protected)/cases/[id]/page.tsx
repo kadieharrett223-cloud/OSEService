@@ -6,6 +6,7 @@ import {
   addNoteAction,
   addReplacementPartAction,
   updateCaseStatusAction,
+  updateCaseWorkflowAction,
   uploadAttachmentAction,
 } from "@/app/(protected)/cases/[id]/actions";
 
@@ -27,6 +28,7 @@ type NoteRow = {
 type CaseRecord = {
   id: string;
   case_number: string;
+  case_type: string;
   status: string;
   priority: string;
   issue_reported_at: string;
@@ -125,6 +127,7 @@ export default async function CaseDetailsPage({
         <div>
           <p className="text-sm text-[#5a5a5a]">Case</p>
           <h1 className="text-3xl">{caseRecord.case_number}</h1>
+          <p className="text-sm text-[#5a5a5a]">{caseRecord.case_type ?? "General"}</p>
         </div>
         <div className="flex gap-2">
           <span className="badge badge-status">{caseRecord.status}</span>
@@ -200,6 +203,19 @@ export default async function CaseDetailsPage({
             </div>
             <button type="submit" className="btn-primary">Save Status</button>
           </form>
+
+          <form action={updateCaseWorkflowAction} className="mt-3 flex flex-wrap gap-2">
+            <input type="hidden" name="case_id" value={id} />
+            <button type="submit" name="workflow_action" value="mark_in_progress" className="btn-secondary">
+              Mark In Progress
+            </button>
+            <button type="submit" name="workflow_action" value="mark_completed" className="btn-primary">
+              Mark Completed
+            </button>
+            <button type="submit" name="workflow_action" value="reopen_case" className="btn-secondary">
+              Reopen Case
+            </button>
+          </form>
         </article>
       </section>
 
@@ -219,24 +235,21 @@ export default async function CaseDetailsPage({
         </article>
 
         <article className="card p-4">
-          <h2 className="text-xl">Add Note</h2>
+          <h2 className="text-xl">Progress Tracking</h2>
           <form action={addNoteAction} className="mt-3 space-y-2">
             <input type="hidden" name="case_id" value={id} />
-            <select name="note_type" className="select">
-              <option value="internal">Internal Note</option>
-              <option value="customer">Customer-Facing Note</option>
-            </select>
-            <textarea name="content" rows={4} required className="textarea" placeholder="Record progress or communication" />
-            <button type="submit" className="btn-primary w-full">Add Note</button>
+            <input type="hidden" name="note_type" value="internal" />
+            <textarea name="content" rows={4} required className="textarea" placeholder="Add the next progress line. Date and time are auto-recorded." />
+            <button type="submit" className="btn-primary w-full">Add Progress Line</button>
           </form>
 
-          <h3 className="mt-5 text-lg">Recent Notes</h3>
+          <h3 className="mt-5 text-lg">Recent Progress Lines</h3>
           <div className="mt-2 space-y-2">
             {((notes ?? []) as NoteRow[]).slice(0, 8).map((note) => (
               <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
                 <p>{note.content}</p>
                 <p className="mt-1 text-xs text-[#6a6a6a]">
-                  {note.note_type} • {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"}
+                  {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"}
                 </p>
               </div>
             ))}
@@ -292,6 +305,7 @@ export default async function CaseDetailsPage({
                 <p className="font-semibold">{part.part_name}</p>
                 <p>Qty: {part.quantity} • SKU: {part.sku ?? "-"} • Supplier: {part.supplier ?? "-"}</p>
                 <p>Status: {part.shipping_status ?? "-"} • Tracking: {part.tracking_number ?? "-"}</p>
+                <p className="text-xs text-[#6a6a6a]">Added {new Date(part.created_at).toLocaleString()}</p>
               </div>
             ))}
           </div>

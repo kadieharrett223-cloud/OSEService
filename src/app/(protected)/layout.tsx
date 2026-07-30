@@ -7,6 +7,11 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/cases", label: "Cases" },
   { href: "/cases/new", label: "Create Case" },
+  { href: "/cases/new?case_type=Warranty", label: "New Warranty Case" },
+  { href: "/cases/new?case_type=Freight+Damage", label: "New Freight Damage Case" },
+  { href: "/cases/completed", label: "Archived / Completed" },
+  { href: "/cases?case_type=Warranty", label: "Warranty" },
+  { href: "/cases?case_type=Freight+Damage", label: "Freight Damage" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -26,14 +31,6 @@ export default async function ProtectedLayout({
             <p className="text-xl">{APP_SHORT_NAME}</p>
           </div>
 
-          <nav className="flex items-center gap-2 text-sm">
-            {navItems.map((item) => (
-              <Link key={item.href} href={item.href} className="rounded-md px-3 py-2 hover:bg-[#f1f1f1]">
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-
           <div className="flex items-center gap-3">
             <p className="text-right text-sm text-[#5a5a5a]">{user.fullName ?? "Unknown User"}</p>
             <form action={signOutAction}>
@@ -45,7 +42,20 @@ export default async function ProtectedLayout({
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6">{children}</main>
+      <div className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 md:grid-cols-[220px_1fr] md:px-6">
+        <aside className="card h-fit p-3">
+          <p className="px-2 pb-2 text-xs uppercase tracking-[0.08em] text-[#6a6a6a]">Workflow Menu</p>
+          <nav className="flex flex-col gap-1 text-sm">
+            {navItems.map((item) => (
+              <Link key={item.href} href={item.href} className="rounded-md px-3 py-2 hover:bg-[#f1f1f1]">
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+        </aside>
+
+        <main>{children}</main>
+      </div>
     </div>
   );
 }

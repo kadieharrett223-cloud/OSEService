@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { CASE_STATUSES, PRIORITIES } from "@/lib/constants";
+import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { createCaseAction, quickbooksAutofillAction } from "@/app/(protected)/cases/actions";
 import { QuickbooksLookup } from "@/app/(protected)/cases/new/quickbooks-lookup";
 
@@ -22,6 +22,7 @@ export default async function CreateCasePage({
     invoice_date?: string;
     invoice_total?: string;
     payment_status?: string;
+    case_type?: string;
   }>;
 }) {
   await requireUser();
@@ -29,6 +30,9 @@ export default async function CreateCasePage({
   const params = await searchParams;
   const error = params.error;
   const enteredDate = new Date().toISOString().slice(0, 10);
+  const defaultCaseType = CASE_TYPES.includes((params.case_type ?? "") as (typeof CASE_TYPES)[number])
+    ? params.case_type
+    : "General";
 
   return (
     <div className="space-y-5">
@@ -130,6 +134,14 @@ export default async function CreateCasePage({
 
         <section className="card grid gap-4 border-l-4 border-l-[#7b3f00] bg-[#fffefb] p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Case Details</h2>
+          <div>
+            <label htmlFor="case_type" className="label">Case Type</label>
+            <select id="case_type" name="case_type" className="select" defaultValue={defaultCaseType}>
+              {CASE_TYPES.map((caseType) => (
+                <option key={caseType} value={caseType}>{caseType}</option>
+              ))}
+            </select>
+          </div>
           <div>
             <label htmlFor="entered_date" className="label">Enter Date</label>
             <input id="entered_date" name="entered_date" type="date" className="input" defaultValue={enteredDate} />

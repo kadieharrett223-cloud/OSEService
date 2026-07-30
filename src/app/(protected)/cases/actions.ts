@@ -5,9 +5,11 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import {
   CASE_STATUSES,
+  CASE_TYPES,
   PRIORITIES,
   type CasePriority,
   type CaseStatus,
+  type CaseType,
 } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -173,6 +175,13 @@ export async function createCaseAction(formData: FormData) {
     ? (statusInput as CaseStatus)
     : "New";
 
+  const caseTypeInput = String(formData.get("case_type") ?? "General");
+  const caseType: CaseType = CASE_TYPES.includes(
+    caseTypeInput as (typeof CASE_TYPES)[number],
+  )
+    ? (caseTypeInput as CaseType)
+    : "General";
+
   let customerQuery = supabase.from("customers").select("id").limit(1);
 
   if (quickbooksCustomerId) {
@@ -214,6 +223,7 @@ export async function createCaseAction(formData: FormData) {
     .from("customer_service_cases")
     .insert({
       customer_id: customerId,
+      case_type: caseType,
       quickbooks_invoice_id: emptyToNull(formData.get("quickbooks_invoice_id")),
       quickbooks_invoice_number: emptyToNull(formData.get("quickbooks_invoice_number")),
       quickbooks_invoice_link: emptyToNull(formData.get("quickbooks_invoice_link")),

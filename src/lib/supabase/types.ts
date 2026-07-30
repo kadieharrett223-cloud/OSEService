@@ -109,6 +109,7 @@ export type Database = {
           id: string;
           case_number: string;
           customer_id: string;
+          case_type: "General" | "Warranty" | "Freight Damage";
           quickbooks_invoice_id: string | null;
           quickbooks_invoice_number: string | null;
           quickbooks_invoice_link: string | null;
@@ -121,12 +122,14 @@ export type Database = {
           priority: "Low" | "Medium" | "High";
           status:
             | "New"
+            | "In Progress"
             | "Waiting for Customer"
             | "Under Review"
             | "Parts Needed"
             | "Parts Ordered"
             | "Parts Shipped"
             | "Service Scheduled"
+            | "Completed"
             | "Resolved"
             | "Closed";
           internal_notes: string | null;
@@ -141,6 +144,7 @@ export type Database = {
           id?: string;
           case_number?: string;
           customer_id: string;
+          case_type?: "General" | "Warranty" | "Freight Damage";
           quickbooks_invoice_id?: string | null;
           quickbooks_invoice_number?: string | null;
           quickbooks_invoice_link?: string | null;
@@ -153,12 +157,14 @@ export type Database = {
           priority?: "Low" | "Medium" | "High";
           status?:
             | "New"
+            | "In Progress"
             | "Waiting for Customer"
             | "Under Review"
             | "Parts Needed"
             | "Parts Ordered"
             | "Parts Shipped"
             | "Service Scheduled"
+            | "Completed"
             | "Resolved"
             | "Closed";
           internal_notes?: string | null;
@@ -171,6 +177,7 @@ export type Database = {
         };
         Update: {
           customer_id?: string;
+          case_type?: "General" | "Warranty" | "Freight Damage";
           quickbooks_invoice_id?: string | null;
           quickbooks_invoice_number?: string | null;
           quickbooks_invoice_link?: string | null;
@@ -183,12 +190,14 @@ export type Database = {
           priority?: "Low" | "Medium" | "High";
           status?:
             | "New"
+            | "In Progress"
             | "Waiting for Customer"
             | "Under Review"
             | "Parts Needed"
             | "Parts Ordered"
             | "Parts Shipped"
             | "Service Scheduled"
+            | "Completed"
             | "Resolved"
             | "Closed";
           internal_notes?: string | null;

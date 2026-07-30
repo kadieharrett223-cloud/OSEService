@@ -14,8 +14,10 @@ Phase 1 implements only internal customer service case tracking:
 - Attachment upload metadata and secure storage
 - Replacement part tracking
 - Immutable activity timeline entries
+- Workflow action buttons that append timeline events (customer contacted, waiting states, warranty/parts/tracking updates)
 - Search and filtering for operations
 - Archived/completed case view with reopen support
+- Multi-file attachment gallery with upload, download, and delete controls
 
 Out of scope for Phase 1:
 
@@ -31,7 +33,8 @@ Out of scope for Phase 1:
 4. Server Actions write to Supabase Postgres tables.
 5. Activity rows are appended to case_activity.
 6. Attachments are uploaded to private Supabase Storage bucket case-attachments.
-7. Access is enforced by server-side session cookies.
+7. Case actions and uploads append timeline rows to case_activity automatically.
+8. Access is enforced by server-side session cookies.
 
 ## Main Tables
 

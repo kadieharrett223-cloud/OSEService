@@ -16,6 +16,7 @@
 - Protected app header now surfaces QuickBooks status as connected/disconnected using snapshot availability, with a Connect action when disconnected.
 - Settings now includes live QuickBooks OAuth connect, disconnect, and manual invoice sync.
 - OAuth callback performs first sync to populate `quickbooks_invoices` and `customers` snapshots.
+- Create-case now auto-sets issue reported timestamp at save time and auto-populates date of purchase from matched invoice date.
 
 ## Constraints
 

@@ -7,6 +7,8 @@ import { CASE_STATUSES, type CaseStatus } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/types";
 
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "heic", "pdf", "mp4"]);
+
 function getString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
 }
@@ -14,6 +16,16 @@ function getString(formData: FormData, key: string) {
 function getNullableString(formData: FormData, key: string) {
   const value = getString(formData, key);
   return value || null;
+}
+
+function getFileExtension(fileName: string) {
+  if (!fileName.includes(".")) return "";
+  return fileName.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isAllowedAttachment(file: File) {
+  const extension = getFileExtension(file.name);
+  return ALLOWED_ATTACHMENT_EXTENSIONS.has(extension);
 }
 
 async function getCaseOrRedirect(caseId: string) {
@@ -212,52 +224,175 @@ export async function addReplacementPartAction(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+type WorkflowEventConfig = {
+  summary: string;
+  status?: CaseStatus;
+};
+
+const WORKFLOW_EVENTS: Record<string, WorkflowEventConfig> = {
+  customer_contacted: { summary: "Customer contacted" },
+  replacement_part_ordered: { summary: "Replacement part ordered" },
+  warranty_approved: { summary: "Warranty approved" },
+  waiting_supplier: { summary: "Waiting on supplier", status: "Parts Ordered" },
+  waiting_customer: { summary: "Waiting on customer", status: "Waiting for Customer" },
+  replacement_delivered: { summary: "Replacement delivered" },
+  add_tracking_number: { summary: "Tracking number added" },
+  request_supplier_approval: { summary: "Supplier approval requested" },
+  schedule_technician: { summary: "Technician scheduled", status: "Service Scheduled" },
+  send_customer_email: { summary: "Customer email sent" },
+  generate_warranty_claim: { summary: "Warranty claim generated" },
+};
+
+export async function addCaseWorkflowEventAction(formData: FormData) {
+  const user = await requireUser();
+
+  const caseId = getString(formData, "case_id");
+  const eventType = getString(formData, "event_type");
+  const trackingNumber = getString(formData, "tracking_number");
+
+  if (!caseId || !eventType) {
+    redirect(`/cases/${caseId || ""}?error=missing_event_type`);
+  }
+
+  const eventConfig = WORKFLOW_EVENTS[eventType];
+  if (!eventConfig) {
+    redirect(`/cases/${caseId}?error=invalid_event_type`);
+  }
+
+  const { supabase } = await getCaseOrRedirect(caseId);
+
+  if (eventConfig.status) {
+    const { error: updateError } = await supabase
+      .from("customer_service_cases")
+      .update({ status: eventConfig.status as never })
+      .eq("id", caseId);
+
+    if (updateError) {
+      redirect(`/cases/${caseId}?error=${encodeURIComponent(updateError.message)}`);
+    }
+  }
+
+  const details = trackingNumber ? { tracking_number: trackingNumber } : null;
+  const summary = trackingNumber ? `${eventConfig.summary}: ${trackingNumber}` : eventConfig.summary;
+
+  const { error } = await supabase.from("case_activity").insert({
+    case_id: caseId,
+    actor_id: user.id,
+    activity_type: eventType,
+    summary,
+    details,
+  });
+
+  if (error) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  revalidatePath("/dashboard");
+}
+
 export async function uploadAttachmentAction(formData: FormData) {
   const user = await requireUser();
 
   const caseId = getString(formData, "case_id");
-  const file = formData.get("attachment");
+  const files = formData.getAll("attachments").filter((item): item is File => item instanceof File && item.size > 0);
 
-  if (!caseId || !(file instanceof File) || file.size <= 0) {
+  if (!caseId || files.length === 0) {
     redirect(`/cases/${caseId || ""}?error=attachment_missing`);
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
 
-  const fileExtension = file.name.includes(".") ? file.name.split(".").pop() : "bin";
-  const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
-  const storagePath = `${caseId}/${safeFileName}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("case-attachments")
-    .upload(storagePath, file, {
-      cacheControl: "3600",
-      upsert: false,
-      contentType: file.type || undefined,
-    });
-
-  if (uploadError) {
-    redirect(`/cases/${caseId}?error=${encodeURIComponent(uploadError.message)}`);
+  for (const file of files) {
+    if (!isAllowedAttachment(file)) {
+      redirect(`/cases/${caseId}?error=Unsupported+file+type.+Use+JPG,+PNG,+HEIC,+PDF,+or+MP4`);
+    }
   }
 
-  const { error: dbError } = await supabase.from("case_attachments").insert({
-    case_id: caseId,
-    file_path: storagePath,
-    file_name: file.name,
-    file_size: file.size,
-    mime_type: file.type || null,
-    uploaded_by: user.id,
-  });
+  for (const file of files) {
+    const fileExtension = getFileExtension(file.name) || "bin";
+    const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
+    const storagePath = `${caseId}/${safeFileName}`;
 
-  if (dbError) {
-    redirect(`/cases/${caseId}?error=${encodeURIComponent(dbError.message)}`);
+    const { error: uploadError } = await supabase.storage
+      .from("case-attachments")
+      .upload(storagePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || undefined,
+      });
+
+    if (uploadError) {
+      redirect(`/cases/${caseId}?error=${encodeURIComponent(uploadError.message)}`);
+    }
+
+    const { error: dbError } = await supabase.from("case_attachments").insert({
+      case_id: caseId,
+      file_path: storagePath,
+      file_name: file.name,
+      file_size: file.size,
+      mime_type: file.type || null,
+      uploaded_by: user.id,
+    });
+
+    if (dbError) {
+      redirect(`/cases/${caseId}?error=${encodeURIComponent(dbError.message)}`);
+    }
   }
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
     actor_id: user.id,
     activity_type: "file_uploaded",
-    summary: `Attachment uploaded: ${file.name}`,
+    summary: files.length === 1 ? `Attachment uploaded: ${files[0].name}` : `${files.length} attachments uploaded`,
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+}
+
+export async function deleteAttachmentAction(formData: FormData) {
+  const user = await requireUser();
+
+  const caseId = getString(formData, "case_id");
+  const attachmentId = getString(formData, "attachment_id");
+
+  if (!caseId || !attachmentId) {
+    redirect(`/cases/${caseId || ""}?error=missing_attachment_reference`);
+  }
+
+  const { supabase } = await getCaseOrRedirect(caseId);
+
+  const { data: attachment, error: lookupError } = await supabase
+    .from("case_attachments")
+    .select("id, file_name, file_path")
+    .eq("id", attachmentId)
+    .eq("case_id", caseId)
+    .maybeSingle();
+
+  if (lookupError || !attachment) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(lookupError?.message ?? "Attachment not found")}`);
+  }
+
+  await supabase.storage
+    .from("case-attachments")
+    .remove([attachment.file_path]);
+
+  const { error: deleteError } = await supabase
+    .from("case_attachments")
+    .delete()
+    .eq("id", attachmentId)
+    .eq("case_id", caseId);
+
+  if (deleteError) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(deleteError.message)}`);
+  }
+
+  await supabase.from("case_activity").insert({
+    case_id: caseId,
+    actor_id: user.id,
+    activity_type: "file_deleted",
+    summary: `Attachment deleted: ${attachment.file_name}`,
   });
 
   revalidatePath(`/cases/${caseId}`);

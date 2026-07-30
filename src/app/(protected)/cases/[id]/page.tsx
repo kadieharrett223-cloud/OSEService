@@ -3,8 +3,10 @@ import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
+  addCaseWorkflowEventAction,
   addNoteAction,
   addReplacementPartAction,
+  deleteAttachmentAction,
   updateCaseStatusAction,
   updateCaseWorkflowAction,
   uploadAttachmentAction,
@@ -51,6 +53,16 @@ type CaseRecord = {
   creator: { full_name: string | null } | null;
 };
 
+type AttachmentRow = {
+  id: string;
+  file_name: string;
+  file_path: string;
+  file_size: number | null;
+  mime_type: string | null;
+  created_at: string;
+  uploader: { full_name: string | null } | null;
+};
+
 export default async function CaseDetailsPage({
   params,
   searchParams,
@@ -95,7 +107,7 @@ export default async function CaseDetailsPage({
         .order("created_at", { ascending: false }),
       supabase
         .from("case_attachments")
-        .select("id, file_name, file_path, file_size, mime_type, created_at")
+        .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!case_attachments_uploaded_by_access_user_fkey(full_name)")
         .eq("case_id", id)
         .order("created_at", { ascending: false }),
     ]);
@@ -113,7 +125,7 @@ export default async function CaseDetailsPage({
   }
 
   const attachmentLinks = await Promise.all(
-    (attachments ?? []).map(async (item) => {
+    ((attachments ?? []) as AttachmentRow[]).map(async (item) => {
       const { data } = await supabase.storage
         .from("case-attachments")
         .createSignedUrl(item.file_path, 60 * 60);
@@ -177,8 +189,6 @@ export default async function CaseDetailsPage({
           <dl className="mt-3 grid grid-cols-[170px,1fr] gap-y-2 text-sm">
             <dt className="text-[#5a5a5a]">Product Model</dt>
             <dd>{caseRecord.product_model ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Serial Number</dt>
-            <dd>{caseRecord.serial_number ?? "-"}</dd>
             <dt className="text-[#5a5a5a]">Date of Purchase</dt>
             <dd>{caseRecord.date_of_purchase ?? "-"}</dd>
             <dt className="text-[#5a5a5a]">Issue Reported</dt>
@@ -221,7 +231,8 @@ export default async function CaseDetailsPage({
 
       <section className="grid gap-4 xl:grid-cols-3">
         <article className="card p-4 xl:col-span-2">
-          <h2 className="text-xl">Activity History</h2>
+          <h2 className="text-xl">Timeline</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">Generated from actual actions in this case.</p>
           <div className="mt-3 space-y-3">
             {((activity ?? []) as ActivityRow[]).map((row) => (
               <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
@@ -235,15 +246,41 @@ export default async function CaseDetailsPage({
         </article>
 
         <article className="card p-4">
-          <h2 className="text-xl">Progress Tracking</h2>
-          <form action={addNoteAction} className="mt-3 space-y-2">
+          <h2 className="text-xl">Resolution Actions</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">Use action buttons to move work forward and append timeline entries automatically.</p>
+
+          <form action={addCaseWorkflowEventAction} className="mt-3 grid grid-cols-2 gap-2">
             <input type="hidden" name="case_id" value={id} />
-            <input type="hidden" name="note_type" value="internal" />
-            <textarea name="content" rows={4} required className="textarea" placeholder="Add the next progress line. Date and time are auto-recorded." />
-            <button type="submit" className="btn-primary w-full">Add Progress Line</button>
+            <button type="submit" name="event_type" value="customer_contacted" className="btn-secondary text-sm">Customer Contacted</button>
+            <button type="submit" name="event_type" value="send_customer_email" className="btn-secondary text-sm">Send Customer Email</button>
+            <button type="submit" name="event_type" value="replacement_part_ordered" className="btn-secondary text-sm">Order Replacement Part</button>
+            <button type="submit" name="event_type" value="generate_warranty_claim" className="btn-secondary text-sm">Generate Warranty Claim</button>
+            <button type="submit" name="event_type" value="request_supplier_approval" className="btn-secondary text-sm">Request Supplier Approval</button>
+            <button type="submit" name="event_type" value="schedule_technician" className="btn-secondary text-sm">Schedule Technician</button>
+            <button type="submit" name="event_type" value="waiting_supplier" className="btn-secondary text-sm">Mark Waiting on Supplier</button>
+            <button type="submit" name="event_type" value="waiting_customer" className="btn-secondary text-sm">Mark Waiting on Customer</button>
+            <button type="submit" name="event_type" value="warranty_approved" className="btn-secondary text-sm">Warranty Approved</button>
+            <button type="submit" name="event_type" value="replacement_delivered" className="btn-secondary text-sm">Replacement Delivered</button>
           </form>
 
-          <h3 className="mt-5 text-lg">Recent Progress Lines</h3>
+          <form action={addCaseWorkflowEventAction} className="mt-3 flex items-end gap-2">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="event_type" value="add_tracking_number" />
+            <div className="flex-1">
+              <label htmlFor="tracking_number" className="label">Add Tracking Number</label>
+              <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
+            </div>
+            <button type="submit" className="btn-primary">Add Tracking Number</button>
+          </form>
+
+          <form action={addNoteAction} className="mt-4 space-y-2 border-t border-[#ececec] pt-4">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="note_type" value="internal" />
+            <textarea name="content" rows={3} required className="textarea" placeholder="Internal note (auto-added to timeline)." />
+            <button type="submit" className="btn-primary w-full">Add Internal Note</button>
+          </form>
+
+          <h3 className="mt-5 text-lg">Recent Notes</h3>
           <div className="mt-2 space-y-2">
             {((notes ?? []) as NoteRow[]).slice(0, 8).map((note) => (
               <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
@@ -260,24 +297,47 @@ export default async function CaseDetailsPage({
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="card p-4">
           <h2 className="text-xl">Attachments</h2>
-          <form action={uploadAttachmentAction} className="mt-3 flex flex-wrap items-end gap-2">
+          <p className="mt-1 text-sm text-[#5a5a5a]">Upload unlimited images and files (JPG, PNG, HEIC, PDF, MP4).</p>
+          <form action={uploadAttachmentAction} className="mt-3 space-y-3">
             <input type="hidden" name="case_id" value={id} />
-            <input type="file" name="attachment" className="input" required />
-            <button type="submit" className="btn-primary">Upload</button>
+            <label htmlFor="attachments" className="flex min-h-[120px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#c9d1dd] bg-[#f8fafc] px-4 py-6 text-center text-sm text-[#475569]">
+              Drag and drop files here, or click to browse
+            </label>
+            <input id="attachments" type="file" name="attachments" className="sr-only" accept=".jpg,.jpeg,.png,.heic,.pdf,.mp4" multiple required />
+            <button type="submit" className="btn-primary">Upload Files</button>
           </form>
-          <ul className="mt-3 space-y-2 text-sm">
-            {attachmentLinks.map((item) => (
-              <li key={item.id} className="rounded-md border border-[#ececec] p-2">
-                <p className="font-semibold">{item.file_name}</p>
-                <p className="text-xs text-[#6a6a6a]">{item.mime_type ?? "unknown"} • {(item.file_size ?? 0).toLocaleString()} bytes</p>
-                {item.url ? (
-                  <a className="text-[#b20610] underline" href={item.url} target="_blank" rel="noreferrer">
-                    Download
-                  </a>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {attachmentLinks.map((item) => {
+              const isImage = Boolean(item.mime_type?.startsWith("image/"));
+
+              return (
+                <div key={item.id} className="rounded-md border border-[#ececec] p-2 text-sm">
+                  <div className="mb-2 flex h-28 items-center justify-center rounded-md bg-[#f5f7fb]">
+                    {isImage && item.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.url} alt={item.file_name} className="h-full w-full rounded-md object-cover" />
+                    ) : (
+                      <span className="text-xs text-[#64748b]">{item.mime_type ?? "File"}</span>
+                    )}
+                  </div>
+                  <p className="truncate font-semibold" title={item.file_name}>{item.file_name}</p>
+                  <p className="text-xs text-[#6a6a6a]">Uploaded {new Date(item.created_at).toLocaleString()}</p>
+                  <p className="text-xs text-[#6a6a6a]">By {item.uploader?.full_name ?? "Unknown"}</p>
+                  <div className="mt-2 flex gap-2">
+                    {item.url ? (
+                      <a className="btn-secondary text-xs" href={item.url} target="_blank" rel="noreferrer">Download</a>
+                    ) : null}
+                    <form action={deleteAttachmentAction}>
+                      <input type="hidden" name="case_id" value={id} />
+                      <input type="hidden" name="attachment_id" value={item.id} />
+                      <button type="submit" className="btn-danger text-xs">Delete</button>
+                    </form>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </article>
 
         <article className="card p-4">

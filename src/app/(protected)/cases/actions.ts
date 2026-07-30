@@ -26,6 +26,7 @@ type AutofillPayload = {
   invoice_date?: string;
   invoice_total?: string;
   payment_status?: string;
+  date_of_purchase?: string;
 };
 
 function emptyToNull(value: FormDataEntryValue | null) {
@@ -35,20 +36,6 @@ function emptyToNull(value: FormDataEntryValue | null) {
 
 function normalizeLookupQuery(value: string) {
   return value.replace(/[%_,()]/g, "").trim();
-}
-
-function toIssueReportedAt(value: FormDataEntryValue | null, enteredDate: FormDataEntryValue | null) {
-  const issueReportedAt = String(value ?? "").trim();
-  if (issueReportedAt) {
-    return issueReportedAt;
-  }
-
-  const dateOnly = String(enteredDate ?? "").trim();
-  if (dateOnly) {
-    return `${dateOnly}T00:00:00.000Z`;
-  }
-
-  return new Date().toISOString();
 }
 
 function buildAutofillUrl(payload: AutofillPayload) {
@@ -137,6 +124,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
       invoice_date: invoice?.invoice_date ?? "",
       invoice_total: invoice?.invoice_total != null ? String(invoice.invoice_total) : "",
       payment_status: invoice?.payment_status ?? "",
+      date_of_purchase: invoice?.invoice_date ?? "",
     }),
   );
 }
@@ -182,6 +170,26 @@ export async function createCaseAction(formData: FormData) {
     ? (caseTypeInput as CaseType)
     : "General";
 
+  const quickbooksInvoiceId = emptyToNull(formData.get("quickbooks_invoice_id"));
+  const quickbooksInvoiceNumber = emptyToNull(formData.get("quickbooks_invoice_number"));
+
+  let dateOfPurchase = emptyToNull(formData.get("date_of_purchase"));
+  if (!dateOfPurchase && (quickbooksInvoiceId || quickbooksInvoiceNumber)) {
+    let invoiceQuery = supabase
+      .from("quickbooks_invoices")
+      .select("invoice_date")
+      .limit(1);
+
+    if (quickbooksInvoiceId) {
+      invoiceQuery = invoiceQuery.eq("quickbooks_invoice_id", quickbooksInvoiceId);
+    } else if (quickbooksInvoiceNumber) {
+      invoiceQuery = invoiceQuery.eq("invoice_number", quickbooksInvoiceNumber);
+    }
+
+    const { data: invoiceRecord } = await invoiceQuery.maybeSingle();
+    dateOfPurchase = invoiceRecord?.invoice_date ?? null;
+  }
+
   let customerQuery = supabase.from("customers").select("id").limit(1);
 
   if (quickbooksCustomerId) {
@@ -224,13 +232,13 @@ export async function createCaseAction(formData: FormData) {
     .insert({
       customer_id: customerId,
       case_type: caseType,
-      quickbooks_invoice_id: emptyToNull(formData.get("quickbooks_invoice_id")),
-      quickbooks_invoice_number: emptyToNull(formData.get("quickbooks_invoice_number")),
+      quickbooks_invoice_id: quickbooksInvoiceId,
+      quickbooks_invoice_number: quickbooksInvoiceNumber,
       quickbooks_invoice_link: emptyToNull(formData.get("quickbooks_invoice_link")),
       product_model: emptyToNull(formData.get("product_model")),
       serial_number: emptyToNull(formData.get("serial_number")),
-      date_of_purchase: emptyToNull(formData.get("date_of_purchase")),
-      issue_reported_at: toIssueReportedAt(formData.get("issue_reported_at"), formData.get("entered_date")),
+      date_of_purchase: dateOfPurchase,
+      issue_reported_at: new Date().toISOString(),
       issue_description: issueDescription,
       assigned_employee_id: emptyToNull(formData.get("assigned_employee_id")),
       priority,
@@ -250,7 +258,7 @@ export async function createCaseAction(formData: FormData) {
     case_id: createdCase.id,
     actor_id: user.id,
     activity_type: "case_created",
-    summary: `Case ${createdCase.case_number} created`,
+    summary: `Case created by ${user.fullName ?? "Unknown"}`,
     details: { status, priority },
   });
 

@@ -29,7 +29,6 @@ export default async function CreateCasePage({
 
   const params = await searchParams;
   const error = params.error;
-  const enteredDate = new Date().toISOString().slice(0, 10);
   const defaultCaseType = CASE_TYPES.includes((params.case_type ?? "") as (typeof CASE_TYPES)[number])
     ? params.case_type
     : "General";
@@ -63,9 +62,13 @@ export default async function CreateCasePage({
 
       <div className="grid gap-4 xl:grid-cols-[1.5fr_1fr]">
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-          <h2 className="text-lg font-semibold text-[#121826]">Case Information</h2>
-          <p className="mt-1 text-xs text-[#5a5a5a]">Set core workflow details before creating the case.</p>
+          <h2 className="text-lg font-semibold text-[#121826]">1. Customer</h2>
+          <p className="mt-1 text-xs text-[#5a5a5a]">Match invoice/customer first so key details auto-fill from QuickBooks.</p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label htmlFor="matched_invoice_display" className="label">Matched Invoice Number</label>
+              <input id="matched_invoice_display" className="input" value={params.quickbooks_invoice_number ?? ""} readOnly placeholder="Auto-filled from QuickBooks lookup" />
+            </div>
             <div>
               <label htmlFor="case_type" className="label">Case Type</label>
               <select id="case_type" name="case_type" className="select" defaultValue={defaultCaseType} form="create-case-form">
@@ -73,10 +76,6 @@ export default async function CreateCasePage({
                   <option key={caseType} value={caseType}>{caseType}</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label htmlFor="entered_date" className="label">Entered Date</label>
-              <input id="entered_date" name="entered_date" type="date" className="input" defaultValue={enteredDate} form="create-case-form" />
             </div>
             <div>
               <label htmlFor="priority" className="label">Priority</label>
@@ -94,16 +93,12 @@ export default async function CreateCasePage({
                 ))}
               </select>
             </div>
-            <div className="sm:col-span-2">
-              <label htmlFor="quickbooks_invoice_number" className="label">Invoice Number</label>
-              <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" defaultValue={params.quickbooks_invoice_number ?? ""} form="create-case-form" placeholder="Auto-filled from QuickBooks lookup" />
-            </div>
           </div>
         </section>
 
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-[#121826]">Quick Actions</h2>
-          <p className="mt-1 text-xs text-[#5a5a5a]">Find customer and invoice details without leaving intake.</p>
+          <p className="mt-1 text-xs text-[#5a5a5a]">Find customer and invoice details without manual re-entry.</p>
           <form action={quickbooksAutofillAction} className="mt-3 space-y-2">
             <QuickbooksLookup />
             <div className="flex justify-end">
@@ -158,18 +153,18 @@ export default async function CreateCasePage({
 
         <div className="grid gap-4 xl:grid-cols-[1.3fr_1fr]">
           <section className="card grid gap-3 border border-[#e7eaef] bg-white p-4 shadow-sm md:grid-cols-2">
-            <h2 className="md:col-span-2 text-lg font-semibold text-[#121826]">QuickBooks Snapshot</h2>
+            <h2 className="md:col-span-2 text-lg font-semibold text-[#121826]">2. Problem and QuickBooks Snapshot</h2>
           <div>
             <label htmlFor="quickbooks_customer_id" className="label">QuickBooks Customer ID</label>
-            <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" defaultValue={params.quickbooks_customer_id ?? ""} />
+            <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" defaultValue={params.quickbooks_customer_id ?? ""} readOnly />
           </div>
           <div>
             <label htmlFor="quickbooks_invoice_id" className="label">QuickBooks Invoice ID</label>
-            <input id="quickbooks_invoice_id" name="quickbooks_invoice_id" className="input" defaultValue={params.quickbooks_invoice_id ?? ""} />
+            <input id="quickbooks_invoice_id" name="quickbooks_invoice_id" className="input" defaultValue={params.quickbooks_invoice_id ?? ""} readOnly />
           </div>
           <div>
             <label htmlFor="quickbooks_invoice_number" className="label">QuickBooks Invoice Number</label>
-            <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" defaultValue={params.quickbooks_invoice_number ?? ""} />
+            <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" defaultValue={params.quickbooks_invoice_number ?? ""} readOnly />
           </div>
           <div>
             <label htmlFor="invoice_date" className="label">Invoice Date</label>
@@ -184,6 +179,11 @@ export default async function CreateCasePage({
             <input id="payment_status" name="payment_status" className="input" defaultValue={params.payment_status ?? ""} readOnly />
           </div>
           <div>
+            <label htmlFor="date_of_purchase_display" className="label">Date of Purchase</label>
+            <input id="date_of_purchase_display" className="input" value={params.invoice_date ?? ""} readOnly placeholder="Auto-filled from QuickBooks invoice" />
+            <input type="hidden" name="date_of_purchase" value={params.invoice_date ?? ""} />
+          </div>
+          <div>
             <label htmlFor="quickbooks_invoice_link" className="label">QuickBooks Invoice Link</label>
             <input id="quickbooks_invoice_link" name="quickbooks_invoice_link" className="input" />
           </div>
@@ -194,13 +194,8 @@ export default async function CreateCasePage({
           </section>
 
           <section className="card space-y-3 border border-[#e7eaef] bg-white p-4 shadow-sm">
-            <h2 className="text-lg font-semibold text-[#121826]">Timeline</h2>
-            <div className="space-y-2 rounded-lg border border-[#eef1f5] bg-[#fafbfc] p-3 text-sm text-[#384152]">
-              <p className="font-medium">10:22 Case Created</p>
-              <p>10:31 Tracking Added</p>
-              <p>2:45 Customer Emailed</p>
-              <p>4:02 Waiting on Supplier</p>
-            </div>
+            <h2 className="text-lg font-semibold text-[#121826]">4. Communication</h2>
+            <p className="text-xs text-[#5a5a5a]">Timeline entries are generated automatically from actual actions after case creation.</p>
             <div>
               <label htmlFor="internal_notes" className="label">Internal Notes</label>
               <textarea id="internal_notes" name="internal_notes" rows={3} className="textarea" placeholder="What has been done so far?" />
@@ -213,22 +208,10 @@ export default async function CreateCasePage({
         </div>
 
         <section className="card grid gap-3 border border-[#e7eaef] bg-white p-4 shadow-sm md:grid-cols-2">
-          <h2 className="md:col-span-2 text-lg font-semibold text-[#121826]">Issue Details</h2>
+          <h2 className="md:col-span-2 text-lg font-semibold text-[#121826]">3. Resolution Setup</h2>
           <div>
             <label htmlFor="product_model" className="label">Product Model</label>
             <input id="product_model" name="product_model" className="input" />
-          </div>
-          <div>
-            <label htmlFor="serial_number" className="label">Serial Number</label>
-            <input id="serial_number" name="serial_number" className="input" />
-          </div>
-          <div>
-            <label htmlFor="date_of_purchase" className="label">Date of Purchase</label>
-            <input id="date_of_purchase" name="date_of_purchase" type="date" className="input" />
-          </div>
-          <div>
-            <label htmlFor="issue_reported_at" className="label">Issue Reported Date</label>
-            <input id="issue_reported_at" name="issue_reported_at" type="datetime-local" className="input" />
           </div>
           <div className="md:col-span-2">
             <label htmlFor="issue_description" className="label">Issue Description</label>

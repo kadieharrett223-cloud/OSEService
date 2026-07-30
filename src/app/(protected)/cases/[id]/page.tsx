@@ -386,49 +386,26 @@ export default async function CaseDetailsPage({
         </section>
 
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-[#121826]">Timeline</h2>
-            <span className="badge badge-status">Auto</span>
-          </div>
-          <p className="mt-2 text-sm text-[#5a5a5a]">Generated from real actions with timestamp and employee.</p>
-
-          <div className="mt-3 space-y-2">
-            {activityRows.map((row) => (
-              <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
-                  <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
-                </div>
-                <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
-                <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
-                {row.activity_type === "add_tracking_number" && (row.details?.tracking_number || row.summary.includes(":")) ? (
-                  <a
-                    href={buildTrackingUrl(row.details?.tracking_number ?? row.summary.split(":").slice(1).join(":").trim())}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline"
-                  >
-                    Track package
-                  </a>
-                ) : null}
+          <h3 className="text-lg font-semibold text-[#121826]">Internal Notes</h3>
+          <form action={addNoteAction} className="mt-3 space-y-2">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="note_type" value="internal" />
+            <label htmlFor="content" className="label">Add Internal Note</label>
+            <textarea id="content" name="content" rows={3} required className="textarea" placeholder="Add internal note" />
+            <button type="submit" className="btn-primary">Add Note</button>
+          </form>
+          <div className="mt-2 space-y-2">
+            {noteRows.filter((note) => note.note_type === "internal").slice(0, 8).map((note) => (
+              <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
+                <p>{note.content}</p>
+                <p className="mt-1 text-xs text-[#6a6a6a]">
+                  {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"} • {note.note_type}
+                </p>
               </div>
             ))}
-            {activityRows.length === 0 ? (
-              <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
+            {noteRows.filter((note) => note.note_type === "internal").length === 0 ? (
+              <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No notes yet.</p>
             ) : null}
-          </div>
-
-          <div className="mt-4 rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-xs text-[#6a7281]">
-            <p className="font-semibold uppercase tracking-[0.08em]">Workflow Actions</p>
-            <form action={addCaseWorkflowEventAction} className="mt-2 grid grid-cols-2 gap-2">
-              <input type="hidden" name="case_id" value={id} />
-              <button type="submit" name="event_type" value="customer_contacted" className="btn-secondary text-xs">Customer Contacted</button>
-              <button type="submit" name="event_type" value="send_customer_email" className="btn-secondary text-xs">Send Customer Email</button>
-              <button type="submit" name="event_type" value="replacement_part_ordered" className="btn-secondary text-xs">Order Replacement Part</button>
-              <button type="submit" name="event_type" value="waiting_supplier" className="btn-secondary text-xs">Waiting on Supplier</button>
-              <button type="submit" name="event_type" value="waiting_customer" className="btn-secondary text-xs">Waiting on Customer</button>
-              <button type="submit" name="event_type" value="replacement_delivered" className="btn-secondary text-xs">Replacement Delivered</button>
-            </form>
           </div>
         </section>
       </div>
@@ -477,26 +454,49 @@ export default async function CaseDetailsPage({
       </section>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-        <h3 className="text-lg font-semibold text-[#121826]">Internal Notes</h3>
-        <form action={addNoteAction} className="mt-3 space-y-2">
-          <input type="hidden" name="case_id" value={id} />
-          <input type="hidden" name="note_type" value="internal" />
-          <label htmlFor="content" className="label">Add Internal Note</label>
-          <textarea id="content" name="content" rows={3} required className="textarea" placeholder="Add internal note" />
-          <button type="submit" className="btn-primary">Add Note</button>
-        </form>
-        <div className="mt-2 space-y-2">
-          {noteRows.filter((note) => note.note_type === "internal").slice(0, 8).map((note) => (
-            <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
-              <p>{note.content}</p>
-              <p className="mt-1 text-xs text-[#6a6a6a]">
-                {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"} • {note.note_type}
-              </p>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-[#121826]">Timeline</h2>
+          <span className="badge badge-status">Auto</span>
+        </div>
+        <p className="mt-2 text-sm text-[#5a5a5a]">Generated from real actions with timestamp and employee.</p>
+
+        <div className="mt-3 space-y-2">
+          {activityRows.map((row) => (
+            <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
+                <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
+              </div>
+              <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
+              <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
+              {row.activity_type === "add_tracking_number" && (row.details?.tracking_number || row.summary.includes(":")) ? (
+                <a
+                  href={buildTrackingUrl(row.details?.tracking_number ?? row.summary.split(":").slice(1).join(":").trim())}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline"
+                >
+                  Track package
+                </a>
+              ) : null}
             </div>
           ))}
-          {noteRows.filter((note) => note.note_type === "internal").length === 0 ? (
-            <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No notes yet.</p>
+          {activityRows.length === 0 ? (
+            <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
           ) : null}
+        </div>
+
+        <div className="mt-4 rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-xs text-[#6a7281]">
+          <p className="font-semibold uppercase tracking-[0.08em]">Workflow Actions</p>
+          <form action={addCaseWorkflowEventAction} className="mt-2 grid grid-cols-2 gap-2">
+            <input type="hidden" name="case_id" value={id} />
+            <button type="submit" name="event_type" value="customer_contacted" className="btn-secondary text-xs">Customer Contacted</button>
+            <button type="submit" name="event_type" value="send_customer_email" className="btn-secondary text-xs">Send Customer Email</button>
+            <button type="submit" name="event_type" value="replacement_part_ordered" className="btn-secondary text-xs">Order Replacement Part</button>
+            <button type="submit" name="event_type" value="waiting_supplier" className="btn-secondary text-xs">Waiting on Supplier</button>
+            <button type="submit" name="event_type" value="waiting_customer" className="btn-secondary text-xs">Waiting on Customer</button>
+            <button type="submit" name="event_type" value="replacement_delivered" className="btn-secondary text-xs">Replacement Delivered</button>
+          </form>
         </div>
       </section>
     </div>

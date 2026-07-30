@@ -7,7 +7,7 @@ Phase 1 implements only internal customer service case tracking:
 - Access-code login
 - Shared code with per-person login history
 - Customer/case creation
-- Case type routing (General, Warranty, Freight Damage)
+- Case type routing (General, Warranty)
 - Status and priority updates
 - New cases auto-start as In Progress at creation
 - Case detail status is managed from a single Status control (Case Workflow section); issue-details edits no longer mutate status

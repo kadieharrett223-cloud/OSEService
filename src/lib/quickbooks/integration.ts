@@ -53,7 +53,8 @@ function getQuickbooksEnvironment(): QboEnvironment {
 function getQuickbooksCredentials() {
   const clientId = readEnv("QUICKBOOKS_CLIENT_ID");
   const clientSecret = readEnv("QUICKBOOKS_CLIENT_SECRET");
-  const scope = readEnv("QUICKBOOKS_SCOPE") || "com.intuit.quickbooks.accounting";
+  const configuredScope = readEnv("QUICKBOOKS_SCOPE");
+  const scope = configuredScope || "com.intuit.quickbooks.accounting offline_access";
 
   if (!clientId || !clientSecret) {
     return null;
@@ -261,6 +262,7 @@ export function getQuickbooksConnectUrl(origin: string, state: string) {
     response_type: "code",
     scope: config.scope,
     state,
+    prompt: "consent",
   });
 
   return `${QUICKBOOKS_AUTH_URL}?${params.toString()}`;

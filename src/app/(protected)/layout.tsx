@@ -23,7 +23,7 @@ export default async function ProtectedLayout({
   const user = await requireUser();
 
   return (
-    <div className="min-h-screen bg-[#f8f8f8]">
+    <div className="flex min-h-screen flex-col bg-[#f8f8f8]">
       <header className="border-b border-[#dddddd] bg-white">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 md:px-6">
           <div>
@@ -42,8 +42,8 @@ export default async function ProtectedLayout({
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-7xl gap-6 px-4 py-6 md:grid-cols-[220px_1fr] md:px-6">
-        <aside className="card h-fit p-3">
+      <div className="mx-auto grid w-full max-w-7xl flex-1 gap-6 px-4 py-6 md:grid-cols-[220px_1fr] md:items-stretch md:px-6">
+        <aside className="card h-full p-3">
           <p className="px-2 pb-2 text-xs uppercase tracking-[0.08em] text-[#6a6a6a]">Workflow Menu</p>
           <nav className="flex flex-col gap-1 text-sm">
             {navItems.map((item) => (

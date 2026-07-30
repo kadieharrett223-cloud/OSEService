@@ -1,0 +1,64 @@
+# Phase 1 Architecture
+
+## Scope
+Phase 1 implements only internal customer service case tracking:
+
+- Employee login
+- Access-code login
+- Shared code with per-person login history
+- Customer/case creation
+- Status and priority updates
+- Internal/customer notes
+- Attachment upload metadata and secure storage
+- Replacement part tracking
+- Immutable activity timeline entries
+- Search and filtering for operations
+
+Out of scope for Phase 1:
+
+- QuickBooks writeback or accounting edits
+- CRM/sales pipeline features
+- Inventory management workflows
+
+## Request/Data Flow
+
+1. User enters full name and shared access code on /enter-code.
+2. Server validates shared code, resolves/creates access_users identity, and writes access_login_events.
+3. UI submits Server Actions (Next.js) for writes.
+4. Server Actions write to Supabase Postgres tables.
+5. Activity rows are appended to case_activity.
+6. Attachments are uploaded to private Supabase Storage bucket case-attachments.
+7. Access is enforced by server-side session cookies.
+
+## Main Tables
+
+- profiles
+- customers
+- quickbooks_invoices (placeholder for Phase 2 links)
+- customer_service_cases
+- case_notes
+- case_attachments
+- case_activity
+- replacement_parts
+- access_users
+- access_login_events
+
+## Security Model
+
+- Supabase Auth user login is not used.
+- Shared access code is configured via environment variable.
+- Access users are managed in app settings.
+- Service role keys are not used in browser code.
+- Browser never receives service role key or access code table credentials.
+
+## Status Set
+
+- New
+- Waiting for Customer
+- Under Review
+- Parts Needed
+- Parts Ordered
+- Parts Shipped
+- Service Scheduled
+- Resolved
+- Closed

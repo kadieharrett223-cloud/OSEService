@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Olympic Equipment Customer Service Tracking App
 
-## Getting Started
+Simple internal web app for customer service case tracking.
 
-First, run the development server:
+## Tech Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js (App Router, TypeScript)
+- Supabase (Postgres, Storage)
+- Vercel (deployment)
+- GitHub (source control + Vercel integration)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Phase 1 Features
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Access-code entry gate (no Supabase user login required)
+- One shared access code with per-person login history tracking
+- Create and view customer service cases
+- Search and filter case list
+- Status and priority updates
+- Internal and customer-facing notes
+- Replacement part tracking
+- Attachment uploads (private storage)
+- Activity timeline with persistent history
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Project Structure
 
-## Learn More
+- `src/app/login`: legacy redirect to access-code page
+- `src/app/enter-code`: access-code entry UI
+- `src/app/(protected)`: dashboard and case workflows
+- `src/lib/supabase`: client/server Supabase helpers
+- `supabase/migrations`: SQL schema and RLS policies
+- `docs`: architecture, rollback, and phase plans
 
-To learn more about Next.js, take a look at the following resources:
+## Environment Files
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Copy `.env.local.example` to `.env.local`
+2. Fill in Supabase URL, anon key, service role key, app session secret, and shared access code
+3. Keep QuickBooks values empty or sandbox-only until Phase 2
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local Setup
 
-## Deploy on Vercel
+1. Install dependencies
+	`npm install`
+2. Run app
+	`npm run dev`
+3. Open http://localhost:3000
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Supabase Setup
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Create a Supabase project.
+2. Run migration in SQL editor:
+	`supabase/migrations/202607300001_phase1_customer_service.sql`
+3. Run follow-up migration for access-code auth:
+	`supabase/migrations/202607300002_access_code_auth.sql`
+4. Confirm bucket `case-attachments` exists.
+5. In `/settings`, create at least one access user.
+
+## Vercel Deployment
+
+1. Push repository to GitHub.
+2. Import repo in Vercel.
+3. Set production environment variables from `.env.production.example`.
+4. Deploy and run smoke tests.
+
+## Security Notes
+
+- Never expose Supabase service role in client code.
+- Keep QuickBooks credentials only in server environment variables.
+- Use QuickBooks sandbox for integration development.
+- Access checks are server-side via signed session cookie and access code.
+
+## Backup and Rollback
+
+See `docs/backup-and-rollback.md` for database, storage, deployment rollback, and migration recovery guidance.
+
+## Suggested First Setup Steps
+
+1. Set `APP_SHARED_ACCESS_CODE` in your environment.
+2. Create at least one access user in `/settings`.
+3. Enter shared code and create first case.
+4. Add additional internal users for assignment and audit history.

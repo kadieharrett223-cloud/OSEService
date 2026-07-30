@@ -1,26 +1,103 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --oe-red: #b20610;
+  --oe-red-dark: #8f030d;
+  --oe-black: #111111;
+  --oe-white: #ffffff;
+  --oe-gray-50: #f8f8f8;
+  --oe-gray-100: #efefef;
+  --oe-gray-200: #dddddd;
+  --oe-gray-600: #5a5a5a;
+  --background: var(--oe-gray-50);
+  --foreground: var(--oe-black);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-body);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading), "Segoe UI", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.card {
+  border: 1px solid var(--oe-gray-200);
+  background: var(--oe-white);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.btn-primary {
+  background: var(--oe-red);
+  color: var(--oe-white);
+  border-radius: 0.5rem;
+  font-weight: 600;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid transparent;
+}
+
+.btn-primary:hover {
+  background: var(--oe-red-dark);
+}
+
+.btn-secondary {
+  background: var(--oe-white);
+  color: var(--oe-black);
+  border-radius: 0.5rem;
+  font-weight: 600;
+  padding: 0.55rem 0.95rem;
+  border: 1px solid var(--oe-gray-200);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  border: 1px solid var(--oe-gray-200);
+  background: var(--oe-white);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.label {
+  font-size: 0.875rem;
+  color: var(--oe-gray-600);
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--oe-gray-200);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-priority-high {
+  color: var(--oe-red);
+  border-color: #f1bdc0;
+  background: #fff6f7;
+}
+
+.badge-status {
+  color: #1b1b1b;
+  background: #f5f5f5;
 }

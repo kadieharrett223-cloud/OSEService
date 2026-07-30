@@ -56,19 +56,25 @@ export default async function CreateCasePage({
         </p>
       ) : null}
 
-      <section className="card space-y-3 border border-[#e7eaef] bg-white p-5 shadow-md">
-        <div>
-          <h2 className="text-3xl text-[#121826]">QuickBooks Autofill</h2>
-          <p className="mt-1 text-sm text-[#5a5a5a]">
-            Start typing a customer name, customer ID, or invoice number to see matches.
-          </p>
-        </div>
-        <form action={quickbooksAutofillAction} className="space-y-2">
-          <QuickbooksLookup />
-          <div className="flex justify-end">
-            <button type="submit" className="btn-secondary">Find and Prefill</button>
+      <section className="card border border-[#e7eaef] bg-white p-5 shadow-md">
+        <div className="grid gap-4 md:grid-cols-[1fr_220px] md:items-end">
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-3xl text-[#121826]">QuickBooks Autofill</h2>
+              <p className="mt-1 text-sm text-[#5a5a5a]">
+                Start typing a customer name, customer ID, or invoice number to see matches.
+              </p>
+            </div>
+            <form action={quickbooksAutofillAction} className="space-y-2">
+              <QuickbooksLookup />
+              <div className="flex justify-end">
+                <button type="submit" className="btn-primary">Find and Prefill</button>
+              </div>
+            </form>
           </div>
-        </form>
+
+          <div className="hidden h-[140px] rounded-lg border border-[#e7eaef] bg-gradient-to-b from-white to-[#f6f8fb] md:block" />
+        </div>
       </section>
 
       <form action={createCaseAction} className="space-y-4">

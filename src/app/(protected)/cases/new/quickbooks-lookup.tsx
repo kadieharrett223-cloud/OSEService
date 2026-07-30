@@ -79,7 +79,7 @@ export function QuickbooksLookup() {
           ref={inputRef}
           id="lookup_query"
           name="lookup_query"
-          className="input"
+          className="input h-11"
           placeholder="Start typing customer name, customer ID, or invoice number"
           value={query}
           onChange={(event) => {

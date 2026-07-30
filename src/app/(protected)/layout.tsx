@@ -31,13 +31,13 @@ const navGroups = [
 ];
 
 function iconFor(label: string) {
-  if (label.includes("Dashboard")) return "◉";
-  if (label.includes("Create")) return "⊕";
-  if (label.includes("Warranty")) return "◍";
-  if (label.includes("Freight")) return "◌";
-  if (label.includes("Archived")) return "◈";
-  if (label.includes("Settings")) return "◎";
-  return "◻";
+  if (label.includes("Dashboard")) return "D";
+  if (label.includes("Create")) return "+";
+  if (label.includes("Warranty")) return "W";
+  if (label.includes("Freight")) return "F";
+  if (label.includes("Archived")) return "A";
+  if (label.includes("Settings")) return "S";
+  return "C";
 }
 
 export default async function ProtectedLayout({
@@ -86,8 +86,8 @@ export default async function ProtectedLayout({
             {navGroups.map((group, groupIndex) => (
               <div key={`group-${groupIndex}`} className="space-y-1">
                 <nav className="flex flex-col gap-1 text-sm">
-                  {group.items.map((item, itemIndex) => {
-                    const isPrimary = groupIndex === 0 && itemIndex === 0;
+                  {group.items.map((item) => {
+                    const isPrimary = item.href === "/cases/new";
 
                     return (
                       <Link
@@ -99,7 +99,9 @@ export default async function ProtectedLayout({
                             : "text-[#e8eef8] hover:bg-[#202735]"
                         }`}
                       >
-                        <span className="text-sm leading-none">{iconFor(item.label)}</span>
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#8090a8] text-[10px] font-semibold">
+                          {iconFor(item.label)}
+                        </span>
                         <span>{item.label}</span>
                       </Link>
                     );

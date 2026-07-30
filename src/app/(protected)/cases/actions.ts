@@ -17,14 +17,36 @@ type AutofillPayload = {
   phone?: string;
   email?: string;
   shipping_address?: string;
+  billing_address?: string;
   quickbooks_customer_id?: string;
   quickbooks_invoice_id?: string;
   quickbooks_invoice_number?: string;
+  invoice_date?: string;
+  invoice_total?: string;
+  payment_status?: string;
 };
 
 function emptyToNull(value: FormDataEntryValue | null) {
   const raw = String(value ?? "").trim();
   return raw ? raw : null;
+}
+
+function normalizeLookupQuery(value: string) {
+  return value.replace(/[%_,()]/g, "").trim();
+}
+
+function toIssueReportedAt(value: FormDataEntryValue | null, enteredDate: FormDataEntryValue | null) {
+  const issueReportedAt = String(value ?? "").trim();
+  if (issueReportedAt) {
+    return issueReportedAt;
+  }
+
+  const dateOnly = String(enteredDate ?? "").trim();
+  if (dateOnly) {
+    return `${dateOnly}T00:00:00.000Z`;
+  }
+
+  return new Date().toISOString();
 }
 
 function buildAutofillUrl(payload: AutofillPayload) {
@@ -44,14 +66,14 @@ export async function quickbooksAutofillAction(formData: FormData) {
   await requireUser();
   const supabase = getSupabaseAdmin();
 
-  const query = String(formData.get("lookup_query") ?? "").trim();
+  const query = normalizeLookupQuery(String(formData.get("lookup_query") ?? ""));
   if (!query) {
     redirect("/cases/new?error=Enter+QuickBooks+customer+or+invoice");
   }
 
   const invoiceByNumberPromise = supabase
     .from("quickbooks_invoices")
-    .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, shipping_address")
+    .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address")
     .ilike("invoice_number", `%${query}%`)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -75,7 +97,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
   const latestInvoiceByCustomer = qbCustomerId
     ? await supabase
         .from("quickbooks_invoices")
-        .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, shipping_address")
+        .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address")
         .eq("quickbooks_customer_id", qbCustomerId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -106,9 +128,13 @@ export async function quickbooksAutofillAction(formData: FormData) {
       phone: customer?.phone ?? "",
       email: customer?.email ?? "",
       shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? "",
+      billing_address: invoice?.billing_address ?? "",
       quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
       quickbooks_invoice_id: invoice?.quickbooks_invoice_id ?? "",
       quickbooks_invoice_number: invoice?.invoice_number ?? "",
+      invoice_date: invoice?.invoice_date ?? "",
+      invoice_total: invoice?.invoice_total != null ? String(invoice.invoice_total) : "",
+      payment_status: invoice?.payment_status ?? "",
     }),
   );
 }
@@ -194,7 +220,7 @@ export async function createCaseAction(formData: FormData) {
       product_model: emptyToNull(formData.get("product_model")),
       serial_number: emptyToNull(formData.get("serial_number")),
       date_of_purchase: emptyToNull(formData.get("date_of_purchase")),
-      issue_reported_at: String(formData.get("issue_reported_at") ?? new Date().toISOString()),
+      issue_reported_at: toIssueReportedAt(formData.get("issue_reported_at"), formData.get("entered_date")),
       issue_description: issueDescription,
       assigned_employee_id: emptyToNull(formData.get("assigned_employee_id")),
       priority,

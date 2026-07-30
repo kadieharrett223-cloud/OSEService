@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES, PRIORITIES } from "@/lib/constants";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createCaseAction, quickbooksAutofillAction } from "@/app/(protected)/cases/actions";
+import { QuickbooksLookup } from "@/app/(protected)/cases/new/quickbooks-lookup";
 
 export default async function CreateCasePage({
   searchParams,
@@ -15,28 +15,27 @@ export default async function CreateCasePage({
     phone?: string;
     email?: string;
     shipping_address?: string;
+    billing_address?: string;
     quickbooks_customer_id?: string;
     quickbooks_invoice_id?: string;
     quickbooks_invoice_number?: string;
+    invoice_date?: string;
+    invoice_total?: string;
+    payment_status?: string;
   }>;
 }) {
   await requireUser();
-  const supabase = getSupabaseAdmin();
 
   const params = await searchParams;
   const error = params.error;
-  const { data: employees } = await supabase
-    .from("access_users")
-    .select("id, full_name")
-    .eq("is_active", true)
-    .order("full_name");
+  const enteredDate = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl">Create Customer Service Case</h1>
-          <p className="text-sm text-[#5a5a5a]">Phase 1 uses manual QuickBooks references. Sandbox search/link flow is added in Phase 2.</p>
+          <p className="text-sm text-[#5a5a5a]">Use QuickBooks snapshot data to quickly pull customer and invoice details into this intake document.</p>
         </div>
         <Link href="/cases" className="btn-secondary">
           Back to Cases
@@ -53,24 +52,23 @@ export default async function CreateCasePage({
         </p>
       ) : null}
 
-      <section className="card grid gap-3 p-4 md:grid-cols-[1fr_auto]">
+      <section className="card space-y-3 border-l-4 border-l-[#8b6a43] bg-[#fffefb] p-4">
         <div>
           <h2 className="text-xl">QuickBooks Autofill</h2>
           <p className="mt-1 text-sm text-[#5a5a5a]">
-            Enter QuickBooks customer name, customer ID, or invoice number to prefill this form.
+            Start typing a customer name, customer ID, or invoice number to see matches.
           </p>
         </div>
-        <form action={quickbooksAutofillAction} className="flex flex-col gap-2 md:flex-row md:items-end">
-          <div>
-            <label htmlFor="lookup_query" className="label">Search</label>
-            <input id="lookup_query" name="lookup_query" className="input min-w-[260px]" required />
+        <form action={quickbooksAutofillAction} className="space-y-2">
+          <QuickbooksLookup />
+          <div className="flex justify-end">
+            <button type="submit" className="btn-secondary">Find and Prefill</button>
           </div>
-          <button type="submit" className="btn-secondary">Find and Prefill</button>
         </form>
       </section>
 
       <form action={createCaseAction} className="space-y-4">
-        <section className="card grid gap-4 p-4 md:grid-cols-2">
+        <section className="card grid gap-4 border-l-4 border-l-[#27445d] bg-[#fffefb] p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Customer Information</h2>
           <div>
             <label htmlFor="customer_name" className="label">Customer Name</label>
@@ -94,8 +92,8 @@ export default async function CreateCasePage({
           </div>
         </section>
 
-        <section className="card grid gap-4 p-4 md:grid-cols-2">
-          <h2 className="md:col-span-2 text-xl">QuickBooks Link (Phase 1 Manual Reference)</h2>
+        <section className="card grid gap-4 border-l-4 border-l-[#4b7a4d] bg-[#fffefb] p-4 md:grid-cols-2">
+          <h2 className="md:col-span-2 text-xl">QuickBooks Invoice Snapshot</h2>
           <div>
             <label htmlFor="quickbooks_customer_id" className="label">QuickBooks Customer ID</label>
             <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" defaultValue={params.quickbooks_customer_id ?? ""} />
@@ -109,13 +107,33 @@ export default async function CreateCasePage({
             <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" defaultValue={params.quickbooks_invoice_number ?? ""} />
           </div>
           <div>
+            <label htmlFor="invoice_date" className="label">Invoice Date</label>
+            <input id="invoice_date" name="invoice_date" className="input" defaultValue={params.invoice_date ?? ""} readOnly />
+          </div>
+          <div>
+            <label htmlFor="invoice_total" className="label">Invoice Total</label>
+            <input id="invoice_total" name="invoice_total" className="input" defaultValue={params.invoice_total ?? ""} readOnly />
+          </div>
+          <div>
+            <label htmlFor="payment_status" className="label">Payment Status</label>
+            <input id="payment_status" name="payment_status" className="input" defaultValue={params.payment_status ?? ""} readOnly />
+          </div>
+          <div>
             <label htmlFor="quickbooks_invoice_link" className="label">QuickBooks Invoice Link</label>
             <input id="quickbooks_invoice_link" name="quickbooks_invoice_link" className="input" />
           </div>
+          <div className="md:col-span-2">
+            <label htmlFor="billing_address" className="label">Billing Address</label>
+            <textarea id="billing_address" name="billing_address" rows={2} className="textarea" defaultValue={params.billing_address ?? ""} />
+          </div>
         </section>
 
-        <section className="card grid gap-4 p-4 md:grid-cols-2">
+        <section className="card grid gap-4 border-l-4 border-l-[#7b3f00] bg-[#fffefb] p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Case Details</h2>
+          <div>
+            <label htmlFor="entered_date" className="label">Enter Date</label>
+            <input id="entered_date" name="entered_date" type="date" className="input" defaultValue={enteredDate} />
+          </div>
           <div>
             <label htmlFor="product_model" className="label">Product Model</label>
             <input id="product_model" name="product_model" className="input" />
@@ -135,17 +153,6 @@ export default async function CreateCasePage({
           <div className="md:col-span-2">
             <label htmlFor="issue_description" className="label">Issue Description</label>
             <textarea id="issue_description" name="issue_description" rows={4} required className="textarea" />
-          </div>
-          <div>
-            <label htmlFor="assigned_employee_id" className="label">Assigned Employee</label>
-            <select id="assigned_employee_id" name="assigned_employee_id" className="select" defaultValue="">
-              <option value="">Unassigned</option>
-              {(employees ?? []).map((employee) => (
-                <option key={employee.id} value={employee.id}>
-                  {employee.full_name ?? employee.id}
-                </option>
-              ))}
-            </select>
           </div>
           <div>
             <label htmlFor="priority" className="label">Priority</label>

@@ -11,9 +11,106 @@ import {
 } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+type AutofillPayload = {
+  customer_name?: string;
+  company_name?: string;
+  phone?: string;
+  email?: string;
+  shipping_address?: string;
+  quickbooks_customer_id?: string;
+  quickbooks_invoice_id?: string;
+  quickbooks_invoice_number?: string;
+};
+
 function emptyToNull(value: FormDataEntryValue | null) {
   const raw = String(value ?? "").trim();
   return raw ? raw : null;
+}
+
+function buildAutofillUrl(payload: AutofillPayload) {
+  const params = new URLSearchParams();
+  params.set("prefilled", "1");
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (value) {
+      params.set(key, value);
+    }
+  }
+
+  return `/cases/new?${params.toString()}`;
+}
+
+export async function quickbooksAutofillAction(formData: FormData) {
+  await requireUser();
+  const supabase = getSupabaseAdmin();
+
+  const query = String(formData.get("lookup_query") ?? "").trim();
+  if (!query) {
+    redirect("/cases/new?error=Enter+QuickBooks+customer+or+invoice");
+  }
+
+  const invoiceByNumberPromise = supabase
+    .from("quickbooks_invoices")
+    .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, shipping_address")
+    .ilike("invoice_number", `%${query}%`)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const customerByNamePromise = supabase
+    .from("customers")
+    .select("full_name, company_name, phone, email, shipping_address, quickbooks_customer_id")
+    .or(`full_name.ilike.%${query}%,company_name.ilike.%${query}%,quickbooks_customer_id.eq.${query}`)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const [{ data: invoiceByNumber }, { data: customerByName }] = await Promise.all([
+    invoiceByNumberPromise,
+    customerByNamePromise,
+  ]);
+
+  const qbCustomerId = invoiceByNumber?.quickbooks_customer_id ?? customerByName?.quickbooks_customer_id ?? null;
+
+  const latestInvoiceByCustomer = qbCustomerId
+    ? await supabase
+        .from("quickbooks_invoices")
+        .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, shipping_address")
+        .eq("quickbooks_customer_id", qbCustomerId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+
+  const latestCustomerByQbId = qbCustomerId
+    ? await supabase
+        .from("customers")
+        .select("full_name, company_name, phone, email, shipping_address, quickbooks_customer_id")
+        .eq("quickbooks_customer_id", qbCustomerId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+
+  const customer = latestCustomerByQbId.data ?? customerByName;
+  const invoice = invoiceByNumber ?? latestInvoiceByCustomer.data;
+
+  if (!customer && !invoice) {
+    redirect("/cases/new?error=No+QuickBooks+match+found");
+  }
+
+  redirect(
+    buildAutofillUrl({
+      customer_name: customer?.full_name ?? "",
+      company_name: customer?.company_name ?? "",
+      phone: customer?.phone ?? "",
+      email: customer?.email ?? "",
+      shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? "",
+      quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
+      quickbooks_invoice_id: invoice?.quickbooks_invoice_id ?? "",
+      quickbooks_invoice_number: invoice?.invoice_number ?? "",
+    }),
+  );
 }
 
 export async function createCaseAction(formData: FormData) {

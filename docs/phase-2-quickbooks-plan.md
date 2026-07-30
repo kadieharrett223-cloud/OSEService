@@ -3,9 +3,14 @@
 ## Goals
 
 - Add OAuth connection to QuickBooks Online sandbox
-- Search customers and invoices from app UI
+- Extend current snapshot lookup to direct live QuickBooks search from app UI
 - Link invoice records to customer service cases
 - Import invoice/customer snapshot fields into quickbooks_invoices
+
+## Current Baseline
+
+- Create-case now supports lookup autofill by customer/invoice from stored `customers` and `quickbooks_invoices` records.
+- Lookup is read-only and does not call QuickBooks APIs directly yet.
 
 ## Constraints
 

@@ -14,6 +14,7 @@ Simple internal web app for customer service case tracking.
 - Access-code entry gate (no Supabase user login required)
 - One shared access code with per-person login history tracking
 - Create and view customer service cases
+- QuickBooks customer/invoice lookup autofill in create-case workflow
 - Search and filter case list
 - Status and priority updates
 - Internal and customer-facing notes
@@ -53,6 +54,12 @@ Simple internal web app for customer service case tracking.
 	`supabase/migrations/202607300002_access_code_auth.sql`
 4. Confirm bucket `case-attachments` exists.
 5. In `/settings`, create at least one access user.
+
+## QuickBooks Autofill Behavior
+
+- The create-case page supports searching by QuickBooks customer name/customer ID/invoice number.
+- The current implementation autofills from stored data in `customers` and `quickbooks_invoices` tables.
+- Direct live QuickBooks API search remains a Phase 2 enhancement.
 
 ## Vercel Deployment
 

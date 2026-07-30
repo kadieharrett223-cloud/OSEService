@@ -2,17 +2,29 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { createCaseAction } from "@/app/(protected)/cases/actions";
+import { createCaseAction, quickbooksAutofillAction } from "@/app/(protected)/cases/actions";
 
 export default async function CreateCasePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    prefilled?: string;
+    customer_name?: string;
+    company_name?: string;
+    phone?: string;
+    email?: string;
+    shipping_address?: string;
+    quickbooks_customer_id?: string;
+    quickbooks_invoice_id?: string;
+    quickbooks_invoice_number?: string;
+  }>;
 }) {
   await requireUser();
   const supabase = getSupabaseAdmin();
 
-  const { error } = await searchParams;
+  const params = await searchParams;
+  const error = params.error;
   const { data: employees } = await supabase
     .from("access_users")
     .select("id, full_name")
@@ -35,28 +47,50 @@ export default async function CreateCasePage({
         <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</p>
       ) : null}
 
+      {params.prefilled === "1" ? (
+        <p className="rounded-md border border-[#badfbe] bg-[#f4fff5] p-3 text-sm text-[#1f6f27]">
+          QuickBooks match found. Review and adjust any fields before saving.
+        </p>
+      ) : null}
+
+      <section className="card grid gap-3 p-4 md:grid-cols-[1fr_auto]">
+        <div>
+          <h2 className="text-xl">QuickBooks Autofill</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">
+            Enter QuickBooks customer name, customer ID, or invoice number to prefill this form.
+          </p>
+        </div>
+        <form action={quickbooksAutofillAction} className="flex flex-col gap-2 md:flex-row md:items-end">
+          <div>
+            <label htmlFor="lookup_query" className="label">Search</label>
+            <input id="lookup_query" name="lookup_query" className="input min-w-[260px]" required />
+          </div>
+          <button type="submit" className="btn-secondary">Find and Prefill</button>
+        </form>
+      </section>
+
       <form action={createCaseAction} className="space-y-4">
         <section className="card grid gap-4 p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Customer Information</h2>
           <div>
             <label htmlFor="customer_name" className="label">Customer Name</label>
-            <input id="customer_name" name="customer_name" required className="input" />
+            <input id="customer_name" name="customer_name" required className="input" defaultValue={params.customer_name ?? ""} />
           </div>
           <div>
             <label htmlFor="company_name" className="label">Company Name</label>
-            <input id="company_name" name="company_name" className="input" />
+            <input id="company_name" name="company_name" className="input" defaultValue={params.company_name ?? ""} />
           </div>
           <div>
             <label htmlFor="phone" className="label">Phone</label>
-            <input id="phone" name="phone" className="input" />
+            <input id="phone" name="phone" className="input" defaultValue={params.phone ?? ""} />
           </div>
           <div>
             <label htmlFor="email" className="label">Email</label>
-            <input id="email" name="email" type="email" className="input" />
+            <input id="email" name="email" type="email" className="input" defaultValue={params.email ?? ""} />
           </div>
           <div className="md:col-span-2">
             <label htmlFor="shipping_address" className="label">Shipping Address</label>
-            <textarea id="shipping_address" name="shipping_address" rows={2} className="textarea" />
+            <textarea id="shipping_address" name="shipping_address" rows={2} className="textarea" defaultValue={params.shipping_address ?? ""} />
           </div>
         </section>
 
@@ -64,15 +98,15 @@ export default async function CreateCasePage({
           <h2 className="md:col-span-2 text-xl">QuickBooks Link (Phase 1 Manual Reference)</h2>
           <div>
             <label htmlFor="quickbooks_customer_id" className="label">QuickBooks Customer ID</label>
-            <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" />
+            <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" defaultValue={params.quickbooks_customer_id ?? ""} />
           </div>
           <div>
             <label htmlFor="quickbooks_invoice_id" className="label">QuickBooks Invoice ID</label>
-            <input id="quickbooks_invoice_id" name="quickbooks_invoice_id" className="input" />
+            <input id="quickbooks_invoice_id" name="quickbooks_invoice_id" className="input" defaultValue={params.quickbooks_invoice_id ?? ""} />
           </div>
           <div>
             <label htmlFor="quickbooks_invoice_number" className="label">QuickBooks Invoice Number</label>
-            <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" />
+            <input id="quickbooks_invoice_number" name="quickbooks_invoice_number" className="input" defaultValue={params.quickbooks_invoice_number ?? ""} />
           </div>
           <div>
             <label htmlFor="quickbooks_invoice_link" className="label">QuickBooks Invoice Link</label>

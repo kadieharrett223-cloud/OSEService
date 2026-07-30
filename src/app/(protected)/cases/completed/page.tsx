@@ -23,6 +23,11 @@ type Params = {
   case_type?: string;
 };
 
+function normalizeStatusLabel(status: string) {
+  if (status === "Completed" || status === "Closed") return "Resolved";
+  return status;
+}
+
 export default async function CompletedCasesPage({
   searchParams,
 }: {
@@ -120,7 +125,7 @@ export default async function CompletedCasesPage({
                   <div className="text-xs text-[#6e6e6e]">{row.customers?.company_name ?? ""}</div>
                 </td>
                 <td className="px-2 py-2">{row.quickbooks_invoice_number ?? "-"}</td>
-                <td className="px-2 py-2">{row.status}</td>
+                <td className="px-2 py-2">{normalizeStatusLabel(row.status)}</td>
                 <td className="px-2 py-2">{row.closed_at ? new Date(row.closed_at).toLocaleString() : "-"}</td>
                 <td className="px-2 py-2">{new Date(row.updated_at).toLocaleString()}</td>
               </tr>

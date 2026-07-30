@@ -53,7 +53,7 @@ async function getCaseOrRedirect(caseId: string) {
 
 function mapWorkflowStatus(action: string): CaseStatus {
   if (action === "mark_in_progress") return "In Progress";
-  if (action === "mark_completed") return "Completed";
+  if (action === "mark_completed") return "Resolved";
   return "In Progress";
 }
 
@@ -74,7 +74,7 @@ export async function updateCaseStatusAction(formData: FormData) {
   const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
     status: validatedStatus,
   };
-  if (newStatus === "Closed" || newStatus === "Completed") {
+  if (newStatus === "Closed" || newStatus === "Completed" || newStatus === "Resolved") {
     updates.closed_at = new Date().toISOString();
   } else {
     updates.closed_at = null;
@@ -109,7 +109,6 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
   const caseId = getString(formData, "case_id");
   const caseTypeInput = getString(formData, "case_type");
   const priorityInput = getString(formData, "priority");
-  const statusInput = getString(formData, "status");
   const issueDescription = getString(formData, "issue_description");
 
   if (!caseId || !issueDescription) {
@@ -122,18 +121,12 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
   const priority: CasePriority = PRIORITIES.includes(priorityInput as (typeof PRIORITIES)[number])
     ? (priorityInput as CasePriority)
     : "Medium";
-  const status: CaseStatus = CASE_STATUSES.includes(statusInput as (typeof CASE_STATUSES)[number])
-    ? (statusInput as CaseStatus)
-    : "New";
-
   const { supabase, existingCase } = await getCaseOrRedirect(caseId);
 
   const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
     case_type: caseType,
     priority,
-    status,
     issue_description: issueDescription,
-    closed_at: status === "Closed" || status === "Completed" ? new Date().toISOString() : null,
   };
 
   const { error } = await supabase
@@ -154,7 +147,6 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
       case_number: existingCase.case_number,
       case_type: caseType,
       priority,
-      status,
     },
   });
 
@@ -192,7 +184,7 @@ export async function updateCaseWorkflowAction(formData: FormData) {
   }
 
   const summary = workflowAction === "mark_completed"
-    ? "Case marked completed"
+    ? "Case marked resolved"
     : workflowAction === "reopen_case"
       ? "Case reopened"
       : "Case marked in progress";

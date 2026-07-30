@@ -10,7 +10,6 @@ import {
   deleteAttachmentAction,
   updateCaseIssueDetailsAction,
   updateCaseStatusAction,
-  updateCaseWorkflowAction,
   uploadAttachmentAction,
 } from "@/app/(protected)/cases/[id]/actions";
 
@@ -143,6 +142,11 @@ function buildTrackingUrl(trackingNumber: string) {
   return `https://www.google.com/search?q=${encodeURIComponent(`${trackingNumber} package tracking`)}`;
 }
 
+function normalizeStatusLabel(status: string) {
+  if (status === "Completed" || status === "Closed") return "Resolved";
+  return status;
+}
+
 export default async function CaseDetailsPage({
   params,
   searchParams,
@@ -215,6 +219,8 @@ export default async function CaseDetailsPage({
   const activityRows = allActivityRows.filter((row) => row.activity_type !== "note_added");
   const showAllTimeline = timeline === "all";
   const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
+  const normalizedStatus = normalizeStatusLabel(caseRecord.status);
+  const statusOptions = CASE_STATUSES.filter((status) => status !== "Completed" && status !== "Closed");
   const latestTracking = allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.details?.tracking_number
     ?? allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.summary.split(":").slice(1).join(":").trim()
     ?? "";
@@ -233,7 +239,7 @@ export default async function CaseDetailsPage({
           <p className="text-sm text-[#5a5a5a]">Case workspace mirrors intake view for faster follow-up work.</p>
         </div>
         <div className="flex gap-2">
-          <span className="badge badge-status">{caseRecord.status}</span>
+          <span className="badge badge-status">{normalizedStatus}</span>
           <span className={`badge ${caseRecord.priority === "High" ? "badge-priority-high" : "badge-status"}`}>
             {caseRecord.priority}
           </span>
@@ -305,7 +311,7 @@ export default async function CaseDetailsPage({
         <h2 className="text-xl font-semibold text-[#121826]">Issue Details</h2>
         <form action={updateCaseIssueDetailsAction} className="mt-3 space-y-3">
           <input type="hidden" name="case_id" value={id} />
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label htmlFor="case_type" className="label">Issue Category</label>
               <select id="case_type" name="case_type" className="select" defaultValue={caseRecord.case_type ?? "General"}>
@@ -319,14 +325,6 @@ export default async function CaseDetailsPage({
               <select id="priority" name="priority" className="select" defaultValue={caseRecord.priority}>
                 {PRIORITIES.map((priority) => (
                   <option key={priority} value={priority}>{priority}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="status" className="label">Status</label>
-              <select id="status" name="status" className="select" defaultValue={caseRecord.status}>
-                {CASE_STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
                 ))}
               </select>
             </div>
@@ -419,8 +417,8 @@ export default async function CaseDetailsPage({
           <form action={updateCaseStatusAction} className="space-y-2">
             <input type="hidden" name="case_id" value={id} />
             <label htmlFor="status" className="label">Status</label>
-            <select id="status" name="status" defaultValue={caseRecord.status} className="select">
-              {CASE_STATUSES.map((status) => (
+            <select id="status" name="status" defaultValue={normalizedStatus} className="select">
+              {statusOptions.map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
@@ -450,18 +448,6 @@ export default async function CaseDetailsPage({
           </form>
         </div>
 
-        <form action={updateCaseWorkflowAction} className="mt-4 grid gap-2 border-t border-[#ececec] pt-4 sm:grid-cols-[1fr_auto]">
-          <input type="hidden" name="case_id" value={id} />
-          <div>
-            <label htmlFor="workflow_action" className="label">Workflow Update</label>
-            <select id="workflow_action" name="workflow_action" className="select" defaultValue="" required>
-              <option value="" disabled>Select an action</option>
-              <option value="mark_completed">Mark Completed</option>
-              <option value="reopen_case">Reopen Case</option>
-            </select>
-          </div>
-          <button type="submit" className="btn-primary self-end">Apply</button>
-        </form>
       </section>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">

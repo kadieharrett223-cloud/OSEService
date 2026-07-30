@@ -59,6 +59,12 @@ function getInvoiceLink(quickbooksInvoiceExternalId: string | null | undefined) 
   return `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(quickbooksInvoiceExternalId)}`;
 }
 
+function isRedirectLikeError(error: unknown) {
+  return typeof error === "object" && error !== null && "digest" in error
+    && typeof (error as { digest?: unknown }).digest === "string"
+    && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
+}
+
 function parseProductsPurchased(rawPayload: unknown) {
   if (!rawPayload || typeof rawPayload !== "object") return "";
 
@@ -193,256 +199,272 @@ export async function createCaseAction(formData: FormData) {
   const user = await requireUser();
   const supabase = getSupabaseAdmin();
 
-  const customerName = String(formData.get("customer_name") ?? "").trim();
-  const companyName = emptyToNull(formData.get("company_name"));
-  const phone = emptyToNull(formData.get("phone"));
-  const email = emptyToNull(formData.get("email"));
-  const shippingAddress = emptyToNull(formData.get("shipping_address"));
-  const quickbooksCustomerId = emptyToNull(formData.get("quickbooks_customer_id"));
+  let createdCaseId: string | null = null;
 
-  if (!customerName) {
-    redirect("/cases/new?error=Customer+name+is+required");
-  }
+  try {
+    const customerName = String(formData.get("customer_name") ?? "").trim();
+    const companyName = emptyToNull(formData.get("company_name"));
+    const phone = emptyToNull(formData.get("phone"));
+    const email = emptyToNull(formData.get("email"));
+    const shippingAddress = emptyToNull(formData.get("shipping_address"));
+    const quickbooksCustomerId = emptyToNull(formData.get("quickbooks_customer_id"));
 
-  const issueDescription = String(formData.get("issue_description") ?? "").trim();
-  if (!issueDescription) {
-    redirect("/cases/new?error=Issue+description+is+required");
-  }
-
-  const customerNote = emptyToNull(formData.get("customer_note"));
-  const internalNotes = emptyToNull(formData.get("internal_notes"));
-  const draftInternalNotes = formData
-    .getAll("draft_internal_notes")
-    .map((item) => String(item).trim())
-    .filter(Boolean);
-
-  const nextStep = emptyToNull(formData.get("next_step"));
-  const etaDate = emptyToNull(formData.get("eta_date"));
-  const trackingNumber = emptyToNull(formData.get("tracking_number"));
-  const assignedEmployeeId = emptyToNull(formData.get("assigned_employee_id"));
-
-  const priorityInput = String(formData.get("priority") ?? "Medium");
-  const statusInput = String(formData.get("status") ?? "New");
-
-  const priority: CasePriority = PRIORITIES.includes(
-    priorityInput as (typeof PRIORITIES)[number],
-  )
-    ? (priorityInput as CasePriority)
-    : "Medium";
-  const status: CaseStatus = CASE_STATUSES.includes(
-    statusInput as (typeof CASE_STATUSES)[number],
-  )
-    ? (statusInput as CaseStatus)
-    : "New";
-
-  const caseTypeInput = String(formData.get("case_type") ?? "General");
-  const caseType: CaseType = CASE_TYPES.includes(
-    caseTypeInput as (typeof CASE_TYPES)[number],
-  )
-    ? (caseTypeInput as CaseType)
-    : "General";
-
-  const uploadedFiles = formData
-    .getAll("attachments")
-    .filter((item): item is File => item instanceof File && item.size > 0);
-
-  for (const file of uploadedFiles) {
-    if (!isAllowedAttachment(file)) {
-      redirect("/cases/new?error=Unsupported+file+type.+Use+JPG,+PNG,+HEIC,+PDF,+or+MP4");
-    }
-  }
-
-  const quickbooksInvoiceId = emptyToNull(formData.get("quickbooks_invoice_id"));
-  const quickbooksInvoiceNumber = emptyToNull(formData.get("quickbooks_invoice_number"));
-
-  let dateOfPurchase = emptyToNull(formData.get("date_of_purchase"));
-  if (!dateOfPurchase && (quickbooksInvoiceId || quickbooksInvoiceNumber)) {
-    let invoiceQuery = supabase
-      .from("quickbooks_invoices")
-      .select("invoice_date")
-      .limit(1);
-
-    if (quickbooksInvoiceId) {
-      invoiceQuery = invoiceQuery.eq("quickbooks_invoice_id", quickbooksInvoiceId);
-    } else if (quickbooksInvoiceNumber) {
-      invoiceQuery = invoiceQuery.eq("invoice_number", quickbooksInvoiceNumber);
+    if (!customerName) {
+      redirect("/cases/new?error=Customer+name+is+required");
     }
 
-    const { data: invoiceRecord } = await invoiceQuery.maybeSingle();
-    dateOfPurchase = invoiceRecord?.invoice_date ?? null;
-  }
+    const issueDescription = String(formData.get("issue_description") ?? "").trim();
+    if (!issueDescription) {
+      redirect("/cases/new?error=Issue+description+is+required");
+    }
 
-  let customerQuery = supabase.from("customers").select("id").limit(1);
+    const customerNote = emptyToNull(formData.get("customer_note"));
+    const internalNotes = emptyToNull(formData.get("internal_notes"));
+    const draftInternalNotes = formData
+      .getAll("draft_internal_notes")
+      .map((item) => String(item).trim())
+      .filter(Boolean);
 
-  if (quickbooksCustomerId) {
-    customerQuery = customerQuery.eq("quickbooks_customer_id", quickbooksCustomerId);
-  } else if (email) {
-    customerQuery = customerQuery.eq("email", email);
-  } else {
-    customerQuery = customerQuery
-      .eq("full_name", customerName)
-      .eq("company_name", companyName ?? "");
-  }
+    const nextStep = emptyToNull(formData.get("next_step"));
+    const etaDate = emptyToNull(formData.get("eta_date"));
+    const trackingNumber = emptyToNull(formData.get("tracking_number"));
+    const assignedEmployeeId = emptyToNull(formData.get("assigned_employee_id"));
 
-  const { data: existingCustomer } = await customerQuery.maybeSingle();
+    const priorityInput = String(formData.get("priority") ?? "Medium");
+    const statusInput = String(formData.get("status") ?? "New");
 
-  let customerId = existingCustomer?.id;
+    const priority: CasePriority = PRIORITIES.includes(
+      priorityInput as (typeof PRIORITIES)[number],
+    )
+      ? (priorityInput as CasePriority)
+      : "Medium";
+    const status: CaseStatus = CASE_STATUSES.includes(
+      statusInput as (typeof CASE_STATUSES)[number],
+    )
+      ? (statusInput as CaseStatus)
+      : "New";
 
-  if (!customerId) {
-    const { data: customerInsert, error: customerError } = await supabase
-      .from("customers")
+    const caseTypeInput = String(formData.get("case_type") ?? "General");
+    const caseType: CaseType = CASE_TYPES.includes(
+      caseTypeInput as (typeof CASE_TYPES)[number],
+    )
+      ? (caseTypeInput as CaseType)
+      : "General";
+
+    const uploadedFiles = formData
+      .getAll("attachments")
+      .filter((item): item is File => item instanceof File && item.size > 0);
+
+    for (const file of uploadedFiles) {
+      if (!isAllowedAttachment(file)) {
+        redirect("/cases/new?error=Unsupported+file+type.+Use+JPG,+PNG,+HEIC,+PDF,+or+MP4");
+      }
+    }
+
+    const quickbooksInvoiceId = emptyToNull(formData.get("quickbooks_invoice_id"));
+    const quickbooksInvoiceNumber = emptyToNull(formData.get("quickbooks_invoice_number"));
+
+    let dateOfPurchase = emptyToNull(formData.get("date_of_purchase"));
+    if (!dateOfPurchase && (quickbooksInvoiceId || quickbooksInvoiceNumber)) {
+      let invoiceQuery = supabase
+        .from("quickbooks_invoices")
+        .select("invoice_date")
+        .limit(1);
+
+      if (quickbooksInvoiceId) {
+        invoiceQuery = invoiceQuery.eq("quickbooks_invoice_id", quickbooksInvoiceId);
+      } else if (quickbooksInvoiceNumber) {
+        invoiceQuery = invoiceQuery.eq("invoice_number", quickbooksInvoiceNumber);
+      }
+
+      const { data: invoiceRecord } = await invoiceQuery.maybeSingle();
+      dateOfPurchase = invoiceRecord?.invoice_date ?? null;
+    }
+
+    let customerQuery = supabase.from("customers").select("id").limit(1);
+
+    if (quickbooksCustomerId) {
+      customerQuery = customerQuery.eq("quickbooks_customer_id", quickbooksCustomerId);
+    } else if (email) {
+      customerQuery = customerQuery.eq("email", email);
+    } else {
+      customerQuery = customerQuery
+        .eq("full_name", customerName)
+        .eq("company_name", companyName ?? "");
+    }
+
+    const { data: existingCustomer } = await customerQuery.maybeSingle();
+
+    let customerId = existingCustomer?.id;
+
+    if (!customerId) {
+      const { data: customerInsert, error: customerError } = await supabase
+        .from("customers")
+        .insert({
+          full_name: customerName,
+          company_name: companyName,
+          phone,
+          email,
+          shipping_address: shippingAddress,
+          quickbooks_customer_id: quickbooksCustomerId,
+        })
+        .select("id")
+        .single();
+
+      if (customerError || !customerInsert) {
+        redirect(`/cases/new?error=${encodeURIComponent(customerError?.message ?? "Could not create customer")}`);
+      }
+
+      customerId = customerInsert.id;
+    }
+
+    const { data: createdCase, error: caseError } = await supabase
+      .from("customer_service_cases")
       .insert({
-        full_name: customerName,
-        company_name: companyName,
-        phone,
-        email,
-        shipping_address: shippingAddress,
-        quickbooks_customer_id: quickbooksCustomerId,
+        customer_id: customerId,
+        case_type: caseType,
+        quickbooks_invoice_id: quickbooksInvoiceId,
+        quickbooks_invoice_number: quickbooksInvoiceNumber,
+        quickbooks_invoice_link: emptyToNull(formData.get("quickbooks_invoice_link")),
+        product_model: null,
+        serial_number: null,
+        date_of_purchase: dateOfPurchase,
+        issue_reported_at: new Date().toISOString(),
+        issue_description: issueDescription,
+        assigned_employee_id: assignedEmployeeId,
+        priority,
+        status,
+        internal_notes: [
+          internalNotes,
+          nextStep ? `Next step: ${nextStep}` : null,
+          etaDate ? `ETA: ${etaDate}` : null,
+          trackingNumber ? `Tracking number: ${trackingNumber}` : null,
+        ].filter(Boolean).join("\n") || null,
+        customer_facing_notes: emptyToNull(formData.get("customer_facing_notes")),
+        created_by: user.id,
       })
-      .select("id")
+      .select("id, case_number")
       .single();
 
-    if (customerError || !customerInsert) {
-      redirect(`/cases/new?error=${encodeURIComponent(customerError?.message ?? "Could not create customer")}`);
+    if (caseError || !createdCase) {
+      redirect(`/cases/new?error=${encodeURIComponent(caseError?.message ?? "Could not create case")}`);
     }
 
-    customerId = customerInsert.id;
-  }
-
-  const { data: createdCase, error: caseError } = await supabase
-    .from("customer_service_cases")
-    .insert({
-      customer_id: customerId,
-      case_type: caseType,
-      quickbooks_invoice_id: quickbooksInvoiceId,
-      quickbooks_invoice_number: quickbooksInvoiceNumber,
-      quickbooks_invoice_link: emptyToNull(formData.get("quickbooks_invoice_link")),
-      product_model: null,
-      serial_number: null,
-      date_of_purchase: dateOfPurchase,
-      issue_reported_at: new Date().toISOString(),
-      issue_description: issueDescription,
-      assigned_employee_id: assignedEmployeeId,
-      priority,
-      status,
-      internal_notes: [
-        internalNotes,
-        nextStep ? `Next step: ${nextStep}` : null,
-        etaDate ? `ETA: ${etaDate}` : null,
-        trackingNumber ? `Tracking number: ${trackingNumber}` : null,
-      ].filter(Boolean).join("\n") || null,
-      customer_facing_notes: emptyToNull(formData.get("customer_facing_notes")),
-      created_by: user.id,
-    })
-    .select("id, case_number")
-    .single();
-
-  if (caseError || !createdCase) {
-    redirect(`/cases/new?error=${encodeURIComponent(caseError?.message ?? "Could not create case")}`);
-  }
-
-  await supabase.from("case_activity").insert({
-    case_id: createdCase.id,
-    actor_id: user.id,
-    activity_type: "case_created",
-    summary: `Case created by ${user.fullName ?? "Unknown"}`,
-    details: {
-      status,
-      priority,
-      assigned_employee_id: assignedEmployeeId,
-      next_step: nextStep,
-      eta_date: etaDate,
-    },
-  });
-
-  if (customerNote) {
-    await supabase.from("case_notes").insert({
-      case_id: createdCase.id,
-      note_type: "customer",
-      content: customerNote,
-      created_by: user.id,
-    });
+    createdCaseId = createdCase.id;
 
     await supabase.from("case_activity").insert({
       case_id: createdCase.id,
       actor_id: user.id,
-      activity_type: "note_added",
-      summary: "Customer note added",
-    });
-  }
-
-  const allInternalNotes = [
-    ...(internalNotes ? [internalNotes] : []),
-    ...draftInternalNotes,
-  ];
-
-  for (const note of allInternalNotes) {
-    await supabase.from("case_notes").insert({
-      case_id: createdCase.id,
-      note_type: "internal",
-      content: note,
-      created_by: user.id,
+      activity_type: "case_created",
+      summary: `Case created by ${user.fullName ?? "Unknown"}`,
+      details: {
+        status,
+        priority,
+        assigned_employee_id: assignedEmployeeId,
+        next_step: nextStep,
+        eta_date: etaDate,
+      },
     });
 
-    await supabase.from("case_activity").insert({
-      case_id: createdCase.id,
-      actor_id: user.id,
-      activity_type: "note_added",
-      summary: "Internal note added",
-    });
-  }
-
-  if (trackingNumber) {
-    await supabase.from("case_activity").insert({
-      case_id: createdCase.id,
-      actor_id: user.id,
-      activity_type: "add_tracking_number",
-      summary: `Tracking number added: ${trackingNumber}`,
-      details: { tracking_number: trackingNumber },
-    });
-  }
-
-  if (uploadedFiles.length > 0) {
-    for (const file of uploadedFiles) {
-      const fileExtension = getFileExtension(file.name) || "bin";
-      const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
-      const storagePath = `${createdCase.id}/${safeFileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("case-attachments")
-        .upload(storagePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: file.type || undefined,
-        });
-
-      if (uploadError) {
-        redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(uploadError.message)}`);
-      }
-
-      const { error: attachmentError } = await supabase.from("case_attachments").insert({
+    if (customerNote) {
+      await supabase.from("case_notes").insert({
         case_id: createdCase.id,
-        file_path: storagePath,
-        file_name: file.name,
-        file_size: file.size,
-        mime_type: file.type || null,
-        uploaded_by: user.id,
+        note_type: "customer",
+        content: customerNote,
+        created_by: user.id,
       });
 
-      if (attachmentError) {
-        redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(attachmentError.message)}`);
-      }
+      await supabase.from("case_activity").insert({
+        case_id: createdCase.id,
+        actor_id: user.id,
+        activity_type: "note_added",
+        summary: "Customer note added",
+      });
     }
 
-    await supabase.from("case_activity").insert({
-      case_id: createdCase.id,
-      actor_id: user.id,
-      activity_type: "file_uploaded",
-      summary: uploadedFiles.length === 1 ? `Attachment uploaded: ${uploadedFiles[0].name}` : `${uploadedFiles.length} attachments uploaded`,
-    });
-  }
+    const allInternalNotes = [
+      ...(internalNotes ? [internalNotes] : []),
+      ...draftInternalNotes,
+    ];
 
-  revalidatePath("/dashboard");
-  revalidatePath("/cases");
-  redirect(`/cases/${createdCase.id}`);
+    for (const note of allInternalNotes) {
+      await supabase.from("case_notes").insert({
+        case_id: createdCase.id,
+        note_type: "internal",
+        content: note,
+        created_by: user.id,
+      });
+
+      await supabase.from("case_activity").insert({
+        case_id: createdCase.id,
+        actor_id: user.id,
+        activity_type: "note_added",
+        summary: "Internal note added",
+      });
+    }
+
+    if (trackingNumber) {
+      await supabase.from("case_activity").insert({
+        case_id: createdCase.id,
+        actor_id: user.id,
+        activity_type: "add_tracking_number",
+        summary: `Tracking number added: ${trackingNumber}`,
+        details: { tracking_number: trackingNumber },
+      });
+    }
+
+    if (uploadedFiles.length > 0) {
+      for (const file of uploadedFiles) {
+        const fileExtension = getFileExtension(file.name) || "bin";
+        const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
+        const storagePath = `${createdCase.id}/${safeFileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("case-attachments")
+          .upload(storagePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: file.type || undefined,
+          });
+
+        if (uploadError) {
+          redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(uploadError.message)}`);
+        }
+
+        const { error: attachmentError } = await supabase.from("case_attachments").insert({
+          case_id: createdCase.id,
+          file_path: storagePath,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || null,
+          uploaded_by: user.id,
+        });
+
+        if (attachmentError) {
+          redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(attachmentError.message)}`);
+        }
+      }
+
+      await supabase.from("case_activity").insert({
+        case_id: createdCase.id,
+        actor_id: user.id,
+        activity_type: "file_uploaded",
+        summary: uploadedFiles.length === 1 ? `Attachment uploaded: ${uploadedFiles[0].name}` : `${uploadedFiles.length} attachments uploaded`,
+      });
+    }
+
+    revalidatePath("/dashboard");
+    revalidatePath("/cases");
+    redirect(`/cases/${createdCase.id}`);
+  } catch (error) {
+    if (isRedirectLikeError(error)) {
+      throw error;
+    }
+
+    if (createdCaseId) {
+      redirect(`/cases/${createdCaseId}?error=Case+created+with+follow-up+errors`);
+    }
+
+    redirect("/cases/new?error=Unable+to+create+case");
+  }
 }

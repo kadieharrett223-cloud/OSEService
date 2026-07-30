@@ -5,7 +5,6 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addCaseWorkflowEventAction,
   addNoteAction,
-  addReplacementPartAction,
   deleteAttachmentAction,
   updateCaseStatusAction,
   updateCaseWorkflowAction,
@@ -14,6 +13,7 @@ import {
 
 type ActivityRow = {
   id: string;
+  activity_type: string;
   summary: string;
   created_at: string;
   access_users: { full_name: string | null } | null;
@@ -35,8 +35,6 @@ type CaseRecord = {
   priority: string;
   issue_reported_at: string;
   issue_description: string;
-  product_model: string | null;
-  serial_number: string | null;
   date_of_purchase: string | null;
   quickbooks_invoice_number: string | null;
   quickbooks_invoice_link: string | null;
@@ -48,6 +46,15 @@ type CaseRecord = {
     email: string | null;
     shipping_address: string | null;
     quickbooks_customer_id: string | null;
+  } | null;
+  invoice: {
+    invoice_date: string | null;
+    invoice_total: number | null;
+    payment_status: string | null;
+    billing_address: string | null;
+    shipping_address: string | null;
+    raw_payload: unknown;
+    quickbooks_invoice_id: string;
   } | null;
   assigned: { full_name: string | null } | null;
   creator: { full_name: string | null } | null;
@@ -63,6 +70,70 @@ type AttachmentRow = {
   uploader: { full_name: string | null } | null;
 };
 
+function formatBytes(size: number | null) {
+  if (!size || size < 0) return "-";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function parseProductsPurchased(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return "-";
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  const products = lines
+    .map((line, index) => {
+      if (!line || typeof line !== "object") return null;
+
+      const item = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } };
+      };
+
+      const description = typeof item.Description === "string"
+        ? item.Description.trim()
+        : typeof item.SalesItemLineDetail?.ItemRef?.name === "string"
+          ? item.SalesItemLineDetail.ItemRef.name.trim()
+          : "";
+
+      if (!description) return null;
+
+      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty;
+      const qty = typeof qtyRaw === "number" || typeof qtyRaw === "string"
+        ? String(qtyRaw).trim()
+        : "";
+
+      return `${index + 1}. ${description}${qty ? ` (Qty ${qty})` : ""}`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return products.length > 0 ? products.join("\n") : "-";
+}
+
+function activityLabel(activityType: string) {
+  const map: Record<string, string> = {
+    case_created: "CASE",
+    status_changed: "STATUS",
+    workflow_status_changed: "WORKFLOW",
+    note_added: "NOTE",
+    file_uploaded: "FILE",
+    file_deleted: "FILE",
+    add_tracking_number: "TRACK",
+    replacement_part_ordered: "PART",
+    replacement_delivered: "DELIVERED",
+    waiting_customer: "WAIT",
+    waiting_supplier: "WAIT",
+    customer_contacted: "CALL",
+    send_customer_email: "EMAIL",
+    warranty_approved: "WARRANTY",
+  };
+
+  return map[activityType] ?? "EVENT";
+}
+
 export default async function CaseDetailsPage({
   params,
   searchParams,
@@ -70,13 +141,13 @@ export default async function CaseDetailsPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
 
   const { id } = await params;
   const { error } = await searchParams;
   const supabase = getSupabaseAdmin();
 
-  const [{ data: caseRecordRaw }, { data: notes }, { data: parts }, { data: activity }, { data: attachments }] =
+  const [{ data: caseRecordRaw }, { data: notes }, { data: activity }, { data: attachments }] =
     await Promise.all([
       supabase
         .from("customer_service_cases")
@@ -84,6 +155,7 @@ export default async function CaseDetailsPage({
           `
           *,
           customers(*),
+          invoice:quickbooks_invoices(invoice_date, invoice_total, payment_status, billing_address, shipping_address, raw_payload, quickbooks_invoice_id),
           assigned:access_users!customer_service_cases_assigned_employee_id_access_user_fkey(full_name),
           creator:access_users!customer_service_cases_created_by_access_user_fkey(full_name)
         `,
@@ -93,11 +165,6 @@ export default async function CaseDetailsPage({
       supabase
         .from("case_notes")
         .select("id, note_type, content, created_at, access_users:created_by(full_name)")
-        .eq("case_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("replacement_parts")
-        .select("*")
         .eq("case_id", id)
         .order("created_at", { ascending: false }),
       supabase
@@ -133,19 +200,27 @@ export default async function CaseDetailsPage({
     }),
   );
 
+  const productsPurchased = parseProductsPurchased(caseRecord.invoice?.raw_payload);
+  const noteRows = (notes ?? []) as NoteRow[];
+  const activityRows = (activity ?? []) as ActivityRow[];
+  const invoiceLink = caseRecord.quickbooks_invoice_link
+    || (caseRecord.invoice?.quickbooks_invoice_id
+      ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
+      : null);
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-[#5a5a5a]">Case</p>
-          <h1 className="text-3xl">{caseRecord.case_number}</h1>
-          <p className="text-sm text-[#5a5a5a]">{caseRecord.case_type ?? "General"}</p>
+          <h1 className="text-4xl leading-tight text-[#121826]">{caseRecord.case_number}</h1>
+          <p className="text-sm text-[#5a5a5a]">Case workspace mirrors intake view for faster follow-up work.</p>
         </div>
         <div className="flex gap-2">
           <span className="badge badge-status">{caseRecord.status}</span>
           <span className={`badge ${caseRecord.priority === "High" ? "badge-priority-high" : "badge-status"}`}>
             {caseRecord.priority}
           </span>
+          <Link href="/cases" className="btn-secondary">Back to Cases</Link>
         </div>
       </div>
 
@@ -153,155 +228,89 @@ export default async function CaseDetailsPage({
         <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</p>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <article className="card p-4">
-          <h2 className="text-xl">Customer and Invoice</h2>
-          <dl className="mt-3 grid grid-cols-[170px,1fr] gap-y-2 text-sm">
-            <dt className="text-[#5a5a5a]">Customer</dt>
-            <dd>{caseRecord.customers?.full_name}</dd>
-            <dt className="text-[#5a5a5a]">Company</dt>
-            <dd>{caseRecord.customers?.company_name ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Phone</dt>
-            <dd>{caseRecord.customers?.phone ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Email</dt>
-            <dd>{caseRecord.customers?.email ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Shipping Address</dt>
-            <dd>{caseRecord.customers?.shipping_address ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">QB Customer ID</dt>
-            <dd>{caseRecord.customers?.quickbooks_customer_id ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Invoice Number</dt>
-            <dd>{caseRecord.quickbooks_invoice_number ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Invoice Link</dt>
-            <dd>
-              {caseRecord.quickbooks_invoice_link ? (
-                <a href={caseRecord.quickbooks_invoice_link} target="_blank" rel="noreferrer" className="text-[#b20610] underline">
-                  Open Invoice
-                </a>
-              ) : (
-                "-"
-              )}
-            </dd>
-          </dl>
-        </article>
-
-        <article className="card p-4">
-          <h2 className="text-xl">Issue and Assignment</h2>
-          <dl className="mt-3 grid grid-cols-[170px,1fr] gap-y-2 text-sm">
-            <dt className="text-[#5a5a5a]">Product Model</dt>
-            <dd>{caseRecord.product_model ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Date of Purchase</dt>
-            <dd>{caseRecord.date_of_purchase ?? "-"}</dd>
-            <dt className="text-[#5a5a5a]">Issue Reported</dt>
-            <dd>{new Date(caseRecord.issue_reported_at).toLocaleString()}</dd>
-            <dt className="text-[#5a5a5a]">Assigned Employee</dt>
-            <dd>{caseRecord.assigned?.full_name ?? "Unassigned"}</dd>
-            <dt className="text-[#5a5a5a]">Created By</dt>
-            <dd>{caseRecord.creator?.full_name ?? caseRecord.created_by}</dd>
-            <dt className="text-[#5a5a5a]">Description</dt>
-            <dd className="whitespace-pre-wrap">{caseRecord.issue_description}</dd>
-          </dl>
-
-          <form action={updateCaseStatusAction} className="mt-4 flex flex-wrap items-end gap-2 border-t border-[#ececec] pt-4">
-            <input type="hidden" name="case_id" value={id} />
+      <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-xl font-semibold text-[#121826]">Customer Information</h2>
+          <span className="rounded-full bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#334155]">QuickBooks Snapshot</span>
+        </div>
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          <div className="space-y-2 lg:col-span-2">
             <div>
-              <label htmlFor="status" className="label">Update Status</label>
-              <select id="status" name="status" defaultValue={caseRecord.status} className="select min-w-[220px]">
-                {CASE_STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
+              <label className="label">Customer Name</label>
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.full_name ?? ""} />
             </div>
-            <button type="submit" className="btn-primary">Save Status</button>
-          </form>
+            <div>
+              <label className="label">Company</label>
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.company_name ?? ""} />
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label className="label">Phone</label>
+                <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.phone ?? ""} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.email ?? ""} />
+              </div>
+            </div>
+            <div>
+              <label className="label">Shipping Address</label>
+              <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={caseRecord.customers?.shipping_address ?? ""} />
+            </div>
+            <div>
+              <label className="label">Customer Notes</label>
+                <textarea readOnly rows={3} className="textarea bg-[#f8fafc]" value={noteRows.filter((note) => note.note_type === "customer").map((note) => note.content).join("\n\n") || ""} />
+            </div>
+          </div>
 
-          <form action={updateCaseWorkflowAction} className="mt-3 flex flex-wrap gap-2">
-            <input type="hidden" name="case_id" value={id} />
-            <button type="submit" name="workflow_action" value="mark_in_progress" className="btn-secondary">
-              Mark In Progress
-            </button>
-            <button type="submit" name="workflow_action" value="mark_completed" className="btn-primary">
-              Mark Completed
-            </button>
-            <button type="submit" name="workflow_action" value="reopen_case" className="btn-secondary">
-              Reopen Case
-            </button>
-          </form>
-        </article>
+          <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6a7281]">Invoice Snapshot</p>
+            <p><span className="font-semibold">Invoice #:</span> {caseRecord.quickbooks_invoice_number ?? "-"}</p>
+            <p><span className="font-semibold">Invoice Date:</span> {caseRecord.invoice?.invoice_date ?? "-"}</p>
+            <p><span className="font-semibold">Purchase Date:</span> {caseRecord.date_of_purchase ?? caseRecord.invoice?.invoice_date ?? "-"}</p>
+            <p><span className="font-semibold">Payment Status:</span> {caseRecord.invoice?.payment_status ?? "-"}</p>
+            <p><span className="font-semibold">Invoice Total:</span> {caseRecord.invoice?.invoice_total != null ? `$${caseRecord.invoice.invoice_total.toFixed(2)}` : "-"}</p>
+            <p><span className="font-semibold">Billing Address:</span> {caseRecord.invoice?.billing_address ?? "-"}</p>
+            <div>
+              <label className="label">Products Purchased</label>
+              <textarea readOnly rows={5} className="textarea bg-[#f8fafc]" value={productsPurchased} />
+            </div>
+            {invoiceLink ? (
+              <a href={invoiceLink} target="_blank" rel="noreferrer" className="btn-secondary inline-flex w-full justify-center">View Full Invoice</a>
+            ) : (
+              <button type="button" disabled className="btn-secondary inline-flex w-full justify-center opacity-60">View Full Invoice</button>
+            )}
+          </aside>
+        </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <article className="card p-4 xl:col-span-2">
-          <h2 className="text-xl">Timeline</h2>
-          <p className="mt-1 text-sm text-[#5a5a5a]">Generated from actual actions in this case.</p>
-          <div className="mt-3 space-y-3">
-            {((activity ?? []) as ActivityRow[]).map((row) => (
-              <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
-                <p className="font-semibold">{row.summary}</p>
-                <p className="text-xs text-[#6a6a6a]">
-                  {new Date(row.created_at).toLocaleString()} by {row.access_users?.full_name ?? "System"}
-                </p>
-              </div>
-            ))}
+      <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#121826]">Issue Details</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="label">Issue Category</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.case_type ?? "General"} />
           </div>
-        </article>
-
-        <article className="card p-4">
-          <h2 className="text-xl">Resolution Actions</h2>
-          <p className="mt-1 text-sm text-[#5a5a5a]">Use action buttons to move work forward and append timeline entries automatically.</p>
-
-          <form action={addCaseWorkflowEventAction} className="mt-3 grid grid-cols-2 gap-2">
-            <input type="hidden" name="case_id" value={id} />
-            <button type="submit" name="event_type" value="customer_contacted" className="btn-secondary text-sm">Customer Contacted</button>
-            <button type="submit" name="event_type" value="send_customer_email" className="btn-secondary text-sm">Send Customer Email</button>
-            <button type="submit" name="event_type" value="replacement_part_ordered" className="btn-secondary text-sm">Order Replacement Part</button>
-            <button type="submit" name="event_type" value="generate_warranty_claim" className="btn-secondary text-sm">Generate Warranty Claim</button>
-            <button type="submit" name="event_type" value="request_supplier_approval" className="btn-secondary text-sm">Request Supplier Approval</button>
-            <button type="submit" name="event_type" value="schedule_technician" className="btn-secondary text-sm">Schedule Technician</button>
-            <button type="submit" name="event_type" value="waiting_supplier" className="btn-secondary text-sm">Mark Waiting on Supplier</button>
-            <button type="submit" name="event_type" value="waiting_customer" className="btn-secondary text-sm">Mark Waiting on Customer</button>
-            <button type="submit" name="event_type" value="warranty_approved" className="btn-secondary text-sm">Warranty Approved</button>
-            <button type="submit" name="event_type" value="replacement_delivered" className="btn-secondary text-sm">Replacement Delivered</button>
-          </form>
-
-          <form action={addCaseWorkflowEventAction} className="mt-3 flex items-end gap-2">
-            <input type="hidden" name="case_id" value={id} />
-            <input type="hidden" name="event_type" value="add_tracking_number" />
-            <div className="flex-1">
-              <label htmlFor="tracking_number" className="label">Add Tracking Number</label>
-              <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
-            </div>
-            <button type="submit" className="btn-primary">Add Tracking Number</button>
-          </form>
-
-          <form action={addNoteAction} className="mt-4 space-y-2 border-t border-[#ececec] pt-4">
-            <input type="hidden" name="case_id" value={id} />
-            <input type="hidden" name="note_type" value="internal" />
-            <textarea name="content" rows={3} required className="textarea" placeholder="Internal note (auto-added to timeline)." />
-            <button type="submit" className="btn-primary w-full">Add Internal Note</button>
-          </form>
-
-          <h3 className="mt-5 text-lg">Recent Notes</h3>
-          <div className="mt-2 space-y-2">
-            {((notes ?? []) as NoteRow[]).slice(0, 8).map((note) => (
-              <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
-                <p>{note.content}</p>
-                <p className="mt-1 text-xs text-[#6a6a6a]">
-                  {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"}
-                </p>
-              </div>
-            ))}
+          <div>
+            <label className="label">Priority</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.priority} />
           </div>
-        </article>
+        </div>
+        <div className="mt-3">
+          <label className="label">Issue Description</label>
+          <textarea readOnly rows={8} className="textarea bg-[#f8fafc]" value={caseRecord.issue_description} />
+        </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <article className="card p-4">
-          <h2 className="text-xl">Attachments</h2>
-          <p className="mt-1 text-sm text-[#5a5a5a]">Upload unlimited images and files (JPG, PNG, HEIC, PDF, MP4).</p>
+      <div className="grid gap-4 xl:grid-cols-[1.65fr_1fr]">
+        <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+          <h2 className="text-xl font-semibold text-[#121826]">Photos & Attachments</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">Upload unlimited files for this case: JPG, PNG, HEIC, PDF, MP4.</p>
+
           <form action={uploadAttachmentAction} className="mt-3 space-y-3">
             <input type="hidden" name="case_id" value={id} />
             <label htmlFor="attachments" className="flex min-h-[120px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#c9d1dd] bg-[#f8fafc] px-4 py-6 text-center text-sm text-[#475569]">
-              Drag and drop files here, or click to browse
+              Drag files here or click to upload
             </label>
             <input id="attachments" type="file" name="attachments" className="sr-only" accept=".jpg,.jpeg,.png,.heic,.pdf,.mp4" multiple required />
             <button type="submit" className="btn-primary">Upload Files</button>
@@ -322,8 +331,9 @@ export default async function CaseDetailsPage({
                     )}
                   </div>
                   <p className="truncate font-semibold" title={item.file_name}>{item.file_name}</p>
-                  <p className="text-xs text-[#6a6a6a]">Uploaded {new Date(item.created_at).toLocaleString()}</p>
-                  <p className="text-xs text-[#6a6a6a]">By {item.uploader?.full_name ?? "Unknown"}</p>
+                  <p className="text-xs text-[#6a6a6a]">Size: {formatBytes(item.file_size)}</p>
+                  <p className="text-xs text-[#6a6a6a]">Upload date: {new Date(item.created_at).toLocaleString()}</p>
+                  <p className="text-xs text-[#6a6a6a]">Uploaded by: {item.uploader?.full_name ?? "Unknown"}</p>
                   <div className="mt-2 flex gap-2">
                     {item.url ? (
                       <a className="btn-secondary text-xs" href={item.url} target="_blank" rel="noreferrer">Download</a>
@@ -338,38 +348,107 @@ export default async function CaseDetailsPage({
               );
             })}
           </div>
-        </article>
+        </section>
 
-        <article className="card p-4">
-          <h2 className="text-xl">Replacement Parts</h2>
-          <form action={addReplacementPartAction} className="mt-3 grid gap-2 md:grid-cols-2">
-            <input type="hidden" name="case_id" value={id} />
-            <input name="part_name" placeholder="Part name" required className="input md:col-span-2" />
-            <input name="sku" placeholder="SKU" className="input" />
-            <input name="quantity" type="number" min={1} defaultValue={1} className="input" />
-            <input name="supplier" placeholder="Supplier" className="input" />
-            <input name="cost" type="number" step="0.01" placeholder="Cost" className="input" />
-            <input name="shipping_status" placeholder="Shipping status" className="input" />
-            <input name="carrier" placeholder="Carrier" className="input" />
-            <input name="tracking_number" placeholder="Tracking number" className="input md:col-span-2" />
-            <input name="order_date" type="date" className="input" />
-            <input name="ship_date" type="date" className="input" />
-            <input name="delivery_date" type="date" className="input" />
-            <textarea name="notes" rows={2} placeholder="Notes" className="textarea md:col-span-2" />
-            <button type="submit" className="btn-primary md:col-span-2">Add Replacement Part</button>
-          </form>
+        <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-[#121826]">Timeline / Notes</h2>
+            <span className="badge badge-status">Auto</span>
+          </div>
+          <p className="mt-2 text-sm text-[#5a5a5a]">Generated from real actions with timestamp and employee.</p>
 
-          <div className="mt-3 space-y-2 text-sm">
-            {(parts ?? []).map((part) => (
-              <div key={part.id} className="rounded-md border border-[#ececec] p-2">
-                <p className="font-semibold">{part.part_name}</p>
-                <p>Qty: {part.quantity} • SKU: {part.sku ?? "-"} • Supplier: {part.supplier ?? "-"}</p>
-                <p>Status: {part.shipping_status ?? "-"} • Tracking: {part.tracking_number ?? "-"}</p>
-                <p className="text-xs text-[#6a6a6a]">Added {new Date(part.created_at).toLocaleString()}</p>
+          <div className="mt-3 space-y-2">
+            {activityRows.map((row) => (
+              <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
+                  <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
+                </div>
+                <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
+                <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
               </div>
             ))}
+            {activityRows.length === 0 ? (
+              <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
+            ) : null}
           </div>
-        </article>
+
+          <form action={addNoteAction} className="mt-4 space-y-2 border-t border-[#ececec] pt-4">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="note_type" value="internal" />
+            <label htmlFor="content" className="label">Add Internal Note</label>
+            <textarea id="content" name="content" rows={3} required className="textarea" placeholder="Add internal timeline note" />
+            <button type="submit" className="btn-primary w-full">Add Note</button>
+          </form>
+
+          <div className="mt-4 rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-xs text-[#6a7281]">
+            <p className="font-semibold uppercase tracking-[0.08em]">Workflow Actions</p>
+            <form action={addCaseWorkflowEventAction} className="mt-2 grid grid-cols-2 gap-2">
+              <input type="hidden" name="case_id" value={id} />
+              <button type="submit" name="event_type" value="customer_contacted" className="btn-secondary text-xs">Customer Contacted</button>
+              <button type="submit" name="event_type" value="send_customer_email" className="btn-secondary text-xs">Send Customer Email</button>
+              <button type="submit" name="event_type" value="replacement_part_ordered" className="btn-secondary text-xs">Order Replacement Part</button>
+              <button type="submit" name="event_type" value="waiting_supplier" className="btn-secondary text-xs">Waiting on Supplier</button>
+              <button type="submit" name="event_type" value="waiting_customer" className="btn-secondary text-xs">Waiting on Customer</button>
+              <button type="submit" name="event_type" value="replacement_delivered" className="btn-secondary text-xs">Replacement Delivered</button>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#121826]">Resolution / Status</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <form action={updateCaseStatusAction} className="space-y-2">
+            <input type="hidden" name="case_id" value={id} />
+            <label htmlFor="status" className="label">Status</label>
+            <select id="status" name="status" defaultValue={caseRecord.status} className="select">
+              {CASE_STATUSES.map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+            <button type="submit" className="btn-primary w-full">Save Status</button>
+          </form>
+
+          <div className="space-y-2">
+            <label className="label">Assigned To</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.assigned?.full_name ?? "Unassigned"} />
+            <label className="label">Created By</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.creator?.full_name ?? user.fullName ?? "Unknown"} />
+          </div>
+
+          <form action={addCaseWorkflowEventAction} className="space-y-2">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="event_type" value="add_tracking_number" />
+            <label htmlFor="tracking_number" className="label">Tracking Number</label>
+            <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
+            <button type="submit" className="btn-secondary w-full">Add Tracking Number</button>
+          </form>
+        </div>
+
+        <form action={updateCaseWorkflowAction} className="mt-4 flex flex-wrap gap-2 border-t border-[#ececec] pt-4">
+          <input type="hidden" name="case_id" value={id} />
+          <button type="submit" name="workflow_action" value="mark_in_progress" className="btn-secondary">Mark In Progress</button>
+          <button type="submit" name="workflow_action" value="mark_completed" className="btn-primary">Mark Completed</button>
+          <button type="submit" name="workflow_action" value="reopen_case" className="btn-secondary">Reopen Case</button>
+        </form>
+      </section>
+
+      <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+        <h3 className="text-lg font-semibold text-[#121826]">Recent Notes</h3>
+        <div className="mt-2 space-y-2">
+          {noteRows.slice(0, 8).map((note) => (
+            <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
+              <p>{note.content}</p>
+              <p className="mt-1 text-xs text-[#6a6a6a]">
+                {new Date(note.created_at).toLocaleString()} • {note.access_users?.full_name ?? "Unknown"} • {note.note_type}
+              </p>
+            </div>
+          ))}
+          {noteRows.length === 0 ? (
+            <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No notes yet.</p>
+          ) : null}
+        </div>
       </section>
     </div>
   );

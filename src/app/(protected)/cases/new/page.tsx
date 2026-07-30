@@ -41,10 +41,23 @@ export default async function CreateCasePage({
     ? params.case_type
     : "General";
 
-  const { data: assignees } = await supabase
-    .from("access_users")
-    .select("id, full_name")
-    .order("full_name", { ascending: true });
+  let assignees: Array<{ id: string; full_name: string | null }> = [];
+  let assigneeLoadError = false;
+
+  try {
+    const { data, error: assigneeError } = await supabase
+      .from("access_users")
+      .select("id, full_name")
+      .order("full_name", { ascending: true });
+
+    if (assigneeError) {
+      assigneeLoadError = true;
+    } else {
+      assignees = data ?? [];
+    }
+  } catch {
+    assigneeLoadError = true;
+  }
 
   const invoiceLink =
     params.quickbooks_invoice_link
@@ -72,6 +85,12 @@ export default async function CreateCasePage({
       {params.prefilled === "1" ? (
         <p className="rounded-md border border-[#b20610] bg-[#fff5f5] p-3 text-sm text-[#8f030d]">
           QuickBooks match found. Customer and invoice details are locked to prevent duplicate typing.
+        </p>
+      ) : null}
+
+      {assigneeLoadError ? (
+        <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
+          Assignee list is temporarily unavailable. You can still create the case and assign it later.
         </p>
       ) : null}
 
@@ -236,7 +255,7 @@ export default async function CreateCasePage({
               <label htmlFor="assigned_employee_id" className="label">Assigned To</label>
               <select id="assigned_employee_id" name="assigned_employee_id" className="select" defaultValue="">
                 <option value="">Unassigned</option>
-                {(assignees ?? []).map((assignee) => (
+                {assignees.map((assignee) => (
                   <option key={assignee.id} value={assignee.id}>{assignee.full_name ?? "Unknown"}</option>
                 ))}
               </select>

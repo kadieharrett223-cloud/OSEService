@@ -9,8 +9,26 @@ function generateInternalAccessCode() {
   return `AUTO-${crypto.randomUUID()}`;
 }
 
+function isRedirectLikeError(error: unknown) {
+  return typeof error === "object" && error !== null && "digest" in error
+    && typeof (error as { digest?: unknown }).digest === "string"
+    && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
+}
+
+function isConnectivityError(message: string | null | undefined) {
+  const normalized = String(message ?? "").toLowerCase();
+  return normalized.includes("fetch failed") || normalized.includes("network") || normalized.includes("timeout");
+}
+
+function redirectForSupabaseError(message: string | null | undefined, fallback: string): never {
+  if (isConnectivityError(message)) {
+    redirect("/enter-code?error=Unable+to+reach+database");
+  }
+
+  redirect(`/enter-code?error=${encodeURIComponent(message ?? fallback)}`);
+}
+
 export async function enterCodeAction(formData: FormData) {
-  const supabase = getSupabaseAdmin();
   const fullName = String(formData.get("full_name") ?? "").trim();
   const accessCodeInput = String(formData.get("access_code") ?? "").trim();
   const configuredSharedCode = String(process.env.APP_SHARED_ACCESS_CODE ?? "").trim();
@@ -25,63 +43,85 @@ export async function enterCodeAction(formData: FormData) {
     redirect("/enter-code?error=Shared+access+code+is+not+configured");
   }
 
-  if (accessCode !== expectedCode) {
-    await supabase.from("access_login_events").insert({
-      success: false,
-      full_name_snapshot: fullName || "Unknown",
-    });
-    redirect("/enter-code?error=Invalid+code");
-  }
+  try {
+    const supabase = getSupabaseAdmin();
 
-  const { data: existingUser } = await supabase
-    .from("access_users")
-    .select("id, full_name, is_active")
-    .eq("full_name", fullName)
-    .maybeSingle();
-
-  if (existingUser && !existingUser.is_active) {
-    await supabase.from("access_login_events").insert({
-      success: false,
-      full_name_snapshot: existingUser.full_name,
-    });
-    redirect("/enter-code?error=User+is+disabled");
-  }
-
-  let userId = existingUser?.id;
-  let userName = existingUser?.full_name ?? fullName;
-
-  if (!userId) {
-    const { data: createdUser, error: createUserError } = await supabase
-      .from("access_users")
-      .insert({
-        full_name: fullName,
-        access_code: generateInternalAccessCode(),
-        is_active: true,
-        last_login_at: new Date().toISOString(),
-      })
-      .select("id, full_name")
-      .single();
-
-    if (createUserError || !createdUser) {
-      redirect(`/enter-code?error=${encodeURIComponent(createUserError?.message ?? "Unable to create user")}`);
+    if (accessCode !== expectedCode) {
+      await supabase.from("access_login_events").insert({
+        success: false,
+        full_name_snapshot: fullName || "Unknown",
+      });
+      redirect("/enter-code?error=Invalid+code");
     }
 
-    userId = createdUser.id;
-    userName = createdUser.full_name;
-  }
-
-  await Promise.all([
-    supabase
+    const { data: existingUser, error: existingUserError } = await supabase
       .from("access_users")
-      .update({ last_login_at: new Date().toISOString() })
-      .eq("id", userId),
-    supabase.from("access_login_events").insert({
-      access_user_id: userId,
-      full_name_snapshot: userName,
-      success: true,
-    }),
-  ]);
+      .select("id, full_name, is_active")
+      .eq("full_name", fullName)
+      .maybeSingle();
 
-  await createSession(userId, userName);
-  redirect("/dashboard");
+    if (existingUserError) {
+      redirectForSupabaseError(existingUserError.message, "Unable to load user");
+    }
+
+    if (existingUser && !existingUser.is_active) {
+      await supabase.from("access_login_events").insert({
+        success: false,
+        full_name_snapshot: existingUser.full_name,
+      });
+      redirect("/enter-code?error=User+is+disabled");
+    }
+
+    let userId = existingUser?.id;
+    let userName = existingUser?.full_name ?? fullName;
+
+    if (!userId) {
+      const { data: createdUser, error: createUserError } = await supabase
+        .from("access_users")
+        .insert({
+          full_name: fullName,
+          access_code: generateInternalAccessCode(),
+          is_active: true,
+          last_login_at: new Date().toISOString(),
+        })
+        .select("id, full_name")
+        .single();
+
+      if (createUserError || !createdUser) {
+        redirectForSupabaseError(createUserError?.message, "Unable to create user");
+      }
+
+      userId = createdUser.id;
+      userName = createdUser.full_name;
+    }
+
+    const [updateUserResult, loginEventResult] = await Promise.all([
+      supabase
+        .from("access_users")
+        .update({ last_login_at: new Date().toISOString() })
+        .eq("id", userId),
+      supabase.from("access_login_events").insert({
+        access_user_id: userId,
+        full_name_snapshot: userName,
+        success: true,
+      }),
+    ]);
+
+    if (updateUserResult.error) {
+      redirectForSupabaseError(updateUserResult.error.message, "Unable to update login timestamp");
+    }
+
+    if (loginEventResult.error) {
+      redirectForSupabaseError(loginEventResult.error.message, "Unable to log access event");
+    }
+
+    await createSession(userId, userName);
+    redirect("/dashboard");
+  } catch (error) {
+    if (isRedirectLikeError(error)) {
+      throw error;
+    }
+
+    redirect("/enter-code?error=Unable+to+reach+database");
+  }
 }

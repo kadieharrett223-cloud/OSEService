@@ -81,7 +81,7 @@ export default async function DashboardPage({
         .from("customer_service_cases")
         .select("id", { count: "exact", head: true })
         .eq("priority", "High")
-        .not("status", "eq", "Closed"),
+        .not("status", "in", '("Resolved","Completed","Closed")'),
       supabase
         .from("customer_service_cases")
         .select("id", { count: "exact", head: true })

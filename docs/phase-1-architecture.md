@@ -25,6 +25,7 @@ Phase 1 implements only internal customer service case tracking:
 - Cases list now includes explicit sort controls (updated newest/oldest, priority high-low, status A-Z)
 - Sidebar workflow menu no longer includes warranty shortcut links
 - Menu/list status color semantics: In Progress is red, while Resolved/Completed/Closed are green
+- Dashboard High Priority metric excludes Resolved/Completed/Closed cases
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status

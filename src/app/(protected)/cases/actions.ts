@@ -231,7 +231,7 @@ export async function createCaseAction(formData: FormData) {
     const assignedEmployeeId = emptyToNull(formData.get("assigned_employee_id"));
 
     const priorityInput = String(formData.get("priority") ?? "Medium");
-    const statusInput = String(formData.get("status") ?? "New");
+    const statusInput = String(formData.get("status") ?? "In Progress");
 
     const priority: CasePriority = PRIORITIES.includes(
       priorityInput as (typeof PRIORITIES)[number],
@@ -242,7 +242,7 @@ export async function createCaseAction(formData: FormData) {
       statusInput as (typeof CASE_STATUSES)[number],
     )
       ? (statusInput as CaseStatus)
-      : "New";
+      : "In Progress";
 
     const caseTypeInput = String(formData.get("case_type") ?? "General");
     const caseType: CaseType = CASE_TYPES.includes(

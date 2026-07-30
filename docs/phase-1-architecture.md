@@ -9,7 +9,7 @@ Phase 1 implements only internal customer service case tracking:
 - Customer/case creation
 - Case type routing (General, Warranty, Freight Damage)
 - Status and priority updates
-- Workflow status updates via explicit dropdown action selection (In Progress, Completed, Reopen)
+- New cases auto-start as In Progress at creation; follow-up workflow actions use explicit dropdown selection for Completed or Reopen
 - Internal/customer notes
 - Attachment upload metadata and secure storage
 - Replacement part tracking

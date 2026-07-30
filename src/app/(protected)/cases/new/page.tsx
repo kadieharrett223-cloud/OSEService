@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
+import { CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createCaseAction, quickbooksAutofillAction } from "@/app/(protected)/cases/actions";
 import { QuickbooksLookup } from "@/app/(protected)/cases/new/quickbooks-lookup";
@@ -240,16 +240,8 @@ export default async function CreateCasePage({
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <label htmlFor="status" className="label">Status</label>
-              <select id="status" name="status" className="select" defaultValue="New">
-                <option value="New">Open</option>
-                <option value="Waiting for Customer">Waiting on Customer</option>
-                <option value="Under Review">Waiting on Supplier</option>
-                <option value="Parts Ordered">Parts Ordered</option>
-                <option value="Closed">Closed</option>
-                {CASE_STATUSES.filter((status) => !["New", "Waiting for Customer", "Under Review", "Parts Ordered", "Closed"].includes(status)).map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
+              <input id="status" readOnly className="input bg-[#f8fafc]" value="In Progress (auto on create)" />
+              <input type="hidden" name="status" value="In Progress" />
             </div>
             <div>
               <label htmlFor="assigned_employee_id" className="label">Assigned To</label>

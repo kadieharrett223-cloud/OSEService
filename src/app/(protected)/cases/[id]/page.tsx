@@ -456,7 +456,6 @@ export default async function CaseDetailsPage({
             <label htmlFor="workflow_action" className="label">Workflow Update</label>
             <select id="workflow_action" name="workflow_action" className="select" defaultValue="" required>
               <option value="" disabled>Select an action</option>
-              <option value="mark_in_progress">Mark In Progress</option>
               <option value="mark_completed">Mark Completed</option>
               <option value="reopen_case">Reopen Case</option>
             </select>

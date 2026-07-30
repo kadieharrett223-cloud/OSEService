@@ -12,6 +12,7 @@ Phase 1 implements only internal customer service case tracking:
 - New cases auto-start as In Progress at creation
 - Case detail status is managed from a single Status control (Case Workflow section); issue-details edits no longer mutate status
 - Completed/Closed are treated as Resolved in operator-facing UI labels
+- Workflow event buttons append timeline entries only; they do not mutate case status
 - Internal/customer notes
 - Attachment upload metadata and secure storage
 - Replacement part tracking

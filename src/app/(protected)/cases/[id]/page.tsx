@@ -233,6 +233,7 @@ export default async function CaseDetailsPage({
   return (
     <div className="space-y-4">
       {success === "issue_saved" ? <SaveToast message="Issue details saved" /> : null}
+      {success === "status_saved" ? <SaveToast message="Status saved" /> : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-4xl leading-tight text-[#121826]">{caseRecord.case_number}</h1>

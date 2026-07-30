@@ -101,6 +101,7 @@ export async function updateCaseStatusAction(formData: FormData) {
   revalidatePath("/cases");
   revalidatePath("/cases/completed");
   revalidatePath("/dashboard");
+  redirect(`/cases/${caseId}?success=status_saved`);
 }
 
 export async function updateCaseIssueDetailsAction(formData: FormData) {
@@ -287,19 +288,18 @@ export async function addReplacementPartAction(formData: FormData) {
 
 type WorkflowEventConfig = {
   summary: string;
-  status?: CaseStatus;
 };
 
 const WORKFLOW_EVENTS: Record<string, WorkflowEventConfig> = {
   customer_contacted: { summary: "Customer contacted" },
   replacement_part_ordered: { summary: "Replacement part ordered" },
   warranty_approved: { summary: "Warranty approved" },
-  waiting_supplier: { summary: "Waiting on supplier", status: "Parts Ordered" },
-  waiting_customer: { summary: "Waiting on customer", status: "Waiting for Customer" },
+  waiting_supplier: { summary: "Waiting on supplier" },
+  waiting_customer: { summary: "Waiting on customer" },
   replacement_delivered: { summary: "Replacement delivered" },
   add_tracking_number: { summary: "Tracking number added" },
   request_supplier_approval: { summary: "Supplier approval requested" },
-  schedule_technician: { summary: "Technician scheduled", status: "Service Scheduled" },
+  schedule_technician: { summary: "Technician scheduled" },
   send_customer_email: { summary: "Customer email sent" },
   generate_warranty_claim: { summary: "Warranty claim generated" },
 };
@@ -321,17 +321,6 @@ export async function addCaseWorkflowEventAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
-
-  if (eventConfig.status) {
-    const { error: updateError } = await supabase
-      .from("customer_service_cases")
-      .update({ status: eventConfig.status as never })
-      .eq("id", caseId);
-
-    if (updateError) {
-      redirect(`/cases/${caseId}?error=${encodeURIComponent(updateError.message)}`);
-    }
-  }
 
   const details = trackingNumber ? { tracking_number: trackingNumber } : null;
   const summary = trackingNumber ? `${eventConfig.summary}: ${trackingNumber}` : eventConfig.summary;

@@ -34,6 +34,7 @@ type NoteRow = {
 type CaseRecord = {
   id: string;
   case_number: string;
+  created_at: string;
   case_type: string;
   status: string;
   priority: string;
@@ -147,12 +148,12 @@ export default async function CaseDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; success?: string }>;
+  searchParams: Promise<{ error?: string; success?: string; timeline?: string }>;
 }) {
   const user = await requireUser();
 
   const { id } = await params;
-  const { error, success } = await searchParams;
+  const { error, success, timeline } = await searchParams;
   const supabase = getSupabaseAdmin();
 
   const [{ data: caseRecordRaw }, { data: notes }, { data: activity }, { data: attachments }] =
@@ -212,6 +213,8 @@ export default async function CaseDetailsPage({
   const noteRows = (notes ?? []) as NoteRow[];
   const allActivityRows = (activity ?? []) as ActivityRow[];
   const activityRows = allActivityRows.filter((row) => row.activity_type !== "note_added");
+  const showAllTimeline = timeline === "all";
+  const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
   const latestTracking = allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.details?.tracking_number
     ?? allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.summary.split(":").slice(1).join(":").trim()
     ?? "";
@@ -411,7 +414,7 @@ export default async function CaseDetailsPage({
       </div>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-        <h2 className="text-xl font-semibold text-[#121826]">Resolution / Status</h2>
+        <h2 className="text-xl font-semibold text-[#121826]">Case Workflow</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <form action={updateCaseStatusAction} className="space-y-2">
             <input type="hidden" name="case_id" value={id} />
@@ -425,10 +428,12 @@ export default async function CaseDetailsPage({
           </form>
 
           <div className="space-y-2">
-            <label className="label">Created By</label>
-            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.creator?.full_name ?? user.fullName ?? "Unknown"} />
             <label className="label">Reported</label>
-            <input readOnly className="input bg-[#f8fafc]" value={new Date(caseRecord.issue_reported_at).toLocaleString()} />
+            <input
+              readOnly
+              className="input bg-[#f8fafc]"
+              value={new Date(caseRecord.issue_reported_at || caseRecord.created_at).toLocaleString()}
+            />
           </div>
 
           <form action={addCaseWorkflowEventAction} className="space-y-2">
@@ -445,11 +450,18 @@ export default async function CaseDetailsPage({
           </form>
         </div>
 
-        <form action={updateCaseWorkflowAction} className="mt-4 flex flex-wrap gap-2 border-t border-[#ececec] pt-4">
+        <form action={updateCaseWorkflowAction} className="mt-4 grid gap-2 border-t border-[#ececec] pt-4 sm:grid-cols-[1fr_auto]">
           <input type="hidden" name="case_id" value={id} />
-          <button type="submit" name="workflow_action" value="mark_in_progress" className="btn-secondary">Mark In Progress</button>
-          <button type="submit" name="workflow_action" value="mark_completed" className="btn-primary">Mark Completed</button>
-          <button type="submit" name="workflow_action" value="reopen_case" className="btn-secondary">Reopen Case</button>
+          <div>
+            <label htmlFor="workflow_action" className="label">Workflow Update</label>
+            <select id="workflow_action" name="workflow_action" className="select" defaultValue="" required>
+              <option value="" disabled>Select an action</option>
+              <option value="mark_in_progress">Mark In Progress</option>
+              <option value="mark_completed">Mark Completed</option>
+              <option value="reopen_case">Reopen Case</option>
+            </select>
+          </div>
+          <button type="submit" className="btn-primary self-end">Apply</button>
         </form>
       </section>
 
@@ -461,7 +473,7 @@ export default async function CaseDetailsPage({
         <p className="mt-2 text-sm text-[#5a5a5a]">Generated from real actions with timestamp and employee.</p>
 
         <div className="mt-3 space-y-2">
-          {activityRows.map((row) => (
+          {visibleTimelineRows.map((row) => (
             <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
               <div className="flex items-center justify-between gap-2">
                 <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
@@ -483,6 +495,17 @@ export default async function CaseDetailsPage({
           ))}
           {activityRows.length === 0 ? (
             <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
+          ) : null}
+
+          {activityRows.length > 5 ? (
+            <div className="pt-1 text-right">
+              <Link
+                href={showAllTimeline ? `/cases/${id}` : `/cases/${id}?timeline=all`}
+                className="inline-flex text-xs font-semibold text-[#b20610] underline"
+              >
+                {showAllTimeline ? "Show Less" : "View All"}
+              </Link>
+            </div>
           ) : null}
         </div>
 

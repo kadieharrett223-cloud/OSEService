@@ -9,16 +9,17 @@ Phase 1 implements only internal customer service case tracking:
 - Customer/case creation
 - Case type routing (General, Warranty, Freight Damage)
 - Status and priority updates
-- Workflow shortcuts for In Progress, Completed, and Reopen
+- Workflow status updates via explicit dropdown action selection (In Progress, Completed, Reopen)
 - Internal/customer notes
 - Attachment upload metadata and secure storage
 - Replacement part tracking
 - Immutable activity timeline entries
-- Workflow action buttons that append timeline events (customer contacted, waiting states, warranty/parts/tracking updates)
+- Workflow action controls that append timeline events (customer contacted, waiting states, warranty/parts/tracking updates)
 - Search and filtering for operations
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status
+- Case details timeline defaults to the 5 most recent events with a View All toggle for full history
 - QuickBooks-prefilled customer/invoice card on intake with read-only operational fields and editable customer notes only
 - Create-time attachment queue previews with filename, size, selected time, selected by, and remove control before submit
 - Create-time internal notes queue that is converted into case notes and case_activity timeline rows on save

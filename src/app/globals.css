@@ -38,16 +38,16 @@ h6 {
 .card {
   border: 1px solid #e7eaef;
   background: var(--oe-white);
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 0.8rem;
+  box-shadow: 0 6px 22px rgba(16, 24, 40, 0.04);
 }
 
 .btn-primary {
   background: var(--oe-red);
   color: var(--oe-white);
-  border-radius: 0.5rem;
+  border-radius: 0.65rem;
   font-weight: 600;
-  padding: 0.55rem 0.95rem;
+  padding: 0.5rem 0.95rem;
   border: 1px solid transparent;
 }
 
@@ -58,9 +58,9 @@ h6 {
 .btn-secondary {
   background: var(--oe-white);
   color: var(--oe-black);
-  border-radius: 0.5rem;
+  border-radius: 0.65rem;
   font-weight: 600;
-  padding: 0.55rem 0.95rem;
+  padding: 0.5rem 0.95rem;
   border: 1px solid #d8dce3;
 }
 
@@ -75,8 +75,17 @@ h6 {
   width: 100%;
   border: 1px solid #d8dce3;
   background: var(--oe-white);
-  border-radius: 0.5rem;
-  padding: 0.55rem 0.7rem;
+  border-radius: 0.65rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.9rem;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: #d50917;
+  box-shadow: 0 0 0 3px rgba(213, 9, 23, 0.1);
 }
 
 .label {

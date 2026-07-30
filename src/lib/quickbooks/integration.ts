@@ -29,14 +29,29 @@ type TokenResponse = {
 const QUICKBOOKS_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QUICKBOOKS_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
+function readEnv(name: string) {
+  const raw = String(process.env[name] ?? "").trim();
+  if (!raw) return "";
+
+  // Accept values pasted with wrapping quotes in hosting UIs.
+  if (
+    (raw.startsWith('"') && raw.endsWith('"'))
+    || (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    return raw.slice(1, -1).trim();
+  }
+
+  return raw;
+}
+
 function getQuickbooksEnvironment(): QboEnvironment {
-  return process.env.QUICKBOOKS_ENV === "production" ? "production" : "sandbox";
+  return readEnv("QUICKBOOKS_ENV") === "production" ? "production" : "sandbox";
 }
 
 function getQuickbooksCredentials() {
-  const clientId = String(process.env.QUICKBOOKS_CLIENT_ID ?? "").trim();
-  const clientSecret = String(process.env.QUICKBOOKS_CLIENT_SECRET ?? "").trim();
-  const scope = String(process.env.QUICKBOOKS_SCOPE ?? "com.intuit.quickbooks.accounting").trim();
+  const clientId = readEnv("QUICKBOOKS_CLIENT_ID");
+  const clientSecret = readEnv("QUICKBOOKS_CLIENT_SECRET");
+  const scope = readEnv("QUICKBOOKS_SCOPE") || "com.intuit.quickbooks.accounting";
 
   if (!clientId || !clientSecret) {
     return null;
@@ -51,10 +66,8 @@ function getQuickbooksCredentials() {
 }
 
 function getQuickbooksRedirectUri(origin: string) {
-  return String(
-    process.env.QUICKBOOKS_REDIRECT_URI
-      ?? `${origin}/api/integrations/quickbooks/callback`,
-  ).trim();
+  const configured = readEnv("QUICKBOOKS_REDIRECT_URI");
+  return configured || `${origin}/api/integrations/quickbooks/callback`;
 }
 
 function getQuickbooksApiBase(environment: QboEnvironment) {
@@ -64,9 +77,7 @@ function getQuickbooksApiBase(environment: QboEnvironment) {
 }
 
 function getEncryptionKey() {
-  const secret = String(
-    process.env.QUICKBOOKS_TOKEN_ENCRYPTION_KEY ?? process.env.APP_SESSION_SECRET ?? "",
-  ).trim();
+  const secret = readEnv("QUICKBOOKS_TOKEN_ENCRYPTION_KEY") || readEnv("APP_SESSION_SECRET");
 
   if (!secret) {
     throw new Error("Missing QUICKBOOKS_TOKEN_ENCRYPTION_KEY or APP_SESSION_SECRET for token encryption.");
@@ -484,13 +495,12 @@ export async function syncQuickbooksInvoices() {
 }
 
 export function describeQuickbooksConfig() {
-  const hasCredentials = Boolean(
-    String(process.env.QUICKBOOKS_CLIENT_ID ?? "").trim()
-    && String(process.env.QUICKBOOKS_CLIENT_SECRET ?? "").trim(),
-  );
+  const hasCredentials = Boolean(readEnv("QUICKBOOKS_CLIENT_ID") && readEnv("QUICKBOOKS_CLIENT_SECRET"));
+  const configuredRedirectUri = readEnv("QUICKBOOKS_REDIRECT_URI");
 
   return {
     hasCredentials,
     environment: getQuickbooksEnvironment(),
+    configuredRedirectUri,
   };
 }

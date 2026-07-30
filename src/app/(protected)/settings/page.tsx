@@ -83,6 +83,12 @@ export default async function SettingsPage({
             <p className="text-[#5a5a5a]">Mode</p>
             <p className="font-medium text-[#121826]">{quickbooksConfig.environment}</p>
           </div>
+          <div className="md:col-span-2">
+            <p className="text-[#5a5a5a]">Redirect URI In Use</p>
+            <p className="font-mono text-xs text-[#121826] break-all">
+              {quickbooksConfig.configuredRedirectUri || "(dynamic) current-origin/api/integrations/quickbooks/callback"}
+            </p>
+          </div>
           <div>
             <p className="text-[#5a5a5a]">Snapshot Count</p>
             <p className="font-medium text-[#121826]">{quickbooksSnapshotCount ?? 0}</p>
@@ -102,6 +108,10 @@ export default async function SettingsPage({
             Add QUICKBOOKS_CLIENT_ID and QUICKBOOKS_CLIENT_SECRET in environment variables to enable Connect.
           </p>
         ) : null}
+
+        <p className="mt-3 rounded-md border border-[#d9e2f7] bg-[#f7faff] p-3 text-sm text-[#1e3a8a]">
+          In Intuit Developer Keys, add the exact redirect URI shown above in Redirect URIs. It must match character-for-character.
+        </p>
 
         {quickbooksTableMissing ? (
           <p className="mt-3 rounded-md border border-[#f1d3a4] bg-[#fff8ec] p-3 text-sm text-[#915b12]">

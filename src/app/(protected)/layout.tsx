@@ -3,6 +3,8 @@ import { APP_SHORT_NAME } from "@/lib/constants";
 import { signOutAction } from "@/app/(protected)/actions";
 import { SidebarNav } from "@/app/(protected)/sidebar-nav";
 import { TopbarTools } from "@/app/(protected)/topbar-tools";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import Link from "next/link";
 
 export default async function ProtectedLayout({
   children,
@@ -11,6 +13,13 @@ export default async function ProtectedLayout({
 }) {
   const user = await requireUser();
   const userName = user.fullName ?? "Unknown User";
+  const supabase = getSupabaseAdmin();
+
+  const { count: quickbooksSnapshotCount } = await supabase
+    .from("quickbooks_invoices")
+    .select("id", { count: "exact", head: true });
+
+  const isQboConnected = (quickbooksSnapshotCount ?? 0) > 0;
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f5f7fa]">
@@ -30,6 +39,13 @@ export default async function ProtectedLayout({
           <header className="border-b border-[#e3e6ea] bg-white px-4 py-3 shadow-sm md:px-6">
             <div className="flex items-center gap-3">
               <TopbarTools />
+              <div className="hidden items-center gap-2 rounded-lg border border-[#e5e7eb] bg-white px-2.5 py-1.5 text-xs md:flex">
+                <span className={`inline-flex h-2 w-2 rounded-full ${isQboConnected ? "bg-[#16a34a]" : "bg-[#dc2626]"}`} />
+                <span className="font-medium text-[#334155]">QBO {isQboConnected ? "Connected" : "Disconnected"}</span>
+                {!isQboConnected ? (
+                  <Link href="/settings" className="font-semibold text-[#d50917] hover:underline">Connect</Link>
+                ) : null}
+              </div>
               <details className="relative">
                 <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
                   <span className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#d50917] text-sm font-semibold text-white">

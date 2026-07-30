@@ -13,6 +13,7 @@
 - Lookup includes typeahead suggestions while typing via `/api/quickbooks/suggestions`.
 - Autofill now carries fuller snapshot details (invoice date, total, payment status, billing/shipping address) into intake review fields.
 - Intake defaults to unassigned case creation and captures an explicit enter date for reporting timestamp fallback.
+- Protected app header now surfaces QuickBooks status as connected/disconnected using snapshot availability, with a Connect action when disconnected.
 - Lookup is read-only and does not call QuickBooks APIs directly yet.
 
 ## Constraints

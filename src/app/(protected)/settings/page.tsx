@@ -101,7 +101,17 @@ export default async function SettingsPage({
             <p className="text-[#5a5a5a]">Last Sync</p>
             <p className="font-medium text-[#121826]">{connectedRow?.last_sync_at ? new Date(connectedRow.last_sync_at).toLocaleString() : "Never"}</p>
           </div>
+          <div>
+            <p className="text-[#5a5a5a]">Last Sync Status</p>
+            <p className="font-medium text-[#121826]">{connectedRow?.last_sync_status ?? "Unknown"}</p>
+          </div>
         </div>
+
+        {connectedRow?.last_sync_error ? (
+          <p className="mt-3 rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d] break-words">
+            Last sync error: {connectedRow.last_sync_error}
+          </p>
+        ) : null}
 
         {!quickbooksConfig.hasCredentials ? (
           <p className="mt-3 rounded-md border border-[#f1d3a4] bg-[#fff8ec] p-3 text-sm text-[#915b12]">

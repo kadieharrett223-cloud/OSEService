@@ -26,6 +26,8 @@ type TokenResponse = {
   x_refresh_token_expires_in?: number;
 };
 
+type QuickbooksApiPayload = Record<string, unknown>;
+
 const QUICKBOOKS_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QUICKBOOKS_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
@@ -119,6 +121,24 @@ function parseTokenExpiry(seconds: number | undefined) {
   return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
+function parseQuickbooksFault(payload: QuickbooksApiPayload | null, fallback: string) {
+  if (!payload || typeof payload !== "object") {
+    return fallback;
+  }
+
+  const fault = payload.Fault as Record<string, unknown> | undefined;
+  const errors = fault?.Error as Array<Record<string, unknown>> | undefined;
+  const first = errors?.[0];
+
+  const code = typeof first?.code === "string" ? first.code : "";
+  const detail = typeof first?.Detail === "string" ? first.Detail : "";
+  const message = typeof first?.Message === "string" ? first.Message : "";
+  const fallbackMessage = typeof payload.message === "string" ? payload.message : "";
+
+  const summary = detail || message || fallbackMessage || fallback;
+  return code ? `${summary} (code ${code})` : summary;
+}
+
 async function requestTokens(params: URLSearchParams, clientId: string, clientSecret: string) {
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
 
@@ -144,6 +164,38 @@ async function requestTokens(params: URLSearchParams, clientId: string, clientSe
   }
 
   return payload as TokenResponse;
+}
+
+async function fetchQuickbooksQuery(options: {
+  apiBase: string;
+  realmId: string;
+  accessToken: string;
+  query: string;
+}) {
+  const response = await fetch(
+    `${options.apiBase}/v3/company/${encodeURIComponent(options.realmId)}/query?query=${encodeURIComponent(options.query)}&minorversion=75`,
+    {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${options.accessToken}`,
+      },
+      cache: "no-store",
+    },
+  );
+
+  let payload: QuickbooksApiPayload | null = null;
+
+  try {
+    payload = await response.json() as QuickbooksApiPayload;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(parseQuickbooksFault(payload, `QuickBooks request failed with status ${response.status}.`));
+  }
+
+  return payload ?? {};
 }
 
 async function exchangeAuthorizationCode(code: string, redirectUri: string, clientId: string, clientSecret: string) {
@@ -368,30 +420,29 @@ async function ensureAccessToken(connection: Awaited<ReturnType<typeof loadConne
 async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loadConnectionForSync>>, accessToken: string) {
   const supabase = getSupabaseAdmin();
   const apiBase = getQuickbooksApiBase(connection.environment);
-  const qboQuery = "select * from Invoice startposition 1 maxresults 200";
+  const pageSize = 200;
+  const maxPages = 50;
+  const invoices: Array<Record<string, unknown>> = [];
 
-  const response = await fetch(
-    `${apiBase}/v3/company/${encodeURIComponent(connection.realm_id)}/query?query=${encodeURIComponent(qboQuery)}&minorversion=75`,
-    {
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      },
-      cache: "no-store",
-    },
-  );
+  for (let page = 0; page < maxPages; page += 1) {
+    const startPosition = page * pageSize + 1;
+    const qboQuery = `select * from Invoice startposition ${startPosition} maxresults ${pageSize}`;
 
-  const payload = await response.json() as Record<string, unknown>;
+    const payload = await fetchQuickbooksQuery({
+      apiBase,
+      realmId: connection.realm_id,
+      accessToken,
+      query: qboQuery,
+    });
 
-  if (!response.ok) {
-    const fault = payload.Fault as Record<string, unknown> | undefined;
-    const errors = fault?.Error as Array<Record<string, unknown>> | undefined;
-    const detail = errors?.[0]?.Detail;
-    throw new Error(typeof detail === "string" ? detail : "QuickBooks sync failed.");
+    const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
+    const batch = (queryResponse?.Invoice as Array<Record<string, unknown>> | undefined) ?? [];
+    invoices.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
   }
-
-  const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
-  const invoices = (queryResponse?.Invoice as Array<Record<string, unknown>> | undefined) ?? [];
 
   const customerMap = new Map<string, { full_name: string; company_name: string | null; quickbooks_customer_id: string }>();
 
@@ -431,22 +482,28 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   const customerRows = Array.from(customerMap.values());
 
   if (customerRows.length > 0) {
-    const { error: customerError } = await supabase
-      .from("customers")
-      .upsert(customerRows, { onConflict: "quickbooks_customer_id" });
+    for (let i = 0; i < customerRows.length; i += 500) {
+      const chunk = customerRows.slice(i, i + 500);
+      const { error: customerError } = await supabase
+        .from("customers")
+        .upsert(chunk, { onConflict: "quickbooks_customer_id" });
 
-    if (customerError) {
-      throw new Error(customerError.message);
+      if (customerError) {
+        throw new Error(customerError.message);
+      }
     }
   }
 
   if (invoiceRows.length > 0) {
-    const { error: invoiceError } = await supabase
-      .from("quickbooks_invoices")
-      .upsert(invoiceRows, { onConflict: "quickbooks_invoice_id" });
+    for (let i = 0; i < invoiceRows.length; i += 500) {
+      const chunk = invoiceRows.slice(i, i + 500);
+      const { error: invoiceError } = await supabase
+        .from("quickbooks_invoices")
+        .upsert(chunk, { onConflict: "quickbooks_invoice_id" });
 
-    if (invoiceError) {
-      throw new Error(invoiceError.message);
+      if (invoiceError) {
+        throw new Error(invoiceError.message);
+      }
     }
   }
 

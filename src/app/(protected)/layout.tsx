@@ -78,7 +78,7 @@ export default async function ProtectedLayout({
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-[1520px] flex-1 gap-6 px-0 py-0 md:grid-cols-[270px_1fr] md:items-stretch">
+      <div className="mx-auto grid w-full max-w-[1520px] flex-1 gap-0 px-0 py-0 md:grid-cols-[270px_1fr] md:items-stretch">
         <aside className="h-full border-r border-[#232833] bg-gradient-to-b from-[#10141b] to-[#141c27] px-3 py-6 text-white">
           <p className="px-2 pb-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa7bc]">Workflow Menu</p>
 
@@ -113,7 +113,7 @@ export default async function ProtectedLayout({
           </div>
         </aside>
 
-        <main className="px-4 py-6 md:px-8">{children}</main>
+        <main className="px-0 py-6 md:px-6">{children}</main>
       </div>
     </div>
   );

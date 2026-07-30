@@ -35,6 +35,7 @@ type Params = {
   priority?: string;
   employee?: string;
   case_type?: string;
+  sort?: string;
 };
 
 function statusBadge(status: string) {
@@ -54,6 +55,7 @@ export default async function CasesPage({
   const supabase = getSupabaseAdmin();
 
   const query = (params.q ?? "").trim().toLowerCase();
+  const sort = params.sort ?? "updated_desc";
 
   let dbQuery = supabase
     .from("customer_service_cases")
@@ -107,6 +109,27 @@ export default async function CasesPage({
     return searchableValues.some((value) => value.includes(query));
   });
 
+  const sortedRows = [...filteredRows].sort((a, b) => {
+    if (sort === "updated_asc") {
+      return new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+    }
+
+    if (sort === "priority_desc") {
+      const rank: Record<string, number> = { High: 0, Medium: 1, Low: 2 };
+      const diff = (rank[a.priority] ?? 99) - (rank[b.priority] ?? 99);
+      if (diff !== 0) return diff;
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    }
+
+    if (sort === "status_asc") {
+      const statusDiff = a.status.localeCompare(b.status);
+      if (statusDiff !== 0) return statusDiff;
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    }
+
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  });
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -124,7 +147,7 @@ export default async function CasesPage({
         </div>
       </div>
 
-      <form className="card grid gap-3 p-3 md:grid-cols-6">
+      <form className="card grid gap-3 p-3 md:grid-cols-7">
         <div className="md:col-span-2">
           <label htmlFor="q" className="label">
             Search
@@ -188,7 +211,19 @@ export default async function CasesPage({
           </select>
         </div>
 
-        <div className="md:col-span-6 flex gap-2">
+        <div>
+          <label htmlFor="sort" className="label">
+            Sort
+          </label>
+          <select id="sort" name="sort" defaultValue={sort} className="select">
+            <option value="updated_desc">Updated (Newest)</option>
+            <option value="updated_asc">Updated (Oldest)</option>
+            <option value="priority_desc">Priority (High to Low)</option>
+            <option value="status_asc">Status (A to Z)</option>
+          </select>
+        </div>
+
+        <div className="md:col-span-7 flex gap-2">
           <button type="submit" className="btn-secondary">
             Apply Filters
           </button>
@@ -214,8 +249,8 @@ export default async function CasesPage({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.length ? (
-              filteredRows.map((row) => (
+            {sortedRows.length ? (
+              sortedRows.map((row) => (
                 <tr key={row.id} className="border-b border-[#f2f2f2] hover:bg-[#f8fafc]">
                   <td className="px-2 py-2">
                     <Link href={`/cases/${row.id}`} className="font-semibold text-[#b20610] hover:underline">

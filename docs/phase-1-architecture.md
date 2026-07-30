@@ -22,6 +22,8 @@ Phase 1 implements only internal customer service case tracking:
 - Search and filtering for operations
 - Dashboard-level recent-case filter menu supports All, In Progress, and Resolved views
 - Dashboard recent-case list shows a green Complete badge when a case status is Resolved/Completed/Closed
+- Cases list now includes explicit sort controls (updated newest/oldest, priority high-low, status A-Z)
+- Sidebar workflow menu no longer includes warranty shortcut links
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status

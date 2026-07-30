@@ -18,10 +18,6 @@ const navGroups: NavItem[][] = [
     { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
     { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },
   ],
-  [
-    { href: "/cases/new?case_type=Warranty", label: "New Warranty Case", matchPath: "/cases/new", matchQuery: "case_type=Warranty", icon: "NW" },
-    { href: "/cases?case_type=Warranty", label: "Warranty", matchPath: "/cases", matchQuery: "case_type=Warranty", icon: "WT" },
-  ],
   [{ href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" }],
 ];
 

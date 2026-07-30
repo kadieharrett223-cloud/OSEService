@@ -51,12 +51,12 @@ export default async function CreateCasePage({
       ) : null}
 
       {params.prefilled === "1" ? (
-        <p className="rounded-md border border-[#badfbe] bg-[#f4fff5] p-3 text-sm text-[#1f6f27]">
+        <p className="rounded-md border border-[#b20610] bg-[#fff5f5] p-3 text-sm text-[#8f030d]">
           QuickBooks match found. Review and adjust any fields before saving.
         </p>
       ) : null}
 
-      <section className="card space-y-3 border-l-4 border-l-[#8b6a43] bg-[#fffefb] p-4">
+      <section className="card space-y-3 border-l-4 border-l-[#b20610] bg-white p-4">
         <div>
           <h2 className="text-xl">QuickBooks Autofill</h2>
           <p className="mt-1 text-sm text-[#5a5a5a]">
@@ -72,7 +72,7 @@ export default async function CreateCasePage({
       </section>
 
       <form action={createCaseAction} className="space-y-4">
-        <section className="card grid gap-4 border-l-4 border-l-[#27445d] bg-[#fffefb] p-4 md:grid-cols-2">
+        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Customer Information</h2>
           <div>
             <label htmlFor="customer_name" className="label">Customer Name</label>
@@ -96,7 +96,7 @@ export default async function CreateCasePage({
           </div>
         </section>
 
-        <section className="card grid gap-4 border-l-4 border-l-[#4b7a4d] bg-[#fffefb] p-4 md:grid-cols-2">
+        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">QuickBooks Invoice Snapshot</h2>
           <div>
             <label htmlFor="quickbooks_customer_id" className="label">QuickBooks Customer ID</label>
@@ -132,7 +132,7 @@ export default async function CreateCasePage({
           </div>
         </section>
 
-        <section className="card grid gap-4 border-l-4 border-l-[#7b3f00] bg-[#fffefb] p-4 md:grid-cols-2">
+        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
           <h2 className="md:col-span-2 text-xl">Case Details</h2>
           <div>
             <label htmlFor="case_type" className="label">Case Type</label>

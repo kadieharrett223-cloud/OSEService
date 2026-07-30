@@ -3,13 +3,13 @@
 :root {
   --oe-red: #b20610;
   --oe-red-dark: #8f030d;
-  --oe-black: #111111;
+  --oe-black: #000000;
   --oe-white: #ffffff;
-  --oe-gray-50: #f8f8f8;
+  --oe-gray-50: #f7f7f7;
   --oe-gray-100: #efefef;
-  --oe-gray-200: #dddddd;
-  --oe-gray-600: #5a5a5a;
-  --background: var(--oe-gray-50);
+  --oe-gray-200: #d9d9d9;
+  --oe-gray-600: #4d4d4d;
+  --background: var(--oe-white);
   --foreground: var(--oe-black);
 }
 
@@ -36,7 +36,7 @@ h6 {
 }
 
 .card {
-  border: 1px solid var(--oe-gray-200);
+  border: 1px solid var(--oe-black);
   background: var(--oe-white);
   border-radius: 0.75rem;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -61,14 +61,19 @@ h6 {
   border-radius: 0.5rem;
   font-weight: 600;
   padding: 0.55rem 0.95rem;
-  border: 1px solid var(--oe-gray-200);
+  border: 1px solid var(--oe-black);
+}
+
+.btn-secondary:hover {
+  border-color: var(--oe-red);
+  color: var(--oe-red);
 }
 
 .input,
 .select,
 .textarea {
   width: 100%;
-  border: 1px solid var(--oe-gray-200);
+  border: 1px solid var(--oe-black);
   background: var(--oe-white);
   border-radius: 0.5rem;
   padding: 0.55rem 0.7rem;
@@ -86,18 +91,18 @@ h6 {
   align-items: center;
   border-radius: 9999px;
   padding: 0.2rem 0.55rem;
-  border: 1px solid var(--oe-gray-200);
+  border: 1px solid var(--oe-black);
   font-size: 0.75rem;
   font-weight: 600;
 }
 
 .badge-priority-high {
   color: var(--oe-red);
-  border-color: #f1bdc0;
-  background: #fff6f7;
+  border-color: var(--oe-red);
+  background: #fff5f5;
 }
 
 .badge-status {
-  color: #1b1b1b;
-  background: #f5f5f5;
+  color: var(--oe-black);
+  background: var(--oe-white);
 }

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { CASE_STATUSES } from "@/lib/constants";
+import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addCaseWorkflowEventAction,
   addNoteAction,
   deleteAttachmentAction,
+  updateCaseIssueDetailsAction,
   updateCaseStatusAction,
   updateCaseWorkflowAction,
   uploadAttachmentAction,
@@ -286,20 +287,42 @@ export default async function CaseDetailsPage({
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Issue Details</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="label">Issue Category</label>
-            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.case_type ?? "General"} />
+        <form action={updateCaseIssueDetailsAction} className="mt-3 space-y-3">
+          <input type="hidden" name="case_id" value={id} />
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label htmlFor="case_type" className="label">Issue Category</label>
+              <select id="case_type" name="case_type" className="select" defaultValue={caseRecord.case_type ?? "General"}>
+                {CASE_TYPES.map((caseType) => (
+                  <option key={caseType} value={caseType}>{caseType}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="priority" className="label">Priority</label>
+              <select id="priority" name="priority" className="select" defaultValue={caseRecord.priority}>
+                {PRIORITIES.map((priority) => (
+                  <option key={priority} value={priority}>{priority}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="status" className="label">Status</label>
+              <select id="status" name="status" className="select" defaultValue={caseRecord.status}>
+                {CASE_STATUSES.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div>
-            <label className="label">Priority</label>
-            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.priority} />
+            <label htmlFor="issue_description" className="label">Issue Description</label>
+            <textarea id="issue_description" name="issue_description" rows={8} className="textarea" defaultValue={caseRecord.issue_description} required />
           </div>
-        </div>
-        <div className="mt-3">
-          <label className="label">Issue Description</label>
-          <textarea readOnly rows={8} className="textarea bg-[#f8fafc]" value={caseRecord.issue_description} />
-        </div>
+          <div className="flex justify-end">
+            <button type="submit" className="btn-primary">Save Issue Details</button>
+          </div>
+        </form>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[1.65fr_1fr]">
@@ -324,8 +347,10 @@ export default async function CaseDetailsPage({
                 <div key={item.id} className="rounded-md border border-[#ececec] p-2 text-sm">
                   <div className="mb-2 flex h-28 items-center justify-center rounded-md bg-[#f5f7fb]">
                     {isImage && item.url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.url} alt={item.file_name} className="h-full w-full rounded-md object-cover" />
+                      <a href={item.url} target="_blank" rel="noreferrer" className="h-full w-full">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={item.url} alt={item.file_name} className="h-full w-full rounded-md object-cover" />
+                      </a>
                     ) : (
                       <span className="text-xs text-[#64748b]">{item.mime_type ?? "File"}</span>
                     )}
@@ -336,7 +361,7 @@ export default async function CaseDetailsPage({
                   <p className="text-xs text-[#6a6a6a]">Uploaded by: {item.uploader?.full_name ?? "Unknown"}</p>
                   <div className="mt-2 flex gap-2">
                     {item.url ? (
-                      <a className="btn-secondary text-xs" href={item.url} target="_blank" rel="noreferrer">Download</a>
+                      <a className="btn-secondary text-xs" href={item.url} target="_blank" rel="noreferrer">View</a>
                     ) : null}
                     <form action={deleteAttachmentAction}>
                       <input type="hidden" name="case_id" value={id} />

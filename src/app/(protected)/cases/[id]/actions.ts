@@ -1,9 +1,17 @@
 "use server";
 
+import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { CASE_STATUSES, type CaseStatus } from "@/lib/constants";
+import {
+  CASE_STATUSES,
+  CASE_TYPES,
+  PRIORITIES,
+  type CasePriority,
+  type CaseStatus,
+  type CaseType,
+} from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/supabase/types";
 
@@ -92,6 +100,66 @@ export async function updateCaseStatusAction(formData: FormData) {
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
   revalidatePath("/cases/completed");
+  revalidatePath("/dashboard");
+}
+
+export async function updateCaseIssueDetailsAction(formData: FormData) {
+  const user = await requireUser();
+
+  const caseId = getString(formData, "case_id");
+  const caseTypeInput = getString(formData, "case_type");
+  const priorityInput = getString(formData, "priority");
+  const statusInput = getString(formData, "status");
+  const issueDescription = getString(formData, "issue_description");
+
+  if (!caseId || !issueDescription) {
+    redirect(`/cases/${caseId || ""}?error=invalid_issue_update`);
+  }
+
+  const caseType: CaseType = CASE_TYPES.includes(caseTypeInput as (typeof CASE_TYPES)[number])
+    ? (caseTypeInput as CaseType)
+    : "General";
+  const priority: CasePriority = PRIORITIES.includes(priorityInput as (typeof PRIORITIES)[number])
+    ? (priorityInput as CasePriority)
+    : "Medium";
+  const status: CaseStatus = CASE_STATUSES.includes(statusInput as (typeof CASE_STATUSES)[number])
+    ? (statusInput as CaseStatus)
+    : "New";
+
+  const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+
+  const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
+    case_type: caseType,
+    priority,
+    status,
+    issue_description: issueDescription,
+    closed_at: status === "Closed" || status === "Completed" ? new Date().toISOString() : null,
+  };
+
+  const { error } = await supabase
+    .from("customer_service_cases")
+    .update(updates as never)
+    .eq("id", caseId);
+
+  if (error) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  await supabase.from("case_activity").insert({
+    case_id: caseId,
+    actor_id: user.id,
+    activity_type: "issue_details_updated",
+    summary: "Issue details updated",
+    details: {
+      case_number: existingCase.case_number,
+      case_type: caseType,
+      priority,
+      status,
+    },
+  });
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
   revalidatePath("/dashboard");
 }
 

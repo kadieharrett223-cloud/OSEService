@@ -30,6 +30,10 @@ function priorityBadge(priority: string) {
   return "bg-[#ecfeff] text-[#155e75]";
 }
 
+function isResolvedStatus(status: string) {
+  return status === "Resolved" || status === "Completed" || status === "Closed";
+}
+
 function formatRelative(dateIso: string) {
   const deltaMs = Date.now() - new Date(dateIso).getTime();
   const hours = Math.floor(deltaMs / (1000 * 60 * 60));
@@ -195,8 +199,12 @@ export default async function DashboardPage({
                       </span>
                     </td>
                     <td className="px-2 py-2">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${priorityBadge(row.priority)}`}>
-                        {row.priority}
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                          isResolvedStatus(row.status) ? "bg-[#ecfdf3] text-[#166534]" : priorityBadge(row.priority)
+                        }`}
+                      >
+                        {isResolvedStatus(row.status) ? "Complete" : row.priority}
                       </span>
                     </td>
                     <td className="px-2 py-2">{row.access_users?.full_name ?? "Unassigned"}</td>

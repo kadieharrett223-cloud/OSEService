@@ -2,6 +2,8 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { SaveToast } from "@/app/(protected)/cases/[id]/save-toast";
+import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import {
   addCaseWorkflowEventAction,
   addNoteAction,
@@ -16,6 +18,7 @@ type ActivityRow = {
   id: string;
   activity_type: string;
   summary: string;
+  details?: { tracking_number?: string } | null;
   created_at: string;
   access_users: { full_name: string | null } | null;
 };
@@ -135,17 +138,21 @@ function activityLabel(activityType: string) {
   return map[activityType] ?? "EVENT";
 }
 
+function buildTrackingUrl(trackingNumber: string) {
+  return `https://www.google.com/search?q=${encodeURIComponent(`${trackingNumber} package tracking`)}`;
+}
+
 export default async function CaseDetailsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
   const user = await requireUser();
 
   const { id } = await params;
-  const { error } = await searchParams;
+  const { error, success } = await searchParams;
   const supabase = getSupabaseAdmin();
 
   const [{ data: caseRecordRaw }, { data: notes }, { data: activity }, { data: attachments }] =
@@ -170,7 +177,7 @@ export default async function CaseDetailsPage({
         .order("created_at", { ascending: false }),
       supabase
         .from("case_activity")
-        .select("id, activity_type, summary, created_at, access_users:actor_id(full_name)")
+        .select("id, activity_type, summary, details, created_at, access_users:actor_id(full_name)")
         .eq("case_id", id)
         .order("created_at", { ascending: false }),
       supabase
@@ -203,7 +210,12 @@ export default async function CaseDetailsPage({
 
   const productsPurchased = parseProductsPurchased(caseRecord.invoice?.raw_payload);
   const noteRows = (notes ?? []) as NoteRow[];
-  const activityRows = (activity ?? []) as ActivityRow[];
+  const allActivityRows = (activity ?? []) as ActivityRow[];
+  const activityRows = allActivityRows.filter((row) => row.activity_type !== "note_added");
+  const latestTracking = allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.details?.tracking_number
+    ?? allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.summary.split(":").slice(1).join(":").trim()
+    ?? "";
+  const latestTrackingUrl = latestTracking ? buildTrackingUrl(latestTracking) : "";
   const invoiceLink = caseRecord.quickbooks_invoice_link
     || (caseRecord.invoice?.quickbooks_invoice_id
       ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
@@ -211,6 +223,7 @@ export default async function CaseDetailsPage({
 
   return (
     <div className="space-y-4">
+      {success === "issue_saved" ? <SaveToast message="Issue details saved" /> : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-4xl leading-tight text-[#121826]">{caseRecord.case_number}</h1>
@@ -332,10 +345,7 @@ export default async function CaseDetailsPage({
 
           <form action={uploadAttachmentAction} className="mt-3 space-y-3">
             <input type="hidden" name="case_id" value={id} />
-            <label htmlFor="attachments" className="flex min-h-[120px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-[#c9d1dd] bg-[#f8fafc] px-4 py-6 text-center text-sm text-[#475569]">
-              Drag files here or click to upload
-            </label>
-            <input id="attachments" type="file" name="attachments" className="sr-only" accept=".jpg,.jpeg,.png,.heic,.pdf,.mp4" multiple required />
+            <AttachmentDropzone uploadedBy={user.fullName ?? "Unknown"} />
             <button type="submit" className="btn-primary">Upload Files</button>
           </form>
 
@@ -377,7 +387,7 @@ export default async function CaseDetailsPage({
 
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-[#121826]">Timeline / Notes</h2>
+            <h2 className="text-xl font-semibold text-[#121826]">Timeline</h2>
             <span className="badge badge-status">Auto</span>
           </div>
           <p className="mt-2 text-sm text-[#5a5a5a]">Generated from real actions with timestamp and employee.</p>
@@ -391,20 +401,22 @@ export default async function CaseDetailsPage({
                 </div>
                 <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
                 <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
+                {row.activity_type === "add_tracking_number" && (row.details?.tracking_number || row.summary.includes(":")) ? (
+                  <a
+                    href={buildTrackingUrl(row.details?.tracking_number ?? row.summary.split(":").slice(1).join(":").trim())}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline"
+                  >
+                    Track package
+                  </a>
+                ) : null}
               </div>
             ))}
             {activityRows.length === 0 ? (
               <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
             ) : null}
           </div>
-
-          <form action={addNoteAction} className="mt-4 space-y-2 border-t border-[#ececec] pt-4">
-            <input type="hidden" name="case_id" value={id} />
-            <input type="hidden" name="note_type" value="internal" />
-            <label htmlFor="content" className="label">Add Internal Note</label>
-            <textarea id="content" name="content" rows={3} required className="textarea" placeholder="Add internal timeline note" />
-            <button type="submit" className="btn-primary w-full">Add Note</button>
-          </form>
 
           <div className="mt-4 rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-xs text-[#6a7281]">
             <p className="font-semibold uppercase tracking-[0.08em]">Workflow Actions</p>
@@ -436,10 +448,10 @@ export default async function CaseDetailsPage({
           </form>
 
           <div className="space-y-2">
-            <label className="label">Assigned To</label>
-            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.assigned?.full_name ?? "Unassigned"} />
             <label className="label">Created By</label>
             <input readOnly className="input bg-[#f8fafc]" value={caseRecord.creator?.full_name ?? user.fullName ?? "Unknown"} />
+            <label className="label">Reported</label>
+            <input readOnly className="input bg-[#f8fafc]" value={new Date(caseRecord.issue_reported_at).toLocaleString()} />
           </div>
 
           <form action={addCaseWorkflowEventAction} className="space-y-2">
@@ -448,6 +460,11 @@ export default async function CaseDetailsPage({
             <label htmlFor="tracking_number" className="label">Tracking Number</label>
             <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
             <button type="submit" className="btn-secondary w-full">Add Tracking Number</button>
+            {latestTrackingUrl ? (
+              <a href={latestTrackingUrl} target="_blank" rel="noreferrer" className="inline-flex text-xs font-semibold text-[#b20610] underline">
+                Track latest package ({latestTracking})
+              </a>
+            ) : null}
           </form>
         </div>
 
@@ -460,9 +477,16 @@ export default async function CaseDetailsPage({
       </section>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-        <h3 className="text-lg font-semibold text-[#121826]">Recent Notes</h3>
+        <h3 className="text-lg font-semibold text-[#121826]">Internal Notes</h3>
+        <form action={addNoteAction} className="mt-3 space-y-2">
+          <input type="hidden" name="case_id" value={id} />
+          <input type="hidden" name="note_type" value="internal" />
+          <label htmlFor="content" className="label">Add Internal Note</label>
+          <textarea id="content" name="content" rows={3} required className="textarea" placeholder="Add internal note" />
+          <button type="submit" className="btn-primary">Add Note</button>
+        </form>
         <div className="mt-2 space-y-2">
-          {noteRows.slice(0, 8).map((note) => (
+          {noteRows.filter((note) => note.note_type === "internal").slice(0, 8).map((note) => (
             <div key={note.id} className="rounded-md border border-[#ececec] p-2 text-sm">
               <p>{note.content}</p>
               <p className="mt-1 text-xs text-[#6a6a6a]">
@@ -470,7 +494,7 @@ export default async function CaseDetailsPage({
               </p>
             </div>
           ))}
-          {noteRows.length === 0 ? (
+          {noteRows.filter((note) => note.note_type === "internal").length === 0 ? (
             <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No notes yet.</p>
           ) : null}
         </div>

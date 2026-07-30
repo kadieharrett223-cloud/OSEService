@@ -161,6 +161,7 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/cases");
   revalidatePath("/dashboard");
+  redirect(`/cases/${caseId}?success=issue_saved`);
 }
 
 export async function updateCaseWorkflowAction(formData: FormData) {
@@ -238,7 +239,7 @@ export async function addNoteAction(formData: FormData) {
     case_id: caseId,
     actor_id: user.id,
     activity_type: "note_added",
-    summary: `${noteType === "customer" ? "Customer-facing" : "Internal"} note added`,
+    summary: content.length > 160 ? `${content.slice(0, 157)}...` : content,
   });
 
   revalidatePath(`/cases/${caseId}`);

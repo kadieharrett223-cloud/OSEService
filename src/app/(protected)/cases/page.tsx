@@ -248,6 +248,7 @@ export default async function CasesPage({
               <th className="px-2 py-2">Priority</th>
               <th className="px-2 py-2">Assigned</th>
               <th className="px-2 py-2">Updated</th>
+              <th className="px-2 py-2 text-right">Open</th>
             </tr>
           </thead>
           <tbody>
@@ -276,11 +277,16 @@ export default async function CasesPage({
                   </td>
                   <td className="px-2 py-2">{row.assigned?.full_name ?? "Unassigned"}</td>
                   <td className="px-2 py-2">{new Date(row.updated_at).toLocaleString()}</td>
+                  <td className="px-2 py-2 text-right">
+                    <Link href={`/cases/${row.id}`} className="btn-secondary text-xs">
+                      Open
+                    </Link>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={9} className="px-2 py-10 text-center">
+                <td colSpan={10} className="px-2 py-10 text-center">
                   <p className="text-3xl">📂</p>
                   <p className="mt-2 text-sm font-medium text-[#111827]">No active service cases.</p>
                   <p className="text-sm text-[#6b7280]">Try clearing filters or create your first case.</p>

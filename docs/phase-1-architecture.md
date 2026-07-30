@@ -23,6 +23,7 @@ Phase 1 implements only internal customer service case tracking:
 - Dashboard-level recent-case filter menu supports All, In Progress, and Resolved views
 - Dashboard recent-case list shows a green Complete badge when a case status is Resolved/Completed/Closed
 - Cases list now includes explicit sort controls (updated newest/oldest, priority high-low, status A-Z)
+- Cases list includes a dedicated right-side Open action button per row for direct case access
 - Sidebar workflow menu no longer includes warranty shortcut links
 - Menu/list status color semantics: In Progress is red, while Resolved/Completed/Closed are green
 - Dashboard High Priority metric excludes Resolved/Completed/Closed cases

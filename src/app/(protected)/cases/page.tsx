@@ -37,6 +37,13 @@ type Params = {
   case_type?: string;
 };
 
+function statusBadge(status: string) {
+  if (status === "New" || status === "In Progress") return "bg-[#ecfdf3] text-[#166534]";
+  if (status === "Waiting for Customer") return "bg-[#fff7ed] text-[#c2410c]";
+  if (status.includes("Parts")) return "bg-[#eff6ff] text-[#1d4ed8]";
+  return "bg-[#f3f4f6] text-[#374151]";
+}
+
 export default async function CasesPage({
   searchParams,
 }: {
@@ -117,7 +124,7 @@ export default async function CasesPage({
         </div>
       </div>
 
-      <form className="card grid gap-3 p-4 md:grid-cols-6">
+      <form className="card grid gap-3 p-3 md:grid-cols-6">
         <div className="md:col-span-2">
           <label htmlFor="q" className="label">
             Search
@@ -182,10 +189,10 @@ export default async function CasesPage({
         </div>
 
         <div className="md:col-span-6 flex gap-2">
-          <button type="submit" className="btn-primary">
+          <button type="submit" className="btn-secondary">
             Apply Filters
           </button>
-          <Link href="/cases" className="btn-secondary">
+          <Link href="/cases" className="btn-ghost">
             Clear
           </Link>
         </div>
@@ -207,28 +214,42 @@ export default async function CasesPage({
             </tr>
           </thead>
           <tbody>
-            {filteredRows.map((row) => (
-              <tr key={row.id} className="border-b border-[#f2f2f2]">
-                <td className="px-2 py-2">
-                  <Link href={`/cases/${row.id}`} className="font-semibold text-[#b20610] hover:underline">
-                    {row.case_number}
-                  </Link>
+            {filteredRows.length ? (
+              filteredRows.map((row) => (
+                <tr key={row.id} className="border-b border-[#f2f2f2] hover:bg-[#f8fafc]">
+                  <td className="px-2 py-2">
+                    <Link href={`/cases/${row.id}`} className="font-semibold text-[#b20610] hover:underline">
+                      {row.case_number}
+                    </Link>
+                  </td>
+                  <td className="px-2 py-2">{row.case_type ?? "General"}</td>
+                  <td className="px-2 py-2">
+                    {row.customers?.full_name}
+                    <div className="text-xs text-[#6e6e6e]">{row.customers?.company_name ?? ""}</div>
+                  </td>
+                  <td className="px-2 py-2">{row.quickbooks_invoice_number ?? "-"}</td>
+                  <td className="px-2 py-2">{row.product_model ?? "-"}</td>
+                  <td className="px-2 py-2">
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(row.status)}`}>
+                      {row.status}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2">
+                    <span className={`badge ${row.priority === "High" ? "badge-priority-high" : "badge-status"}`}>{row.priority}</span>
+                  </td>
+                  <td className="px-2 py-2">{row.assigned?.full_name ?? "Unassigned"}</td>
+                  <td className="px-2 py-2">{new Date(row.updated_at).toLocaleString()}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={9} className="px-2 py-10 text-center">
+                  <p className="text-3xl">📂</p>
+                  <p className="mt-2 text-sm font-medium text-[#111827]">No active service cases.</p>
+                  <p className="text-sm text-[#6b7280]">Try clearing filters or create your first case.</p>
                 </td>
-                <td className="px-2 py-2">{row.case_type ?? "General"}</td>
-                <td className="px-2 py-2">
-                  {row.customers?.full_name}
-                  <div className="text-xs text-[#6e6e6e]">{row.customers?.company_name ?? ""}</div>
-                </td>
-                <td className="px-2 py-2">{row.quickbooks_invoice_number ?? "-"}</td>
-                <td className="px-2 py-2">{row.product_model ?? "-"}</td>
-                <td className="px-2 py-2">{row.status}</td>
-                <td className="px-2 py-2">
-                  <span className={`badge ${row.priority === "High" ? "badge-priority-high" : "badge-status"}`}>{row.priority}</span>
-                </td>
-                <td className="px-2 py-2">{row.assigned?.full_name ?? "Unassigned"}</td>
-                <td className="px-2 py-2">{new Date(row.updated_at).toLocaleString()}</td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </section>

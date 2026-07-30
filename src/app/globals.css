@@ -3,13 +3,13 @@
 :root {
   --oe-red: #b20610;
   --oe-red-dark: #8f030d;
-  --oe-black: #000000;
+  --oe-black: #161b22;
   --oe-white: #ffffff;
-  --oe-gray-50: #f7f7f7;
+  --oe-gray-50: #f5f7fa;
   --oe-gray-100: #efefef;
-  --oe-gray-200: #d9d9d9;
+  --oe-gray-200: #e5e7eb;
   --oe-gray-600: #4d4d4d;
-  --background: var(--oe-white);
+  --background: var(--oe-gray-50);
   --foreground: var(--oe-black);
 }
 
@@ -36,10 +36,11 @@ h6 {
 }
 
 .card {
-  border: 1px solid #e7eaef;
+  border: 1px solid var(--oe-gray-200);
   background: var(--oe-white);
-  border-radius: 0.8rem;
-  box-shadow: 0 6px 22px rgba(16, 24, 40, 0.04);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 16px rgba(16, 24, 40, 0.04);
+  transition: box-shadow 150ms ease, transform 150ms ease;
 }
 
 .btn-primary {
@@ -47,12 +48,14 @@ h6 {
   color: var(--oe-white);
   border-radius: 0.65rem;
   font-weight: 600;
-  padding: 0.5rem 0.95rem;
+  padding: 0.45rem 0.85rem;
   border: 1px solid transparent;
+  transition: background 120ms ease, box-shadow 120ms ease;
 }
 
 .btn-primary:hover {
   background: var(--oe-red-dark);
+  box-shadow: 0 8px 18px rgba(143, 3, 13, 0.24);
 }
 
 .btn-secondary {
@@ -60,13 +63,40 @@ h6 {
   color: var(--oe-black);
   border-radius: 0.65rem;
   font-weight: 600;
-  padding: 0.5rem 0.95rem;
-  border: 1px solid #d8dce3;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--oe-gray-200);
+  transition: border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .btn-secondary:hover {
-  border-color: var(--oe-red);
-  color: var(--oe-red);
+  border-color: #cfd5df;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+
+.btn-ghost {
+  border-radius: 0.65rem;
+  padding: 0.45rem 0.85rem;
+  color: #5d687a;
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.btn-ghost:hover {
+  background: #eef2f7;
+  color: #202939;
+}
+
+.btn-danger {
+  background: #fff5f5;
+  color: #c1121f;
+  border: 1px solid #fecdd3;
+  border-radius: 0.65rem;
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+}
+
+.btn-danger:hover {
+  background: #ffe8ea;
 }
 
 .input,
@@ -76,8 +106,8 @@ h6 {
   border: 1px solid #d8dce3;
   background: var(--oe-white);
   border-radius: 0.65rem;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.9rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.86rem;
 }
 
 .input:focus,

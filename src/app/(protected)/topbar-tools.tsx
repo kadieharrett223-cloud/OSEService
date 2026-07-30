@@ -25,25 +25,29 @@ export function TopbarTools() {
 
       <div className="ml-auto hidden items-center gap-2 lg:flex">
         <label className="relative block">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#8f98a8]">/</span>
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-[#9aa3b2]">⌘</span>
           <input
-            className="h-9 w-64 rounded-lg border border-[#dbe1ea] bg-white pl-7 pr-3 text-sm outline-none focus:border-[#d50917]"
-            placeholder="Search cases, customers"
+            className="h-9 w-72 rounded-xl border border-[#dbe1ea] bg-white pl-7 pr-3 text-[13px] shadow-sm outline-none focus:border-[#d50917]"
+            placeholder="Search customers, invoices, cases..."
             type="search"
           />
         </label>
 
+        <Link
+          href="/cases/new"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#dbe1ea] bg-white text-[#4f5d75] hover:border-[#d50917] hover:text-[#d50917]"
+          aria-label="Quick create case"
+        >
+          +
+        </Link>
+
         <button
           type="button"
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[#dbe1ea] bg-white text-[#5f6b7e] hover:border-[#d50917] hover:text-[#d50917]"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[#dbe1ea] bg-white text-[#5f6b7e] hover:border-[#d50917] hover:text-[#d50917]"
           aria-label="Notifications"
         >
-          •
+          ◦
         </button>
-
-        <Link href="/cases/new" className="btn-primary h-9 px-3 py-0 text-sm leading-9">
-          + Quick Create
-        </Link>
       </div>
     </div>
   );

@@ -13,7 +13,7 @@ export default async function ProtectedLayout({
   const userName = user.fullName ?? "Unknown User";
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f3f5f8]">
+    <div className="flex min-h-screen flex-col bg-[#f5f7fa]">
       <div className="h-1 w-full bg-[#d50917]" />
 
       <div className="mx-auto grid w-full max-w-[1600px] flex-1 md:grid-cols-[246px_1fr]">
@@ -30,19 +30,24 @@ export default async function ProtectedLayout({
           <header className="border-b border-[#e3e6ea] bg-white px-4 py-3 shadow-sm md:px-6">
             <div className="flex items-center gap-3">
               <TopbarTools />
-              <div className="h-8 w-px bg-[#e1e5ec]" />
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#d50917] text-sm font-semibold text-white">
-                {userName.slice(0, 1).toUpperCase()}
-              </span>
-              <form action={signOutAction}>
-                <button type="submit" className="btn-secondary h-9 px-3 py-0 text-sm leading-9">
-                  Sign Out
-                </button>
-              </form>
+              <details className="relative">
+                <summary className="list-none cursor-pointer [&::-webkit-details-marker]:hidden">
+                  <span className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#d50917] text-sm font-semibold text-white">
+                    {userName.slice(0, 1).toUpperCase()}
+                  </span>
+                </summary>
+                <div className="absolute right-0 z-20 mt-2 w-44 rounded-xl border border-[#e5e7eb] bg-white p-2 shadow-lg">
+                  <p className="px-2 py-1 text-xs text-[#6b7280]">Signed in as</p>
+                  <p className="px-2 pb-2 text-sm font-semibold text-[#1f2937]">{userName}</p>
+                  <form action={signOutAction}>
+                    <button type="submit" className="btn-danger w-full text-left">Sign Out</button>
+                  </form>
+                </div>
+              </details>
             </div>
           </header>
 
-          <main className="px-4 py-4 md:px-6 md:py-5">{children}</main>
+          <main className="px-4 py-3 md:px-6 md:py-4">{children}</main>
         </div>
       </div>
     </div>

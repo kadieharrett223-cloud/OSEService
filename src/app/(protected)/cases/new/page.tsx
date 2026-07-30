@@ -107,7 +107,7 @@ export default async function CreateCasePage({
           <form action={quickbooksAutofillAction} className="mt-3 space-y-2">
             <QuickbooksLookup />
             <div className="flex justify-end">
-              <button type="submit" className="btn-primary">Find and Prefill</button>
+              <button type="submit" className="btn-secondary">Find and Prefill</button>
             </div>
           </form>
 

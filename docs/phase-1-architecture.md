@@ -27,6 +27,7 @@ Phase 1 implements only internal customer service case tracking:
 - Menu/list status color semantics: In Progress is red, while Resolved/Completed/Closed are green
 - Dashboard High Priority metric excludes Resolved/Completed/Closed cases
 - Protected app shell now uses full-width layout so the left sidebar is flush to the viewport edge on wide displays
+- Sidebar navigation text size increased for better readability in operations workflows
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status

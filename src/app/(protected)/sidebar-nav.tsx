@@ -50,7 +50,7 @@ export function SidebarNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium leading-5 transition ${
+                className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] font-medium leading-6 transition ${
                   active
                     ? "bg-[#1a2230] text-white"
                     : "text-[#d9e1ef] hover:bg-[#1f2633] hover:text-white"

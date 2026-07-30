@@ -28,7 +28,7 @@ type TokenResponse = {
 
 type QuickbooksApiPayload = Record<string, unknown>;
 
-const QUICKBOOKS_AUTH_URL = "https://oauth.platform.intuit.com/oauth2/v1/authorize";
+const QUICKBOOKS_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QUICKBOOKS_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
 function readEnv(name: string) {

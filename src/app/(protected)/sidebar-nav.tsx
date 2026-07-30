@@ -56,14 +56,14 @@ export function SidebarNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`group relative flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12px] font-medium leading-5 transition ${
+                className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium leading-5 transition ${
                   active
                     ? "bg-[#1a2230] text-white"
                     : "text-[#d9e1ef] hover:bg-[#1f2633] hover:text-white"
                 }`}
               >
                 {active ? <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r bg-[#d50917]" /> : null}
-                <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[8px] font-semibold tracking-[0.03em] ${
+                <span className={`inline-flex h-5 w-5 items-center justify-center rounded-sm border text-[8px] font-semibold tracking-[0.03em] ${
                   active ? "border-[#7a8aa6]" : "border-[#48536a]"
                 }`}>
                   {item.icon}

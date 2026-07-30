@@ -16,7 +16,7 @@ export default async function ProtectedLayout({
     <div className="flex min-h-screen flex-col bg-[#f5f7fa]">
       <div className="h-1 w-full bg-[#d50917]" />
 
-      <div className="mx-auto grid w-full max-w-[1600px] flex-1 md:grid-cols-[246px_1fr]">
+      <div className="mx-auto grid w-full max-w-[1600px] flex-1 md:grid-cols-[264px_1fr]">
         <aside className="border-r border-[#232833] bg-gradient-to-b from-[#10141b] to-[#141c27] px-3 py-4 text-white">
           <div className="mb-4 px-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9aa7bc]">Olympic Equipment</p>

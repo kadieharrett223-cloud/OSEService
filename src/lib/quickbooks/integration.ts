@@ -54,7 +54,16 @@ function getQuickbooksCredentials() {
   const clientId = readEnv("QUICKBOOKS_CLIENT_ID");
   const clientSecret = readEnv("QUICKBOOKS_CLIENT_SECRET");
   const configuredScope = readEnv("QUICKBOOKS_SCOPE");
-  const scope = configuredScope || "com.intuit.quickbooks.accounting offline_access";
+
+  // Accept either comma-delimited or space-delimited scope configuration.
+  const normalizedScope = configuredScope
+    .split(/[\s,]+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .join(" ");
+
+  // Keep default scope conservative for production compatibility.
+  const scope = normalizedScope || "com.intuit.quickbooks.accounting";
 
   if (!clientId || !clientSecret) {
     return null;

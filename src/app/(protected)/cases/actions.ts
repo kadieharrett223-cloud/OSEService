@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -23,11 +24,16 @@ type AutofillPayload = {
   quickbooks_customer_id?: string;
   quickbooks_invoice_id?: string;
   quickbooks_invoice_number?: string;
+  quickbooks_invoice_external_id?: string;
+  quickbooks_invoice_link?: string;
   invoice_date?: string;
   invoice_total?: string;
   payment_status?: string;
   date_of_purchase?: string;
+  products_purchased?: string;
 };
+
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "heic", "pdf", "mp4"]);
 
 function emptyToNull(value: FormDataEntryValue | null) {
   const raw = String(value ?? "").trim();
@@ -36,6 +42,57 @@ function emptyToNull(value: FormDataEntryValue | null) {
 
 function normalizeLookupQuery(value: string) {
   return value.replace(/[%_,()]/g, "").trim();
+}
+
+function getFileExtension(fileName: string) {
+  if (!fileName.includes(".")) return "";
+  return fileName.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function isAllowedAttachment(file: File) {
+  const extension = getFileExtension(file.name);
+  return ALLOWED_ATTACHMENT_EXTENSIONS.has(extension);
+}
+
+function getInvoiceLink(quickbooksInvoiceExternalId: string | null | undefined) {
+  if (!quickbooksInvoiceExternalId) return "";
+  return `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(quickbooksInvoiceExternalId)}`;
+}
+
+function parseProductsPurchased(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return "";
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  const productLines = lines
+    .map((line, index) => {
+      if (!line || typeof line !== "object") return null;
+
+      const entry = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } };
+      };
+
+      const explicitDescription = typeof entry.Description === "string" ? entry.Description.trim() : "";
+      const itemRefName = typeof entry.SalesItemLineDetail?.ItemRef?.name === "string"
+        ? entry.SalesItemLineDetail.ItemRef.name.trim()
+        : "";
+
+      const description = explicitDescription || itemRefName;
+      if (!description) return null;
+
+      const qtyRaw = entry.SalesItemLineDetail?.Qty ?? entry.Qty;
+      const qty = typeof qtyRaw === "number" || typeof qtyRaw === "string"
+        ? String(qtyRaw).trim()
+        : "";
+
+      return `${index + 1}. ${description}${qty ? ` (Qty ${qty})` : ""}`;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  return productLines.join("\n");
 }
 
 function buildAutofillUrl(payload: AutofillPayload) {
@@ -62,7 +119,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
 
   const invoiceByNumberPromise = supabase
     .from("quickbooks_invoices")
-    .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address")
+    .select("id, quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address, raw_payload")
     .or(`invoice_number.ilike.%${query}%,quickbooks_invoice_id.ilike.%${query}%`)
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -86,7 +143,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
   const latestInvoiceByCustomer = qbCustomerId
     ? await supabase
         .from("quickbooks_invoices")
-        .select("quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address")
+        .select("id, quickbooks_invoice_id, invoice_number, quickbooks_customer_id, invoice_date, invoice_total, payment_status, billing_address, shipping_address, raw_payload")
         .eq("quickbooks_customer_id", qbCustomerId)
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -119,12 +176,15 @@ export async function quickbooksAutofillAction(formData: FormData) {
       shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? "",
       billing_address: invoice?.billing_address ?? "",
       quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
-      quickbooks_invoice_id: invoice?.quickbooks_invoice_id ?? "",
+      quickbooks_invoice_id: invoice?.id ?? "",
       quickbooks_invoice_number: invoice?.invoice_number ?? "",
+      quickbooks_invoice_external_id: invoice?.quickbooks_invoice_id ?? "",
+      quickbooks_invoice_link: getInvoiceLink(invoice?.quickbooks_invoice_id),
       invoice_date: invoice?.invoice_date ?? "",
       invoice_total: invoice?.invoice_total != null ? String(invoice.invoice_total) : "",
       payment_status: invoice?.payment_status ?? "",
       date_of_purchase: invoice?.invoice_date ?? "",
+      products_purchased: parseProductsPurchased(invoice?.raw_payload),
     }),
   );
 }
@@ -149,6 +209,18 @@ export async function createCaseAction(formData: FormData) {
     redirect("/cases/new?error=Issue+description+is+required");
   }
 
+  const customerNote = emptyToNull(formData.get("customer_note"));
+  const internalNotes = emptyToNull(formData.get("internal_notes"));
+  const draftInternalNotes = formData
+    .getAll("draft_internal_notes")
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+
+  const nextStep = emptyToNull(formData.get("next_step"));
+  const etaDate = emptyToNull(formData.get("eta_date"));
+  const trackingNumber = emptyToNull(formData.get("tracking_number"));
+  const assignedEmployeeId = emptyToNull(formData.get("assigned_employee_id"));
+
   const priorityInput = String(formData.get("priority") ?? "Medium");
   const statusInput = String(formData.get("status") ?? "New");
 
@@ -169,6 +241,16 @@ export async function createCaseAction(formData: FormData) {
   )
     ? (caseTypeInput as CaseType)
     : "General";
+
+  const uploadedFiles = formData
+    .getAll("attachments")
+    .filter((item): item is File => item instanceof File && item.size > 0);
+
+  for (const file of uploadedFiles) {
+    if (!isAllowedAttachment(file)) {
+      redirect("/cases/new?error=Unsupported+file+type.+Use+JPG,+PNG,+HEIC,+PDF,+or+MP4");
+    }
+  }
 
   const quickbooksInvoiceId = emptyToNull(formData.get("quickbooks_invoice_id"));
   const quickbooksInvoiceNumber = emptyToNull(formData.get("quickbooks_invoice_number"));
@@ -235,15 +317,20 @@ export async function createCaseAction(formData: FormData) {
       quickbooks_invoice_id: quickbooksInvoiceId,
       quickbooks_invoice_number: quickbooksInvoiceNumber,
       quickbooks_invoice_link: emptyToNull(formData.get("quickbooks_invoice_link")),
-      product_model: emptyToNull(formData.get("product_model")),
-      serial_number: emptyToNull(formData.get("serial_number")),
+      product_model: null,
+      serial_number: null,
       date_of_purchase: dateOfPurchase,
       issue_reported_at: new Date().toISOString(),
       issue_description: issueDescription,
-      assigned_employee_id: emptyToNull(formData.get("assigned_employee_id")),
+      assigned_employee_id: assignedEmployeeId,
       priority,
       status,
-      internal_notes: emptyToNull(formData.get("internal_notes")),
+      internal_notes: [
+        internalNotes,
+        nextStep ? `Next step: ${nextStep}` : null,
+        etaDate ? `ETA: ${etaDate}` : null,
+        trackingNumber ? `Tracking number: ${trackingNumber}` : null,
+      ].filter(Boolean).join("\n") || null,
       customer_facing_notes: emptyToNull(formData.get("customer_facing_notes")),
       created_by: user.id,
     })
@@ -259,8 +346,101 @@ export async function createCaseAction(formData: FormData) {
     actor_id: user.id,
     activity_type: "case_created",
     summary: `Case created by ${user.fullName ?? "Unknown"}`,
-    details: { status, priority },
+    details: {
+      status,
+      priority,
+      assigned_employee_id: assignedEmployeeId,
+      next_step: nextStep,
+      eta_date: etaDate,
+    },
   });
+
+  if (customerNote) {
+    await supabase.from("case_notes").insert({
+      case_id: createdCase.id,
+      note_type: "customer",
+      content: customerNote,
+      created_by: user.id,
+    });
+
+    await supabase.from("case_activity").insert({
+      case_id: createdCase.id,
+      actor_id: user.id,
+      activity_type: "note_added",
+      summary: "Customer note added",
+    });
+  }
+
+  const allInternalNotes = [
+    ...(internalNotes ? [internalNotes] : []),
+    ...draftInternalNotes,
+  ];
+
+  for (const note of allInternalNotes) {
+    await supabase.from("case_notes").insert({
+      case_id: createdCase.id,
+      note_type: "internal",
+      content: note,
+      created_by: user.id,
+    });
+
+    await supabase.from("case_activity").insert({
+      case_id: createdCase.id,
+      actor_id: user.id,
+      activity_type: "note_added",
+      summary: "Internal note added",
+    });
+  }
+
+  if (trackingNumber) {
+    await supabase.from("case_activity").insert({
+      case_id: createdCase.id,
+      actor_id: user.id,
+      activity_type: "add_tracking_number",
+      summary: `Tracking number added: ${trackingNumber}`,
+      details: { tracking_number: trackingNumber },
+    });
+  }
+
+  if (uploadedFiles.length > 0) {
+    for (const file of uploadedFiles) {
+      const fileExtension = getFileExtension(file.name) || "bin";
+      const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
+      const storagePath = `${createdCase.id}/${safeFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("case-attachments")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (uploadError) {
+        redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(uploadError.message)}`);
+      }
+
+      const { error: attachmentError } = await supabase.from("case_attachments").insert({
+        case_id: createdCase.id,
+        file_path: storagePath,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || null,
+        uploaded_by: user.id,
+      });
+
+      if (attachmentError) {
+        redirect(`/cases/${createdCase.id}?error=${encodeURIComponent(attachmentError.message)}`);
+      }
+    }
+
+    await supabase.from("case_activity").insert({
+      case_id: createdCase.id,
+      actor_id: user.id,
+      activity_type: "file_uploaded",
+      summary: uploadedFiles.length === 1 ? `Attachment uploaded: ${uploadedFiles[0].name}` : `${uploadedFiles.length} attachments uploaded`,
+    });
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/cases");

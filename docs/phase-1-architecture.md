@@ -18,6 +18,10 @@ Phase 1 implements only internal customer service case tracking:
 - Search and filtering for operations
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
+- Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status
+- QuickBooks-prefilled customer/invoice card on intake with read-only operational fields and editable customer notes only
+- Create-time attachment queue previews with filename, size, selected time, selected by, and remove control before submit
+- Create-time internal notes queue that is converted into case notes and case_activity timeline rows on save
 
 Out of scope for Phase 1:
 
@@ -35,6 +39,7 @@ Out of scope for Phase 1:
 6. Attachments are uploaded to private Supabase Storage bucket case-attachments.
 7. Case actions and uploads append timeline rows to case_activity automatically.
 8. Access is enforced by server-side session cookies.
+9. Create-case resolution fields (status, assignee, next action, ETA, tracking) are persisted at case creation and reflected in timeline/internal notes metadata.
 
 ## Main Tables
 

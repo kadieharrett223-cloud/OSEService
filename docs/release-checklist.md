@@ -20,4 +20,5 @@
 
 - [ ] Confirm activity history writes for create/update/note/upload/part events
 - [ ] Confirm invalid/disabled codes cannot open protected routes
+- [ ] Confirm public legal pages load without login: /eula and /privacy-policy
 - [ ] Confirm rollback target deployment noted in release log

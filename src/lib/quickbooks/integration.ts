@@ -455,7 +455,61 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
     }
   }
 
-  const customerMap = new Map<string, { full_name: string; company_name: string | null; quickbooks_customer_id: string }>();
+  const customerMap = new Map<string, {
+    full_name: string;
+    company_name: string | null;
+    quickbooks_customer_id: string;
+    phone: string | null;
+    email: string | null;
+    shipping_address: string | null;
+  }>();
+
+  const customers: Array<Record<string, unknown>> = [];
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const startPosition = page * pageSize + 1;
+    const qboQuery = `select * from Customer startposition ${startPosition} maxresults ${pageSize}`;
+
+    const payload = await fetchQuickbooksQuery({
+      apiBase,
+      realmId: connection.realm_id,
+      accessToken,
+      query: qboQuery,
+    });
+
+    const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
+    const batch = (queryResponse?.Customer as Array<Record<string, unknown>> | undefined) ?? [];
+    customers.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
+  }
+
+  for (const customer of customers) {
+    const customerId = String(customer.Id ?? "").trim();
+    if (!customerId) continue;
+
+    const displayName = typeof customer.DisplayName === "string" ? customer.DisplayName.trim() : "";
+    const companyName = typeof customer.CompanyName === "string" ? customer.CompanyName.trim() : "";
+    const primaryPhone = customer.PrimaryPhone as Record<string, unknown> | undefined;
+    const mobilePhone = customer.Mobile as Record<string, unknown> | undefined;
+    const primaryEmail = customer.PrimaryEmailAddr as Record<string, unknown> | undefined;
+
+    customerMap.set(customerId, {
+      quickbooks_customer_id: customerId,
+      full_name: displayName || companyName || `QuickBooks Customer ${customerId}`,
+      company_name: companyName || displayName || null,
+      phone: typeof primaryPhone?.FreeFormNumber === "string"
+        ? primaryPhone.FreeFormNumber
+        : typeof mobilePhone?.FreeFormNumber === "string"
+          ? mobilePhone.FreeFormNumber
+          : null,
+      email: typeof primaryEmail?.Address === "string" ? primaryEmail.Address : null,
+      shipping_address: formatAddress(customer.ShipAddr as Record<string, unknown> | undefined)
+        ?? formatAddress(customer.BillAddr as Record<string, unknown> | undefined),
+    });
+  }
 
   const invoiceRows = invoices
     .map((invoice) => {
@@ -467,10 +521,14 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
       const customerName = typeof customerRef?.name === "string" ? customerRef.name : null;
 
       if (customerId) {
+        const existing = customerMap.get(customerId);
         customerMap.set(customerId, {
-          full_name: customerName ?? `QuickBooks Customer ${customerId}`,
-          company_name: customerName,
           quickbooks_customer_id: customerId,
+          full_name: existing?.full_name ?? customerName ?? `QuickBooks Customer ${customerId}`,
+          company_name: existing?.company_name ?? customerName,
+          phone: existing?.phone ?? null,
+          email: existing?.email ?? null,
+          shipping_address: existing?.shipping_address ?? null,
         });
       }
 

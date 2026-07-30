@@ -101,6 +101,51 @@ function parseProductsPurchased(rawPayload: unknown) {
   return productLines.join("\n");
 }
 
+function formatAddressFromRaw(address: unknown) {
+  if (!address || typeof address !== "object") return "";
+
+  const addressRecord = address as Record<string, unknown>;
+  const asText = [
+    addressRecord.Line1,
+    addressRecord.Line2,
+    addressRecord.Line3,
+    [addressRecord.City, addressRecord.CountrySubDivisionCode, addressRecord.PostalCode].filter(Boolean).join(" "),
+    addressRecord.Country,
+  ]
+    .filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+    .map((line) => line.trim());
+
+  return asText.join(", ");
+}
+
+function extractInvoiceAutofillFallbacks(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") {
+    return { email: "", phone: "", shippingAddress: "" };
+  }
+
+  const payload = rawPayload as Record<string, unknown>;
+  const billEmail = payload.BillEmail as Record<string, unknown> | undefined;
+  const primaryEmail = payload.PrimaryEmailAddr as Record<string, unknown> | undefined;
+  const billPhone = payload.BillPhone as Record<string, unknown> | undefined;
+  const primaryPhone = payload.PrimaryPhone as Record<string, unknown> | undefined;
+
+  const email = typeof billEmail?.Address === "string"
+    ? billEmail.Address
+    : typeof primaryEmail?.Address === "string"
+      ? primaryEmail.Address
+      : "";
+
+  const phone = typeof billPhone?.FreeFormNumber === "string"
+    ? billPhone.FreeFormNumber
+    : typeof primaryPhone?.FreeFormNumber === "string"
+      ? primaryPhone.FreeFormNumber
+      : "";
+
+  const shippingAddress = formatAddressFromRaw(payload.ShipAddr) || formatAddressFromRaw(payload.BillAddr);
+
+  return { email, phone, shippingAddress };
+}
+
 function buildAutofillUrl(payload: AutofillPayload) {
   const params = new URLSearchParams();
   params.set("prefilled", "1");
@@ -168,6 +213,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
 
   const customer = latestCustomerByQbId.data ?? customerByName;
   const invoice = invoiceByNumber ?? latestInvoiceByCustomer.data;
+  const invoiceFallbacks = extractInvoiceAutofillFallbacks(invoice?.raw_payload);
 
   if (!customer && !invoice) {
     redirect("/cases/new?error=No+QuickBooks+match+found");
@@ -177,9 +223,9 @@ export async function quickbooksAutofillAction(formData: FormData) {
     buildAutofillUrl({
       customer_name: customer?.full_name ?? "",
       company_name: customer?.company_name ?? "",
-      phone: customer?.phone ?? "",
-      email: customer?.email ?? "",
-      shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? "",
+      phone: customer?.phone ?? invoiceFallbacks.phone,
+      email: customer?.email ?? invoiceFallbacks.email,
+      shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? invoiceFallbacks.shippingAddress,
       billing_address: invoice?.billing_address ?? "",
       quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
       quickbooks_invoice_id: invoice?.id ?? "",

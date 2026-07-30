@@ -19,6 +19,7 @@
 - Settings now includes live QuickBooks OAuth connect, disconnect, and manual invoice sync.
 - OAuth callback performs first sync to populate `quickbooks_invoices` and `customers` snapshots.
 - Create-case now auto-sets issue reported timestamp at save time and auto-populates date of purchase from matched invoice date.
+- Customer sync now captures QuickBooks phone, email, and shipping address fields so case intake autofill can populate contact details reliably.
 
 ## Constraints
 

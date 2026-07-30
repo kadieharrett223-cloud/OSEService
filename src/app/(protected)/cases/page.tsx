@@ -39,7 +39,9 @@ type Params = {
 };
 
 function statusBadge(status: string) {
-  if (status === "New" || status === "In Progress") return "bg-[#ecfdf3] text-[#166534]";
+  if (status === "Resolved" || status === "Completed" || status === "Closed") return "bg-[#ecfdf3] text-[#166534]";
+  if (status === "In Progress") return "bg-[#fff1f2] text-[#be123c]";
+  if (status === "New") return "bg-[#ecfdf3] text-[#166534]";
   if (status === "Waiting for Customer") return "bg-[#fff7ed] text-[#c2410c]";
   if (status.includes("Parts")) return "bg-[#eff6ff] text-[#1d4ed8]";
   return "bg-[#f3f4f6] text-[#374151]";

@@ -15,6 +15,31 @@ const navItems = [
   { href: "/settings", label: "Settings" },
 ];
 
+const navGroups = [
+  {
+    title: "",
+    items: navItems.slice(0, 6),
+  },
+  {
+    title: "",
+    items: navItems.slice(6, 8),
+  },
+  {
+    title: "",
+    items: navItems.slice(8),
+  },
+];
+
+function iconFor(label: string) {
+  if (label.includes("Dashboard")) return "◉";
+  if (label.includes("Create")) return "⊕";
+  if (label.includes("Warranty")) return "◍";
+  if (label.includes("Freight")) return "◌";
+  if (label.includes("Archived")) return "◈";
+  if (label.includes("Settings")) return "◎";
+  return "◻";
+}
+
 export default async function ProtectedLayout({
   children,
 }: {
@@ -23,16 +48,27 @@ export default async function ProtectedLayout({
   const user = await requireUser();
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f8f8f8]">
-      <header className="border-b border-[#dddddd] bg-white">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 md:px-6">
-          <div>
-            <p className="text-xs uppercase tracking-[0.1em] text-[#b20610]">Olympic Equipment</p>
-            <p className="text-xl">{APP_SHORT_NAME}</p>
+    <div className="flex min-h-screen flex-col bg-[#f3f5f8]">
+      <div className="h-1 w-full bg-[#d50917]" />
+
+      <header className="border-b border-[#e3e6ea] bg-white shadow-sm">
+        <div className="mx-auto flex w-full max-w-[1520px] items-center justify-between gap-4 px-4 py-4 md:px-6">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-8 rounded-sm bg-[#d50917]" />
+              <div>
+                <p className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#111]">Olympic Equipment</p>
+              </div>
+            </div>
+            <div className="hidden h-8 w-px bg-[#d9d9d9] md:block" />
+            <p className="text-3xl leading-none text-[#121826]">{APP_SHORT_NAME}</p>
           </div>
 
           <div className="flex items-center gap-3">
-            <p className="text-right text-sm text-[#5a5a5a]">{user.fullName ?? "Unknown User"}</p>
+            <p className="text-right text-sm font-semibold text-[#2a3140]">{user.fullName ?? "Unknown User"}</p>
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#d50917] text-sm font-semibold text-white">
+              {(user.fullName ?? "U").slice(0, 1).toUpperCase()}
+            </span>
             <form action={signOutAction}>
               <button type="submit" className="btn-secondary">
                 Sign Out
@@ -42,19 +78,40 @@ export default async function ProtectedLayout({
         </div>
       </header>
 
-      <div className="mx-auto grid w-full max-w-7xl flex-1 gap-6 px-4 py-6 md:grid-cols-[220px_1fr] md:items-stretch md:px-6">
-        <aside className="card h-full p-3">
-          <p className="px-2 pb-2 text-xs uppercase tracking-[0.08em] text-[#6a6a6a]">Workflow Menu</p>
-          <nav className="flex flex-col gap-1 text-sm">
-            {navItems.map((item) => (
-              <Link key={item.href} href={item.href} className="rounded-md px-3 py-2 hover:bg-[#f1f1f1]">
-                {item.label}
-              </Link>
+      <div className="mx-auto grid w-full max-w-[1520px] flex-1 gap-6 px-0 py-0 md:grid-cols-[270px_1fr] md:items-stretch">
+        <aside className="h-full border-r border-[#232833] bg-gradient-to-b from-[#10141b] to-[#141c27] px-3 py-6 text-white">
+          <p className="px-2 pb-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa7bc]">Workflow Menu</p>
+
+          <div className="space-y-4">
+            {navGroups.map((group, groupIndex) => (
+              <div key={`group-${groupIndex}`} className="space-y-1">
+                <nav className="flex flex-col gap-1 text-sm">
+                  {group.items.map((item, itemIndex) => {
+                    const isPrimary = groupIndex === 0 && itemIndex === 0;
+
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={`flex items-center gap-3 rounded-md px-3 py-2.5 transition ${
+                          isPrimary
+                            ? "bg-[#d50917] text-white"
+                            : "text-[#e8eef8] hover:bg-[#202735]"
+                        }`}
+                      >
+                        <span className="text-sm leading-none">{iconFor(item.label)}</span>
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+                {groupIndex < navGroups.length - 1 ? <div className="border-t border-[#263143] pt-3" /> : null}
+              </div>
             ))}
-          </nav>
+          </div>
         </aside>
 
-        <main>{children}</main>
+        <main className="px-4 py-6 md:px-8">{children}</main>
       </div>
     </div>
   );

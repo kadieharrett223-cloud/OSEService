@@ -98,7 +98,7 @@ export function QuickbooksLookup() {
       {loading ? <p className="text-xs text-[#5a5a5a]">Searching QuickBooks matches...</p> : null}
 
       {open ? (
-        <div className="rounded-md border border-[#d7d7d7] bg-white">
+        <div className="rounded-md border border-[#d7d7d7] bg-white shadow-sm">
           <ul className="max-h-64 overflow-auto">
             {suggestions.map((suggestion) => (
               <li key={suggestion.key} className="border-b border-[#efefef] last:border-b-0">

@@ -35,10 +35,10 @@ export default async function CreateCasePage({
     : "General";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl">Create Customer Service Case</h1>
+          <h1 className="text-5xl leading-tight text-[#121826]">Create Customer Service Case</h1>
           <p className="text-sm text-[#5a5a5a]">Use QuickBooks snapshot data to quickly pull customer and invoice details into this intake document.</p>
         </div>
         <Link href="/cases" className="btn-secondary">
@@ -56,9 +56,9 @@ export default async function CreateCasePage({
         </p>
       ) : null}
 
-      <section className="card space-y-3 border-l-4 border-l-[#b20610] bg-white p-4">
+      <section className="card space-y-3 border border-[#e7eaef] bg-white p-5 shadow-md">
         <div>
-          <h2 className="text-xl">QuickBooks Autofill</h2>
+          <h2 className="text-3xl text-[#121826]">QuickBooks Autofill</h2>
           <p className="mt-1 text-sm text-[#5a5a5a]">
             Start typing a customer name, customer ID, or invoice number to see matches.
           </p>
@@ -72,8 +72,8 @@ export default async function CreateCasePage({
       </section>
 
       <form action={createCaseAction} className="space-y-4">
-        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
-          <h2 className="md:col-span-2 text-xl">Customer Information</h2>
+        <section className="card grid gap-4 border border-[#e7eaef] bg-white p-5 md:grid-cols-2">
+          <h2 className="md:col-span-2 text-3xl text-[#121826]">Customer Information</h2>
           <div>
             <label htmlFor="customer_name" className="label">Customer Name</label>
             <input id="customer_name" name="customer_name" required className="input" defaultValue={params.customer_name ?? ""} />
@@ -96,8 +96,8 @@ export default async function CreateCasePage({
           </div>
         </section>
 
-        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
-          <h2 className="md:col-span-2 text-xl">QuickBooks Invoice Snapshot</h2>
+        <section className="card grid gap-4 border border-[#e7eaef] bg-white p-5 md:grid-cols-2">
+          <h2 className="md:col-span-2 text-3xl text-[#121826]">QuickBooks Invoice Snapshot</h2>
           <div>
             <label htmlFor="quickbooks_customer_id" className="label">QuickBooks Customer ID</label>
             <input id="quickbooks_customer_id" name="quickbooks_customer_id" className="input" defaultValue={params.quickbooks_customer_id ?? ""} />
@@ -132,8 +132,8 @@ export default async function CreateCasePage({
           </div>
         </section>
 
-        <section className="card grid gap-4 border-l-4 border-l-[#b20610] bg-white p-4 md:grid-cols-2">
-          <h2 className="md:col-span-2 text-xl">Case Details</h2>
+        <section className="card grid gap-4 border border-[#e7eaef] bg-white p-5 md:grid-cols-2">
+          <h2 className="md:col-span-2 text-3xl text-[#121826]">Case Details</h2>
           <div>
             <label htmlFor="case_type" className="label">Case Type</label>
             <select id="case_type" name="case_type" className="select" defaultValue={defaultCaseType}>

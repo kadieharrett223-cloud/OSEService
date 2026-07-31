@@ -234,6 +234,8 @@ function formatAddress(address: Record<string, unknown> | null | undefined) {
     address.Line1,
     address.Line2,
     address.Line3,
+    address.Line4,
+    address.Line5,
     [address.City, address.CountrySubDivisionCode, address.PostalCode].filter(Boolean).join(" "),
     address.Country,
   ]

@@ -7,6 +7,25 @@ import { QuickbooksLookup } from "@/app/(protected)/cases/new/quickbooks-lookup"
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { DraftTimelineNotes } from "@/app/(protected)/cases/new/draft-timeline-notes";
 
+function composeShippingAddress(address: string, phone?: string, email?: string) {
+  const base = String(address ?? "").trim();
+  const safePhone = String(phone ?? "").trim();
+  const safeEmail = String(email ?? "").trim();
+
+  const lower = base.toLowerCase();
+  const extras: string[] = [];
+
+  if (safePhone && !lower.includes(safePhone.toLowerCase())) {
+    extras.push(`Phone: ${safePhone}`);
+  }
+
+  if (safeEmail && !lower.includes(safeEmail.toLowerCase())) {
+    extras.push(`Email: ${safeEmail}`);
+  }
+
+  return [base, extras.join(" | ")].filter(Boolean).join("\n");
+}
+
 export default async function CreateCasePage({
   searchParams,
 }: {
@@ -64,6 +83,11 @@ export default async function CreateCasePage({
     ?? (params.quickbooks_invoice_external_id
       ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(params.quickbooks_invoice_external_id)}`
       : "");
+  const shippingAddressDisplay = composeShippingAddress(
+    params.shipping_address ?? "",
+    params.phone,
+    params.email,
+  );
 
   return (
     <div className="space-y-4">
@@ -112,6 +136,8 @@ export default async function CreateCasePage({
         <input type="hidden" name="quickbooks_invoice_number" value={params.quickbooks_invoice_number ?? ""} />
         <input type="hidden" name="quickbooks_invoice_link" value={invoiceLink} />
         <input type="hidden" name="quickbooks_customer_id" value={params.quickbooks_customer_id ?? ""} />
+        <input type="hidden" name="phone" value={params.phone ?? ""} />
+        <input type="hidden" name="email" value={params.email ?? ""} />
         <input type="hidden" name="billing_address" value={params.billing_address ?? ""} />
         <input type="hidden" name="invoice_date" value={params.invoice_date ?? ""} />
         <input type="hidden" name="invoice_total" value={params.invoice_total ?? ""} />
@@ -133,19 +159,9 @@ export default async function CreateCasePage({
                 <label htmlFor="company_name" className="label">Company</label>
                 <input id="company_name" name="company_name" readOnly className="input bg-[#f8fafc]" defaultValue={params.company_name ?? ""} />
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="phone" className="label">Phone</label>
-                  <input id="phone" name="phone" readOnly className="input bg-[#f8fafc]" defaultValue={params.phone ?? ""} />
-                </div>
-                <div>
-                  <label htmlFor="email" className="label">Email</label>
-                  <input id="email" name="email" type="email" readOnly className="input bg-[#f8fafc]" defaultValue={params.email ?? ""} />
-                </div>
-              </div>
               <div>
                 <label htmlFor="shipping_address" className="label">Shipping Address</label>
-                <textarea id="shipping_address" name="shipping_address" rows={2} readOnly className="textarea bg-[#f8fafc]" defaultValue={params.shipping_address ?? ""} />
+                <textarea id="shipping_address" name="shipping_address" rows={4} readOnly className="textarea bg-[#f8fafc]" defaultValue={shippingAddressDisplay} />
               </div>
               <div>
                 <label htmlFor="customer_note" className="label">Customer Notes</label>

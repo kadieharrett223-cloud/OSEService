@@ -30,6 +30,7 @@ Phase 1 implements only internal customer service case tracking:
 - Protected app shell now uses full-width layout so the left sidebar is flush to the viewport edge on wide displays
 - Sidebar navigation text size increased for better readability in operations workflows
 - Case details customer card now surfaces both shipping and billing addresses on the left with QuickBooks snapshot fallbacks; invoice-side billing line removed
+- Customer phone/email are no longer shown as separate fields in case/create customer cards; shipping address line now carries contact context (Phone/Email) when available
 - Archived/completed case view with reopen support
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status

@@ -142,6 +142,51 @@ function buildTrackingUrl(trackingNumber: string) {
   return `https://www.google.com/search?q=${encodeURIComponent(`${trackingNumber} package tracking`)}`;
 }
 
+function composeShippingAddress(address: string, phone?: string, email?: string) {
+  const base = String(address ?? "").trim();
+  const safePhone = String(phone ?? "").trim();
+  const safeEmail = String(email ?? "").trim();
+
+  const lower = base.toLowerCase();
+  const extras: string[] = [];
+
+  if (safePhone && !lower.includes(safePhone.toLowerCase())) {
+    extras.push(`Phone: ${safePhone}`);
+  }
+
+  if (safeEmail && !lower.includes(safeEmail.toLowerCase())) {
+    extras.push(`Email: ${safeEmail}`);
+  }
+
+  return [base, extras.join(" | ")].filter(Boolean).join("\n");
+}
+
+function extractInvoiceContactFallbacks(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") {
+    return { phone: "", email: "" };
+  }
+
+  const payload = rawPayload as Record<string, unknown>;
+  const billEmail = payload.BillEmail as Record<string, unknown> | undefined;
+  const primaryEmail = payload.PrimaryEmailAddr as Record<string, unknown> | undefined;
+  const billPhone = payload.BillPhone as Record<string, unknown> | undefined;
+  const primaryPhone = payload.PrimaryPhone as Record<string, unknown> | undefined;
+
+  const email = typeof billEmail?.Address === "string"
+    ? billEmail.Address
+    : typeof primaryEmail?.Address === "string"
+      ? primaryEmail.Address
+      : "";
+
+  const phone = typeof billPhone?.FreeFormNumber === "string"
+    ? billPhone.FreeFormNumber
+    : typeof primaryPhone?.FreeFormNumber === "string"
+      ? primaryPhone.FreeFormNumber
+      : "";
+
+  return { phone, email };
+}
+
 function normalizeStatusLabel(status: string) {
   if (status === "Completed" || status === "Closed") return "Resolved";
   return status;
@@ -236,10 +281,16 @@ export default async function CaseDetailsPage({
     || (caseRecord.invoice?.quickbooks_invoice_id
       ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
       : null);
+  const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecord.invoice?.raw_payload);
   const shippingAddress = caseRecord.customers?.shipping_address
     ?? caseRecord.invoice?.shipping_address
     ?? caseRecord.invoice?.billing_address
     ?? "";
+  const shippingAddressDisplay = composeShippingAddress(
+    shippingAddress,
+    caseRecord.customers?.phone ?? invoiceContactFallbacks.phone,
+    caseRecord.customers?.email ?? invoiceContactFallbacks.email,
+  );
   const billingAddress = caseRecord.invoice?.billing_address
     ?? caseRecord.invoice?.shipping_address
     ?? caseRecord.customers?.shipping_address
@@ -284,22 +335,12 @@ export default async function CaseDetailsPage({
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <div>
-                <label className="label">Phone</label>
-                <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.phone ?? ""} />
-              </div>
-              <div>
-                <label className="label">Email</label>
-                <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.email ?? ""} />
-              </div>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div>
                 <label className="label">Shipping Address</label>
-                <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={shippingAddress} />
+                <textarea readOnly rows={4} className="textarea bg-[#f8fafc]" value={shippingAddressDisplay} />
               </div>
               <div>
                 <label className="label">Billing Address</label>
-                <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={billingAddress} />
+                <textarea readOnly rows={4} className="textarea bg-[#f8fafc]" value={billingAddress} />
               </div>
             </div>
             <div>

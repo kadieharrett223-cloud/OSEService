@@ -109,6 +109,8 @@ function formatAddressFromRaw(address: unknown) {
     addressRecord.Line1,
     addressRecord.Line2,
     addressRecord.Line3,
+    addressRecord.Line4,
+    addressRecord.Line5,
     [addressRecord.City, addressRecord.CountrySubDivisionCode, addressRecord.PostalCode].filter(Boolean).join(" "),
     addressRecord.Country,
   ]

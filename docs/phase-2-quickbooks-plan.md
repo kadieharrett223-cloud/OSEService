@@ -20,6 +20,7 @@
 - OAuth callback performs first sync to populate `quickbooks_invoices` and `customers` snapshots.
 - Create-case now auto-sets issue reported timestamp at save time and auto-populates date of purchase from matched invoice date.
 - Customer sync now captures QuickBooks phone, email, and shipping address fields so case intake autofill can populate contact details reliably.
+- Address parsing now preserves additional QuickBooks address lines (Line4/Line5) so shipping text includes full dock-hold/contact formatting when present.
 
 ## Constraints
 

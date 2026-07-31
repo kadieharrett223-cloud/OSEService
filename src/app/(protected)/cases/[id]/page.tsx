@@ -187,6 +187,25 @@ function extractInvoiceContactFallbacks(rawPayload: unknown) {
   return { phone, email };
 }
 
+function formatAddressFromRaw(address: unknown) {
+  if (!address || typeof address !== "object") return "";
+
+  const addressRecord = address as Record<string, unknown>;
+  const asText = [
+    addressRecord.Line1,
+    addressRecord.Line2,
+    addressRecord.Line3,
+    addressRecord.Line4,
+    addressRecord.Line5,
+    [addressRecord.City, addressRecord.CountrySubDivisionCode, addressRecord.PostalCode].filter(Boolean).join(" "),
+    addressRecord.Country,
+  ]
+    .filter((line): line is string => typeof line === "string" && line.trim().length > 0)
+    .map((line) => line.trim());
+
+  return asText.join(", ");
+}
+
 function normalizeStatusLabel(status: string) {
   if (status === "Completed" || status === "Closed") return "Resolved";
   return status;
@@ -282,10 +301,13 @@ export default async function CaseDetailsPage({
       ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
       : null);
   const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecord.invoice?.raw_payload);
-  const shippingAddress = caseRecord.customers?.shipping_address
-    ?? caseRecord.invoice?.shipping_address
-    ?? caseRecord.invoice?.billing_address
-    ?? "";
+  const invoiceRaw = caseRecord.invoice?.raw_payload as Record<string, unknown> | undefined;
+  const invoiceShippingFromRaw = formatAddressFromRaw(invoiceRaw?.ShipAddr) || formatAddressFromRaw(invoiceRaw?.BillAddr);
+  const shippingAddress = invoiceShippingFromRaw
+    || caseRecord.invoice?.shipping_address
+    || caseRecord.customers?.shipping_address
+    || caseRecord.invoice?.billing_address
+    || "";
   const shippingAddressDisplay = composeShippingAddress(
     shippingAddress,
     caseRecord.customers?.phone ?? invoiceContactFallbacks.phone,

@@ -227,7 +227,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
       company_name: customer?.company_name ?? "",
       phone: customer?.phone ?? invoiceFallbacks.phone,
       email: customer?.email ?? invoiceFallbacks.email,
-      shipping_address: customer?.shipping_address ?? invoice?.shipping_address ?? invoiceFallbacks.shippingAddress,
+      shipping_address: invoiceFallbacks.shippingAddress || invoice?.shipping_address || customer?.shipping_address || "",
       billing_address: invoice?.billing_address ?? "",
       quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
       quickbooks_invoice_id: invoice?.id ?? "",

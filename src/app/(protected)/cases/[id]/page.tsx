@@ -236,6 +236,14 @@ export default async function CaseDetailsPage({
     || (caseRecord.invoice?.quickbooks_invoice_id
       ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
       : null);
+  const shippingAddress = caseRecord.customers?.shipping_address
+    ?? caseRecord.invoice?.shipping_address
+    ?? caseRecord.invoice?.billing_address
+    ?? "";
+  const billingAddress = caseRecord.invoice?.billing_address
+    ?? caseRecord.invoice?.shipping_address
+    ?? caseRecord.customers?.shipping_address
+    ?? "";
 
   return (
     <div className="space-y-4">
@@ -284,9 +292,15 @@ export default async function CaseDetailsPage({
                 <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.email ?? ""} />
               </div>
             </div>
-            <div>
-              <label className="label">Shipping Address</label>
-              <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={caseRecord.customers?.shipping_address ?? ""} />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <label className="label">Shipping Address</label>
+                <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={shippingAddress} />
+              </div>
+              <div>
+                <label className="label">Billing Address</label>
+                <textarea readOnly rows={2} className="textarea bg-[#f8fafc]" value={billingAddress} />
+              </div>
             </div>
             <div>
               <label className="label">Customer Notes</label>
@@ -301,7 +315,6 @@ export default async function CaseDetailsPage({
             <p><span className="font-semibold">Purchase Date:</span> {caseRecord.date_of_purchase ?? caseRecord.invoice?.invoice_date ?? "-"}</p>
             <p><span className="font-semibold">Payment Status:</span> {caseRecord.invoice?.payment_status ?? "-"}</p>
             <p><span className="font-semibold">Invoice Total:</span> {caseRecord.invoice?.invoice_total != null ? `$${caseRecord.invoice.invoice_total.toFixed(2)}` : "-"}</p>
-            <p><span className="font-semibold">Billing Address:</span> {caseRecord.invoice?.billing_address ?? "-"}</p>
             <div>
               <label className="label">Products Purchased</label>
               <textarea readOnly rows={5} className="textarea bg-[#f8fafc]" value={productsPurchased} />

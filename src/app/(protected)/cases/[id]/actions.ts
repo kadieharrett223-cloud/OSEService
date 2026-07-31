@@ -36,6 +36,12 @@ function isAllowedAttachment(file: File) {
   return ALLOWED_ATTACHMENT_EXTENSIONS.has(extension);
 }
 
+function isRedirectLikeError(error: unknown) {
+  return typeof error === "object" && error !== null && "digest" in error
+    && typeof (error as { digest?: unknown }).digest === "string"
+    && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
+}
+
 async function getCaseOrRedirect(caseId: string) {
   const supabase = getSupabaseAdmin();
   const { data: existingCase } = await supabase
@@ -290,6 +296,12 @@ type WorkflowEventConfig = {
   summary: string;
 };
 
+type AutoSaveState = {
+  ok: boolean;
+  savedAt?: string;
+  error?: string;
+};
+
 const WORKFLOW_EVENTS: Record<string, WorkflowEventConfig> = {
   customer_contacted: { summary: "Customer contacted" },
   replacement_part_ordered: { summary: "Replacement part ordered" },
@@ -437,6 +449,196 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
   revalidatePath("/cases/completed");
   revalidatePath("/dashboard");
   redirect(`/cases/${caseId}?success=workflow_saved`);
+}
+
+export async function autosaveIssueDetailsWorkspaceAction(
+  _prevState: AutoSaveState,
+  formData: FormData,
+): Promise<AutoSaveState> {
+  try {
+    const user = await requireUser();
+
+    const caseId = getString(formData, "case_id");
+    const caseTypeInput = getString(formData, "case_type");
+    const priorityInput = getString(formData, "priority");
+    const issueDescription = getString(formData, "issue_description");
+
+    if (!caseId || !issueDescription) {
+      return { ok: false, error: "Missing required issue details" };
+    }
+
+    const caseType: CaseType = CASE_TYPES.includes(caseTypeInput as (typeof CASE_TYPES)[number])
+      ? (caseTypeInput as CaseType)
+      : "General";
+    const priority: CasePriority = PRIORITIES.includes(priorityInput as (typeof PRIORITIES)[number])
+      ? (priorityInput as CasePriority)
+      : "Medium";
+
+    const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+    const { data: currentCase, error: lookupError } = await supabase
+      .from("customer_service_cases")
+      .select("case_type, priority, issue_description")
+      .eq("id", caseId)
+      .maybeSingle();
+
+    if (lookupError || !currentCase) {
+      return { ok: false, error: lookupError?.message ?? "Case not found" };
+    }
+
+    const changed = currentCase.case_type !== caseType
+      || currentCase.priority !== priority
+      || currentCase.issue_description !== issueDescription;
+
+    if (!changed) {
+      return { ok: true, savedAt: new Date().toISOString() };
+    }
+
+    const { error } = await supabase
+      .from("customer_service_cases")
+      .update({
+        case_type: caseType,
+        priority,
+        issue_description: issueDescription,
+      } as never)
+      .eq("id", caseId);
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    await supabase.from("case_activity").insert({
+      case_id: caseId,
+      actor_id: user.id,
+      activity_type: "issue_details_updated",
+      summary: "Issue details updated",
+      details: {
+        case_number: existingCase.case_number,
+        case_type: caseType,
+        priority,
+      },
+    });
+
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    revalidatePath("/dashboard");
+
+    return { ok: true, savedAt: new Date().toISOString() };
+  } catch (error) {
+    if (isRedirectLikeError(error)) throw error;
+    return { ok: false, error: error instanceof Error ? error.message : "Could not autosave issue details" };
+  }
+}
+
+export async function autosaveWorkflowWorkspaceAction(
+  _prevState: AutoSaveState,
+  formData: FormData,
+): Promise<AutoSaveState> {
+  try {
+    const user = await requireUser();
+
+    const caseId = getString(formData, "case_id");
+    const statusInput = getString(formData, "status");
+    const assignedEmployeeId = getNullableString(formData, "assigned_employee_id");
+    const nextAction = getString(formData, "next_action");
+    const etaDate = getString(formData, "eta_date");
+
+    if (!caseId || !CASE_STATUSES.includes(statusInput as (typeof CASE_STATUSES)[number])) {
+      return { ok: false, error: "Invalid workflow values" };
+    }
+
+    const status = statusInput as CaseStatus;
+    const { supabase } = await getCaseOrRedirect(caseId);
+
+    const { data: currentCase, error: caseLookupError } = await supabase
+      .from("customer_service_cases")
+      .select("id, case_number, status, assigned_employee_id")
+      .eq("id", caseId)
+      .maybeSingle();
+
+    if (caseLookupError || !currentCase) {
+      return { ok: false, error: caseLookupError?.message ?? "Case not found" };
+    }
+
+    const statusChanged = status !== currentCase.status;
+    const assigneeChanged = (currentCase.assigned_employee_id ?? null) !== assignedEmployeeId;
+
+    if (statusChanged || assigneeChanged) {
+      const { error: updateError } = await supabase
+        .from("customer_service_cases")
+        .update({
+          status,
+          assigned_employee_id: assignedEmployeeId,
+          closed_at: status === "Closed" || status === "Completed" || status === "Resolved"
+            ? new Date().toISOString()
+            : null,
+        } as never)
+        .eq("id", caseId);
+
+      if (updateError) {
+        return { ok: false, error: updateError.message };
+      }
+    }
+
+    const activityInserts: Database["public"]["Tables"]["case_activity"]["Insert"][] = [];
+
+    if (statusChanged) {
+      activityInserts.push({
+        case_id: caseId,
+        actor_id: user.id,
+        activity_type: "status_changed",
+        summary: `Status changed to ${status}`,
+        details: { case_number: currentCase.case_number, status },
+      });
+    }
+
+    if (assigneeChanged) {
+      activityInserts.push({
+        case_id: caseId,
+        actor_id: user.id,
+        activity_type: "assigned_user_changed",
+        summary: assignedEmployeeId ? "Assigned user updated" : "Assignee cleared",
+        details: { case_number: currentCase.case_number, assigned_employee_id: assignedEmployeeId },
+      });
+    }
+
+    const { data: latestNextActionEvent } = await supabase
+      .from("case_activity")
+      .select("details")
+      .eq("case_id", caseId)
+      .eq("activity_type", "next_action_set")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const latestDetails = latestNextActionEvent?.details as Record<string, unknown> | null;
+    const previousNextAction = typeof latestDetails?.next_action === "string" ? latestDetails.next_action : "";
+    const previousEtaDate = typeof latestDetails?.eta_date === "string" ? latestDetails.eta_date : "";
+    const nextActionChanged = nextAction !== previousNextAction || etaDate !== previousEtaDate;
+
+    if (nextActionChanged && (nextAction || etaDate)) {
+      activityInserts.push({
+        case_id: caseId,
+        actor_id: user.id,
+        activity_type: "next_action_set",
+        summary: nextAction ? `Next action: ${nextAction}` : `ETA set: ${etaDate}`,
+        details: { case_number: currentCase.case_number, next_action: nextAction || null, eta_date: etaDate || null },
+      });
+    }
+
+    if (activityInserts.length > 0) {
+      await supabase.from("case_activity").insert(activityInserts as never);
+    }
+
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    revalidatePath("/cases/completed");
+    revalidatePath("/dashboard");
+
+    return { ok: true, savedAt: new Date().toISOString() };
+  } catch (error) {
+    if (isRedirectLikeError(error)) throw error;
+    return { ok: false, error: error instanceof Error ? error.message : "Could not autosave workflow" };
+  }
 }
 
 export async function uploadAttachmentAction(formData: FormData) {

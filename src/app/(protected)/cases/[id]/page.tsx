@@ -2,13 +2,13 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { SaveToast } from "@/app/(protected)/cases/[id]/save-toast";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
+import { IssueDetailsAutosaveForm } from "@/app/(protected)/cases/[id]/issue-details-autosave-form";
+import { WorkflowAutosaveForm } from "@/app/(protected)/cases/[id]/workflow-autosave-form";
 import {
+  addCaseWorkflowEventAction,
   addNoteAction,
   deleteAttachmentAction,
-  updateCaseIssueDetailsAction,
-  updateCaseWorkflowWorkspaceAction,
   uploadAttachmentAction,
 } from "@/app/(protected)/cases/[id]/actions";
 
@@ -235,12 +235,12 @@ export default async function CaseDetailsPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; success?: string; timeline?: string }>;
+  searchParams: Promise<{ error?: string; timeline?: string }>;
 }) {
   const user = await requireUser();
 
   const { id } = await params;
-  const { error, success, timeline } = await searchParams;
+  const { error, timeline } = await searchParams;
   const supabase = getSupabaseAdmin();
 
   const [{ data: caseRecordRaw }, { data: activity }, { data: attachments }] =
@@ -343,9 +343,6 @@ export default async function CaseDetailsPage({
 
   return (
     <div className="space-y-4">
-      {success === "issue_saved" ? <SaveToast message="Issue details saved" /> : null}
-      {success === "status_saved" ? <SaveToast message="Status saved" /> : null}
-      {success === "workflow_saved" ? <SaveToast message="Workflow saved" /> : null}
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
@@ -424,34 +421,14 @@ export default async function CaseDetailsPage({
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Issue Details</h2>
-        <form action={updateCaseIssueDetailsAction} className="mt-3 space-y-3">
-          <input type="hidden" name="case_id" value={id} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="case_type" className="label">Issue Category</label>
-              <select id="case_type" name="case_type" className="select" defaultValue={caseRecord.case_type ?? "General"}>
-                {CASE_TYPES.map((caseType) => (
-                  <option key={caseType} value={caseType}>{caseType}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label htmlFor="priority" className="label">Priority</label>
-              <select id="priority" name="priority" className="select" defaultValue={caseRecord.priority}>
-                {PRIORITIES.map((priority) => (
-                  <option key={priority} value={priority}>{priority}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label htmlFor="issue_description" className="label">Issue Description</label>
-            <textarea id="issue_description" name="issue_description" rows={8} className="textarea" defaultValue={caseRecord.issue_description} required />
-          </div>
-          <div className="flex justify-end">
-            <button type="submit" className="btn-primary">Save Issue Details</button>
-          </div>
-        </form>
+        <IssueDetailsAutosaveForm
+          caseId={id}
+          caseType={caseRecord.case_type ?? "General"}
+          priority={caseRecord.priority}
+          issueDescription={caseRecord.issue_description}
+          caseTypeOptions={CASE_TYPES}
+          priorityOptions={PRIORITIES}
+        />
       </section>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
@@ -508,64 +485,29 @@ export default async function CaseDetailsPage({
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Case Workflow</h2>
         <p className="mt-1 text-sm text-[#5a5a5a]">Use this panel to move the case forward and capture the next operational step.</p>
-        <form action={updateCaseWorkflowWorkspaceAction} className="mt-3 space-y-3">
-          <input type="hidden" name="case_id" value={id} />
+        <div className="mt-3 space-y-3">
+          <WorkflowAutosaveForm
+            caseId={id}
+            status={normalizedStatus}
+            statusOptions={statusOptions}
+            assigneeId={caseRecord.assigned_employee_id ?? ""}
+            assignees={(assignees ?? []) as Array<{ id: string; full_name: string | null }>}
+            nextAction={latestNextAction}
+            etaDate={latestEtaDate}
+          />
 
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <label htmlFor="status" className="label">Current Status</label>
-              <select id="status" name="status" defaultValue={normalizedStatus} className="select">
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="assigned_employee_id" className="label">Assigned To</label>
-              <select id="assigned_employee_id" name="assigned_employee_id" className="select" defaultValue={caseRecord.assigned_employee_id ?? ""}>
-                <option value="">Unassigned</option>
-                {(assignees ?? []).map((assignee) => (
-                  <option key={assignee.id} value={assignee.id}>{assignee.full_name ?? "Unknown"}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="eta_date" className="label">ETA</label>
-              <input id="eta_date" name="eta_date" type="date" className="input" defaultValue={latestEtaDate} />
-            </div>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label htmlFor="next_action" className="label">Next Action</label>
-              <select id="next_action" name="next_action" className="select" defaultValue={latestNextAction}>
-                <option value="">Select next action</option>
-                <option value="Order Replacement Part">Order Replacement Part</option>
-                <option value="Waiting on Supplier">Waiting on Supplier</option>
-                <option value="Waiting on Customer">Waiting on Customer</option>
-                <option value="Schedule Technician">Schedule Technician</option>
-                <option value="Email Customer">Email Customer</option>
-                <option value="Close Case">Close Case</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="tracking_number" className="label">Tracking Number</label>
-              <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
-              {latestTrackingUrl ? (
-                <a href={latestTrackingUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline">
-                  Track latest package ({latestTracking})
-                </a>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <button type="submit" className="btn-primary">Save Workflow</button>
-          </div>
-        </form>
+          <form action={addCaseWorkflowEventAction} className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input type="hidden" name="case_id" value={id} />
+            <input type="hidden" name="event_type" value="add_tracking_number" />
+            <input id="tracking_number" name="tracking_number" className="input" placeholder="Enter tracking number" />
+            <button type="submit" className="btn-secondary">Add Tracking Number</button>
+          </form>
+          {latestTrackingUrl ? (
+            <a href={latestTrackingUrl} target="_blank" rel="noreferrer" className="inline-flex text-xs font-semibold text-[#b20610] underline">
+              Track latest package ({latestTracking})
+            </a>
+          ) : null}
+        </div>
       </section>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">

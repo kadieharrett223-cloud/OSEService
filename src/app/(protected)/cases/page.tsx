@@ -71,7 +71,7 @@ export default async function CasesPage({
 
   if (params.status && CASE_STATUSES.includes(params.status as (typeof CASE_STATUSES)[number])) {
     dbQuery = dbQuery.eq("status", params.status as CaseStatus);
-  } else {
+  } else if (!query) {
     dbQuery = dbQuery.not("status", "in", "(Completed,Resolved,Closed)");
   }
 

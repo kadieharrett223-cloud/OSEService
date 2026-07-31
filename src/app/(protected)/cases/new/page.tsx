@@ -145,6 +145,23 @@ export default async function CreateCasePage({
         <input type="hidden" name="date_of_purchase" value={params.date_of_purchase ?? params.invoice_date ?? ""} />
 
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="label">Invoice #</label>
+              <input readOnly className="input bg-[#f8fafc]" value={params.quickbooks_invoice_number ?? "-"} />
+            </div>
+            <div>
+              <label className="label">Invoice Date</label>
+              <input readOnly className="input bg-[#f8fafc]" value={params.invoice_date ?? "-"} />
+            </div>
+            <div>
+              <label className="label">Purchase Date</label>
+              <input readOnly className="input bg-[#f8fafc]" value={params.date_of_purchase ?? params.invoice_date ?? "-"} />
+            </div>
+          </div>
+        </section>
+
+        <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xl font-semibold text-[#121826]">Customer Information</h2>
             <span className="rounded-full bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#334155]">Read-only from QuickBooks</span>
@@ -167,21 +184,10 @@ export default async function CreateCasePage({
 
             <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6a7281]">Invoice Snapshot</p>
-              <p><span className="font-semibold">Invoice #:</span> {params.quickbooks_invoice_number ?? "-"}</p>
-              <p><span className="font-semibold">Invoice Date:</span> {params.invoice_date ?? "-"}</p>
-              <p><span className="font-semibold">Purchase Date:</span> {params.date_of_purchase ?? params.invoice_date ?? "-"}</p>
-              <p><span className="font-semibold">Payment Status:</span> {params.payment_status ?? "-"}</p>
-              <p><span className="font-semibold">Invoice Total:</span> {params.invoice_total ?? "-"}</p>
-              <p><span className="font-semibold">Billing Address:</span> {params.billing_address ?? "-"}</p>
               <div>
                 <label htmlFor="products_purchased" className="label">Products Purchased</label>
                 <textarea id="products_purchased" readOnly rows={5} className="textarea bg-[#f8fafc]" defaultValue={params.products_purchased ?? ""} />
               </div>
-              {invoiceLink ? (
-                <a href={invoiceLink} target="_blank" rel="noreferrer" className="btn-secondary inline-flex w-full justify-center">View Full Invoice</a>
-              ) : (
-                <button type="button" disabled className="btn-secondary inline-flex w-full justify-center opacity-60">View Full Invoice</button>
-              )}
             </aside>
           </div>
         </section>

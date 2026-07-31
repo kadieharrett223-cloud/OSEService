@@ -296,10 +296,6 @@ export default async function CaseDetailsPage({
     ?? allActivityRows.find((row) => row.activity_type === "add_tracking_number")?.summary.split(":").slice(1).join(":").trim()
     ?? "";
   const latestTrackingUrl = latestTracking ? buildTrackingUrl(latestTracking) : "";
-  const invoiceLink = caseRecord.quickbooks_invoice_link
-    || (caseRecord.invoice?.quickbooks_invoice_id
-      ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
-      : null);
   const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecord.invoice?.raw_payload);
   const invoiceRaw = caseRecord.invoice?.raw_payload as Record<string, unknown> | undefined;
   const invoiceShippingFromRaw = formatAddressFromRaw(invoiceRaw?.ShipAddr) || formatAddressFromRaw(invoiceRaw?.BillAddr);
@@ -343,6 +339,23 @@ export default async function CaseDetailsPage({
       ) : null}
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div>
+            <label className="label">Invoice #</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.quickbooks_invoice_number ?? "-"} />
+          </div>
+          <div>
+            <label className="label">Invoice Date</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.invoice?.invoice_date ?? "-"} />
+          </div>
+          <div>
+            <label className="label">Purchase Date</label>
+            <input readOnly className="input bg-[#f8fafc]" value={caseRecord.date_of_purchase ?? caseRecord.invoice?.invoice_date ?? "-"} />
+          </div>
+        </div>
+      </section>
+
+      <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-xl font-semibold text-[#121826]">Customer Information</h2>
           <span className="rounded-full bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#334155]">QuickBooks Snapshot</span>
@@ -371,20 +384,10 @@ export default async function CaseDetailsPage({
 
           <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6a7281]">Invoice Snapshot</p>
-            <p><span className="font-semibold">Invoice #:</span> {caseRecord.quickbooks_invoice_number ?? "-"}</p>
-            <p><span className="font-semibold">Invoice Date:</span> {caseRecord.invoice?.invoice_date ?? "-"}</p>
-            <p><span className="font-semibold">Purchase Date:</span> {caseRecord.date_of_purchase ?? caseRecord.invoice?.invoice_date ?? "-"}</p>
-            <p><span className="font-semibold">Payment Status:</span> {caseRecord.invoice?.payment_status ?? "-"}</p>
-            <p><span className="font-semibold">Invoice Total:</span> {caseRecord.invoice?.invoice_total != null ? `$${caseRecord.invoice.invoice_total.toFixed(2)}` : "-"}</p>
             <div>
               <label className="label">Products Purchased</label>
               <textarea readOnly rows={5} className="textarea bg-[#f8fafc]" value={productsPurchased} />
             </div>
-            {invoiceLink ? (
-              <a href={invoiceLink} target="_blank" rel="noreferrer" className="btn-secondary inline-flex w-full justify-center">View Full Invoice</a>
-            ) : (
-              <button type="button" disabled className="btn-secondary inline-flex w-full justify-center opacity-60">View Full Invoice</button>
-            )}
           </aside>
         </div>
       </section>

@@ -303,6 +303,7 @@ export default async function CaseDetailsPage({
   const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecord.invoice?.raw_payload);
   const invoiceRaw = caseRecord.invoice?.raw_payload as Record<string, unknown> | undefined;
   const invoiceShippingFromRaw = formatAddressFromRaw(invoiceRaw?.ShipAddr) || formatAddressFromRaw(invoiceRaw?.BillAddr);
+  const invoiceBillingFromRaw = formatAddressFromRaw(invoiceRaw?.BillAddr) || formatAddressFromRaw(invoiceRaw?.ShipAddr);
   const shippingAddress = invoiceShippingFromRaw
     || caseRecord.invoice?.shipping_address
     || caseRecord.customers?.shipping_address
@@ -313,10 +314,11 @@ export default async function CaseDetailsPage({
     caseRecord.customers?.phone ?? invoiceContactFallbacks.phone,
     caseRecord.customers?.email ?? invoiceContactFallbacks.email,
   );
-  const billingAddress = caseRecord.invoice?.billing_address
-    ?? caseRecord.invoice?.shipping_address
-    ?? caseRecord.customers?.shipping_address
-    ?? "";
+  const billingAddress = invoiceBillingFromRaw
+    || caseRecord.invoice?.billing_address
+    || caseRecord.invoice?.shipping_address
+    || caseRecord.customers?.shipping_address
+    || "";
 
   return (
     <div className="space-y-4">

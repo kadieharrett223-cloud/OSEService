@@ -122,7 +122,7 @@ function formatAddressFromRaw(address: unknown) {
 
 function extractInvoiceAutofillFallbacks(rawPayload: unknown) {
   if (!rawPayload || typeof rawPayload !== "object") {
-    return { email: "", phone: "", shippingAddress: "" };
+    return { email: "", phone: "", shippingAddress: "", billingAddress: "" };
   }
 
   const payload = rawPayload as Record<string, unknown>;
@@ -144,8 +144,9 @@ function extractInvoiceAutofillFallbacks(rawPayload: unknown) {
       : "";
 
   const shippingAddress = formatAddressFromRaw(payload.ShipAddr) || formatAddressFromRaw(payload.BillAddr);
+  const billingAddress = formatAddressFromRaw(payload.BillAddr) || formatAddressFromRaw(payload.ShipAddr);
 
-  return { email, phone, shippingAddress };
+  return { email, phone, shippingAddress, billingAddress };
 }
 
 function buildAutofillUrl(payload: AutofillPayload) {
@@ -228,7 +229,7 @@ export async function quickbooksAutofillAction(formData: FormData) {
       phone: customer?.phone ?? invoiceFallbacks.phone,
       email: customer?.email ?? invoiceFallbacks.email,
       shipping_address: invoiceFallbacks.shippingAddress || invoice?.shipping_address || customer?.shipping_address || "",
-      billing_address: invoice?.billing_address ?? "",
+      billing_address: invoiceFallbacks.billingAddress || invoice?.billing_address || invoice?.shipping_address || customer?.shipping_address || "",
       quickbooks_customer_id: customer?.quickbooks_customer_id ?? invoice?.quickbooks_customer_id ?? "",
       quickbooks_invoice_id: invoice?.id ?? "",
       quickbooks_invoice_number: invoice?.invoice_number ?? "",

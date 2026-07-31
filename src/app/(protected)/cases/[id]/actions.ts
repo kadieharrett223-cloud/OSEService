@@ -342,6 +342,103 @@ export async function addCaseWorkflowEventAction(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
+export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
+  const user = await requireUser();
+
+  const caseId = getString(formData, "case_id");
+  const statusInput = getString(formData, "status");
+  const assignedEmployeeId = getNullableString(formData, "assigned_employee_id");
+  const nextAction = getString(formData, "next_action");
+  const etaDate = getString(formData, "eta_date");
+  const trackingNumber = getString(formData, "tracking_number");
+
+  if (!caseId || !CASE_STATUSES.includes(statusInput as (typeof CASE_STATUSES)[number])) {
+    redirect(`/cases/${caseId || ""}?error=invalid_workflow_update`);
+  }
+
+  const status = statusInput as CaseStatus;
+  const { supabase } = await getCaseOrRedirect(caseId);
+
+  const { data: currentCase, error: caseLookupError } = await supabase
+    .from("customer_service_cases")
+    .select("id, case_number, status, assigned_employee_id")
+    .eq("id", caseId)
+    .maybeSingle();
+
+  if (caseLookupError || !currentCase) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(caseLookupError?.message ?? "Case not found")}`);
+  }
+
+  const updatePayload: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
+    status,
+    assigned_employee_id: assignedEmployeeId,
+    closed_at: status === "Closed" || status === "Completed" || status === "Resolved"
+      ? new Date().toISOString()
+      : null,
+  };
+
+  const { error: updateError } = await supabase
+    .from("customer_service_cases")
+    .update(updatePayload as never)
+    .eq("id", caseId);
+
+  if (updateError) {
+    redirect(`/cases/${caseId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  const activityInserts: Database["public"]["Tables"]["case_activity"]["Insert"][] = [];
+
+  if (status !== currentCase.status) {
+    activityInserts.push({
+      case_id: caseId,
+      actor_id: user.id,
+      activity_type: "status_changed",
+      summary: `Status changed to ${status}`,
+      details: { case_number: currentCase.case_number, status },
+    });
+  }
+
+  if ((currentCase.assigned_employee_id ?? null) !== assignedEmployeeId) {
+    activityInserts.push({
+      case_id: caseId,
+      actor_id: user.id,
+      activity_type: "assigned_user_changed",
+      summary: assignedEmployeeId ? "Assigned user updated" : "Assignee cleared",
+      details: { case_number: currentCase.case_number, assigned_employee_id: assignedEmployeeId },
+    });
+  }
+
+  if (nextAction || etaDate) {
+    activityInserts.push({
+      case_id: caseId,
+      actor_id: user.id,
+      activity_type: "next_action_set",
+      summary: nextAction ? `Next action: ${nextAction}` : `ETA set: ${etaDate}`,
+      details: { case_number: currentCase.case_number, next_action: nextAction || null, eta_date: etaDate || null },
+    });
+  }
+
+  if (trackingNumber) {
+    activityInserts.push({
+      case_id: caseId,
+      actor_id: user.id,
+      activity_type: "add_tracking_number",
+      summary: `Tracking number added: ${trackingNumber}`,
+      details: { tracking_number: trackingNumber },
+    });
+  }
+
+  if (activityInserts.length > 0) {
+    await supabase.from("case_activity").insert(activityInserts as never);
+  }
+
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/cases");
+  revalidatePath("/cases/completed");
+  revalidatePath("/dashboard");
+  redirect(`/cases/${caseId}?success=workflow_saved`);
+}
+
 export async function uploadAttachmentAction(formData: FormData) {
   const user = await requireUser();
 

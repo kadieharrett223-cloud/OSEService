@@ -163,10 +163,6 @@ export default async function CreateCasePage({
                 <label htmlFor="shipping_address" className="label">Shipping Address</label>
                 <textarea id="shipping_address" name="shipping_address" rows={4} readOnly className="textarea bg-[#f8fafc]" defaultValue={shippingAddressDisplay} />
               </div>
-              <div>
-                <label htmlFor="customer_note" className="label">Customer Notes</label>
-                <textarea id="customer_note" name="customer_note" rows={3} className="textarea" placeholder="Only editable field in this section." />
-              </div>
             </div>
 
             <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">

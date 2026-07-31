@@ -367,10 +367,6 @@ export default async function CaseDetailsPage({
                 <textarea readOnly rows={4} className="textarea bg-[#f8fafc]" value={billingAddress} />
               </div>
             </div>
-            <div>
-              <label className="label">Customer Notes</label>
-                <textarea readOnly rows={3} className="textarea bg-[#f8fafc]" value={noteRows.filter((note) => note.note_type === "customer").map((note) => note.content).join("\n\n") || ""} />
-            </div>
           </div>
 
           <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">

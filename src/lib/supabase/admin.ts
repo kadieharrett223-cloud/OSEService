@@ -4,6 +4,16 @@ import type { Database } from "@/lib/supabase/types";
 
 type SandboxRecord = Record<string, unknown>;
 
+type SandboxState = {
+  store: Map<string, SandboxRecord[]>;
+  storageFiles: Map<string, SandboxRecord[]>;
+};
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __oseSandboxState: SandboxState | undefined;
+}
+
 let client: ReturnType<typeof createClient<Database>> | null = null;
 
 function isPlaceholderEnv(value: string | undefined) {
@@ -22,9 +32,19 @@ function isSandboxMode() {
   return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
 }
 
+function getSandboxState() {
+  if (!globalThis.__oseSandboxState) {
+    globalThis.__oseSandboxState = {
+      store: new Map<string, SandboxRecord[]>(),
+      storageFiles: new Map<string, SandboxRecord[]>(),
+    };
+  }
+
+  return globalThis.__oseSandboxState;
+}
+
 function createSandboxClient() {
-  const store = new Map<string, SandboxRecord[]>();
-  const storageFiles = new Map<string, SandboxRecord[]>();
+  const { store, storageFiles } = getSandboxState();
 
   class SandboxQuery {
     private filters: Array<(row: SandboxRecord) => boolean> = [];
@@ -254,12 +274,35 @@ function createSandboxClient() {
       store.set(this.table, nextRows);
     }
 
+    private executeAwait() {
+      if (this.operation === "insert") {
+        return { data: this.payload ? this.serializeRow(this.payload as SandboxRecord) : null, error: null };
+      }
+
+      if (this.operation === "update") {
+        this.applyUpdate();
+        return this.executeSelect(false);
+      }
+
+      if (this.operation === "delete") {
+        this.applyDelete();
+        return { data: null, error: null };
+      }
+
+      if (this.operation === "upsert") {
+        this.applyUpsert();
+        return { data: this.payload ?? null, error: null };
+      }
+
+      return this.executeSelect(false);
+    }
+
     then(resolve: (value: { data: unknown; error: null; count?: number }) => unknown) {
-      return Promise.resolve(this.single()).then(resolve);
+      return Promise.resolve(this.executeAwait()).then(resolve);
     }
 
     catch(reject: (reason: unknown) => unknown) {
-      return Promise.resolve(this.single()).catch(reject);
+      return Promise.resolve(this.executeAwait()).catch(reject);
     }
   }
 

@@ -188,7 +188,7 @@ function safeInputDate(value: string | null | undefined) {
 }
 
 function buildTrackingUrl(trackingNumber: string) {
-  return `https://www.google.com/search?q=${encodeURIComponent(`${trackingNumber} package tracking`)}`;
+  return `https://www.17track.net/en/track?nums=${encodeURIComponent(trackingNumber)}`;
 }
 
 function extractInvoiceContactFallbacks(rawPayload: unknown) {

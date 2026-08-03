@@ -343,17 +343,11 @@ function createSandboxClient() {
 export function getSupabaseAdmin() {
   if (client) return client;
 
-  if (isSandboxMode()) {
-    client = createSandboxClient();
-    return client;
-  }
-
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey || isPlaceholderEnv(supabaseUrl) || isPlaceholderEnv(serviceRoleKey)) {
-    client = createSandboxClient();
-    return client;
+    throw new Error("Missing live Supabase admin credentials. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
   }
 
   try {
@@ -364,8 +358,7 @@ export function getSupabaseAdmin() {
       },
     });
   } catch {
-    client = createSandboxClient();
-    return client;
+    throw new Error("Unable to create Supabase admin client with live credentials.");
   }
 
   return client;

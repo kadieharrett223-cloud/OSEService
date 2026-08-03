@@ -115,6 +115,7 @@ export async function updateCaseStatusAction(formData: FormData) {
   const validatedStatus = newStatus as CaseStatus;
 
   const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
     status: validatedStatus,
@@ -136,7 +137,7 @@ export async function updateCaseStatusAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "status_changed",
     summary: `Status changed to ${newStatus}`,
     details: { case_number: existingCase.case_number, status: newStatus },
@@ -168,6 +169,7 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
     ? (priorityInput as CasePriority)
     : "Medium";
   const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
     case_type: caseType,
@@ -186,7 +188,7 @@ export async function updateCaseIssueDetailsAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "issue_details_updated",
     summary: "Issue details updated",
     details: {
@@ -213,6 +215,7 @@ export async function updateCaseWorkflowAction(formData: FormData) {
   }
 
   const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const nextStatus = mapWorkflowStatus(workflowAction);
   const updates: Database["public"]["Tables"]["customer_service_cases"]["Update"] = {
@@ -237,7 +240,7 @@ export async function updateCaseWorkflowAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "workflow_status_changed",
     summary,
     details: { case_number: existingCase.case_number, status: nextStatus },
@@ -295,6 +298,7 @@ export async function addReplacementPartAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const quantityRaw = Number(getString(formData, "quantity") || "1");
   const quantity = Number.isFinite(quantityRaw) && quantityRaw > 0 ? quantityRaw : 1;
@@ -308,7 +312,7 @@ export async function addReplacementPartAction(formData: FormData) {
     supplier: getNullableString(formData, "supplier"),
     cost: Number(getString(formData, "cost") || "0") || null,
     order_date: getNullableString(formData, "order_date"),
-    ordered_by: user.id,
+    ordered_by: safeActorId,
     shipping_status: getNullableString(formData, "shipping_status"),
     carrier: getNullableString(formData, "carrier"),
     tracking_number: getNullableString(formData, "tracking_number"),
@@ -323,7 +327,7 @@ export async function addReplacementPartAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "replacement_part_added",
     summary: `Replacement part added: ${partName}`,
   });
@@ -373,13 +377,14 @@ export async function addCaseWorkflowEventAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const details = trackingNumber ? { tracking_number: trackingNumber } : null;
   const summary = trackingNumber ? `${eventConfig.summary}: ${trackingNumber}` : eventConfig.summary;
 
   const { error } = await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: eventType,
     summary,
     details,
@@ -410,6 +415,7 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
 
   const status = statusInput as CaseStatus;
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const { data: currentCase, error: caseLookupError } = await supabase
     .from("customer_service_cases")
@@ -443,7 +449,7 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
   if (status !== currentCase.status) {
     activityInserts.push({
       case_id: caseId,
-      actor_id: user.id,
+      actor_id: safeActorId,
       activity_type: "status_changed",
       summary: `Status changed to ${status}`,
       details: { case_number: currentCase.case_number, status },
@@ -453,7 +459,7 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
   if ((currentCase.assigned_employee_id ?? null) !== assignedEmployeeId) {
     activityInserts.push({
       case_id: caseId,
-      actor_id: user.id,
+      actor_id: safeActorId,
       activity_type: "assigned_user_changed",
       summary: assignedEmployeeId ? "Assigned user updated" : "Assignee cleared",
       details: { case_number: currentCase.case_number, assigned_employee_id: assignedEmployeeId },
@@ -463,7 +469,7 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
   if (nextAction || etaDate) {
     activityInserts.push({
       case_id: caseId,
-      actor_id: user.id,
+      actor_id: safeActorId,
       activity_type: "next_action_set",
       summary: nextAction ? `Next action: ${nextAction}` : `ETA set: ${etaDate}`,
       details: { case_number: currentCase.case_number, next_action: nextAction || null, eta_date: etaDate || null },
@@ -473,7 +479,7 @@ export async function updateCaseWorkflowWorkspaceAction(formData: FormData) {
   if (trackingNumber) {
     activityInserts.push({
       case_id: caseId,
-      actor_id: user.id,
+      actor_id: safeActorId,
       activity_type: "add_tracking_number",
       summary: `Tracking number added: ${trackingNumber}`,
       details: { tracking_number: trackingNumber },
@@ -515,6 +521,7 @@ export async function autosaveIssueDetailsWorkspaceAction(
       : "Medium";
 
     const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+    const safeActorId = await ensureAccessUserId(supabase, user);
     const { data: currentCase, error: lookupError } = await supabase
       .from("customer_service_cases")
       .select("case_type, priority, issue_description")
@@ -548,7 +555,7 @@ export async function autosaveIssueDetailsWorkspaceAction(
 
     await supabase.from("case_activity").insert({
       case_id: caseId,
-      actor_id: user.id,
+      actor_id: safeActorId,
       activity_type: "issue_details_updated",
       summary: "Issue details updated",
       details: {
@@ -588,6 +595,7 @@ export async function autosaveWorkflowWorkspaceAction(
 
     const status = statusInput as CaseStatus;
     const { supabase } = await getCaseOrRedirect(caseId);
+    const safeActorId = await ensureAccessUserId(supabase, user);
 
     const { data: currentCase, error: caseLookupError } = await supabase
       .from("customer_service_cases")
@@ -624,7 +632,7 @@ export async function autosaveWorkflowWorkspaceAction(
     if (statusChanged) {
       activityInserts.push({
         case_id: caseId,
-        actor_id: user.id,
+        actor_id: safeActorId,
         activity_type: "status_changed",
         summary: `Status changed to ${status}`,
         details: { case_number: currentCase.case_number, status },
@@ -634,7 +642,7 @@ export async function autosaveWorkflowWorkspaceAction(
     if (assigneeChanged) {
       activityInserts.push({
         case_id: caseId,
-        actor_id: user.id,
+        actor_id: safeActorId,
         activity_type: "assigned_user_changed",
         summary: assignedEmployeeId ? "Assigned user updated" : "Assignee cleared",
         details: { case_number: currentCase.case_number, assigned_employee_id: assignedEmployeeId },
@@ -658,7 +666,7 @@ export async function autosaveWorkflowWorkspaceAction(
     if (nextActionChanged && (nextAction || etaDate)) {
       activityInserts.push({
         case_id: caseId,
-        actor_id: user.id,
+        actor_id: safeActorId,
         activity_type: "next_action_set",
         summary: nextAction ? `Next action: ${nextAction}` : `ETA set: ${etaDate}`,
         details: { case_number: currentCase.case_number, next_action: nextAction || null, eta_date: etaDate || null },
@@ -692,6 +700,7 @@ export async function uploadAttachmentAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   for (const file of files) {
     if (!isAllowedAttachment(file)) {
@@ -722,7 +731,7 @@ export async function uploadAttachmentAction(formData: FormData) {
       file_name: file.name,
       file_size: file.size,
       mime_type: file.type || null,
-      uploaded_by: user.id,
+      uploaded_by: safeActorId,
     });
 
     if (dbError) {
@@ -732,7 +741,7 @@ export async function uploadAttachmentAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "file_uploaded",
     summary: files.length === 1 ? `Attachment uploaded: ${files[0].name}` : `${files.length} attachments uploaded`,
   });
@@ -751,6 +760,7 @@ export async function deleteAttachmentAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const { data: attachment, error: lookupError } = await supabase
     .from("case_attachments")
@@ -779,7 +789,7 @@ export async function deleteAttachmentAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "file_deleted",
     summary: `Attachment deleted: ${attachment.file_name}`,
   });
@@ -802,6 +812,7 @@ export async function deleteCaseAction(formData: FormData) {
   }
 
   const supabase = getSupabaseAdmin();
+  const safeActorId = await ensureAccessUserId(supabase, user);
   const { data: existingCase, error: lookupError } = await supabase
     .from("customer_service_cases")
     .select("id, case_number, created_by")
@@ -812,7 +823,7 @@ export async function deleteCaseAction(formData: FormData) {
     redirect("/cases?error=case_not_found");
   }
 
-  if (existingCase.created_by !== user.id) {
+  if (existingCase.created_by !== safeActorId) {
     redirect("/cases?error=case_delete_forbidden");
   }
 

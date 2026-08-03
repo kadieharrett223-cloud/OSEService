@@ -90,12 +90,16 @@ function parseSessionValue(value: string | undefined): SessionPayload | null {
 }
 
 export async function getCurrentAccessUser() {
+  if (isSandboxMode()) {
+    return getDevelopmentFallbackUser();
+  }
+
   const cookieStore = await cookies();
   const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
   const session = parseSessionValue(sessionCookie);
 
   if (!session) {
-    return isSandboxMode() ? getDevelopmentFallbackUser() : null;
+    return null;
   }
 
   const supabase = getSupabaseAdmin();

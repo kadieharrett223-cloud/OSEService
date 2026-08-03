@@ -97,13 +97,27 @@ begin
   from public.profiles p
   where c.assigned_employee_id = p.id;
 
-  alter table public.customer_service_cases
-    add constraint customer_service_cases_created_by_access_user_fkey
-    foreign key (created_by) references public.access_users(id) on delete restrict;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'customer_service_cases_created_by_access_user_fkey'
+      and conrelid = 'public.customer_service_cases'::regclass
+  ) then
+    alter table public.customer_service_cases
+      add constraint customer_service_cases_created_by_access_user_fkey
+      foreign key (created_by) references public.access_users(id) on delete restrict;
+  end if;
 
-  alter table public.customer_service_cases
-    add constraint customer_service_cases_assigned_employee_id_access_user_fkey
-    foreign key (assigned_employee_id) references public.access_users(id) on delete set null;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'customer_service_cases_assigned_employee_id_access_user_fkey'
+      and conrelid = 'public.customer_service_cases'::regclass
+  ) then
+    alter table public.customer_service_cases
+      add constraint customer_service_cases_assigned_employee_id_access_user_fkey
+      foreign key (assigned_employee_id) references public.access_users(id) on delete set null;
+  end if;
 
   alter table public.case_notes drop constraint if exists case_notes_created_by_fkey;
   update public.case_notes n
@@ -111,9 +125,16 @@ begin
   from public.profiles p
   where n.created_by = p.id;
   update public.case_notes set created_by = fallback_user where created_by is null;
-  alter table public.case_notes
-    add constraint case_notes_created_by_access_user_fkey
-    foreign key (created_by) references public.access_users(id) on delete restrict;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'case_notes_created_by_access_user_fkey'
+      and conrelid = 'public.case_notes'::regclass
+  ) then
+    alter table public.case_notes
+      add constraint case_notes_created_by_access_user_fkey
+      foreign key (created_by) references public.access_users(id) on delete restrict;
+  end if;
 
   alter table public.case_attachments drop constraint if exists case_attachments_uploaded_by_fkey;
   update public.case_attachments a
@@ -121,27 +142,48 @@ begin
   from public.profiles p
   where a.uploaded_by = p.id;
   update public.case_attachments set uploaded_by = fallback_user where uploaded_by is null;
-  alter table public.case_attachments
-    add constraint case_attachments_uploaded_by_access_user_fkey
-    foreign key (uploaded_by) references public.access_users(id) on delete restrict;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'case_attachments_uploaded_by_access_user_fkey'
+      and conrelid = 'public.case_attachments'::regclass
+  ) then
+    alter table public.case_attachments
+      add constraint case_attachments_uploaded_by_access_user_fkey
+      foreign key (uploaded_by) references public.access_users(id) on delete restrict;
+  end if;
 
   alter table public.case_activity drop constraint if exists case_activity_actor_id_fkey;
   update public.case_activity a
   set actor_id = p.access_user_id
   from public.profiles p
   where a.actor_id = p.id;
-  alter table public.case_activity
-    add constraint case_activity_actor_id_access_user_fkey
-    foreign key (actor_id) references public.access_users(id) on delete set null;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'case_activity_actor_id_access_user_fkey'
+      and conrelid = 'public.case_activity'::regclass
+  ) then
+    alter table public.case_activity
+      add constraint case_activity_actor_id_access_user_fkey
+      foreign key (actor_id) references public.access_users(id) on delete set null;
+  end if;
 
   alter table public.replacement_parts drop constraint if exists replacement_parts_ordered_by_fkey;
   update public.replacement_parts r
   set ordered_by = p.access_user_id
   from public.profiles p
   where r.ordered_by = p.id;
-  alter table public.replacement_parts
-    add constraint replacement_parts_ordered_by_access_user_fkey
-    foreign key (ordered_by) references public.access_users(id) on delete set null;
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'replacement_parts_ordered_by_access_user_fkey'
+      and conrelid = 'public.replacement_parts'::regclass
+  ) then
+    alter table public.replacement_parts
+      add constraint replacement_parts_ordered_by_access_user_fkey
+      foreign key (ordered_by) references public.access_users(id) on delete set null;
+  end if;
 end $$;
 
 -- Disable RLS for app tables because access control moves to server-side code session.

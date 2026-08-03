@@ -63,7 +63,6 @@ export default async function NewInstallationPage({
               initialValue={params.invoice_number ?? ""}
               targetInputId="invoice_number"
               submitFormId="invoice-autofill-form"
-              onSelect={() => undefined}
             />
           </div>
           <button type="submit" className="btn-secondary">Find Invoice</button>

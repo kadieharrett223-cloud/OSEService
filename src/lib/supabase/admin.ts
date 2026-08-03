@@ -27,18 +27,61 @@ function createSandboxClient() {
     private orderBy: { column: string; ascending: boolean } | null = null;
     private limitValue: number | null = null;
     private selectedColumns: string | null = null;
-    private payload: SandboxRecord | null = null;
-    private operation: "select" | "insert" | "update" | "delete" = "select";
+    private selectOptions: { count?: "exact" | "planned"; head?: boolean } | null = null;
+    private payload: SandboxRecord | SandboxRecord[] | null = null;
+    private upsertConflict: string | null = null;
+    private operation: "select" | "insert" | "update" | "delete" | "upsert" = "select";
 
     constructor(private table: string) {}
 
-    select(columns: string) {
+    select(columns: string, options?: { count?: "exact" | "planned"; head?: boolean }) {
       this.selectedColumns = columns;
+      this.selectOptions = options ?? null;
       return this;
     }
 
     eq(column: string, value: unknown) {
       this.filters.push((row) => row[column] === value);
+      return this;
+    }
+
+    not(column: string, operator: string, value: unknown) {
+      this.filters.push((row) => {
+        const rowValue = row[column];
+        if (operator === "in") {
+          const values = Array.isArray(value)
+            ? value.map((entry) => String(entry))
+            : String(value)
+                .trim()
+                .replace(/^\(|\)$/g, "")
+                .split(",")
+                .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""));
+          return !values.includes(rowValue == null ? "" : String(rowValue));
+        }
+
+        return rowValue !== value;
+      });
+      return this;
+    }
+
+    gte(column: string, value: unknown) {
+      this.filters.push((row) => {
+        const rowValue = row[column];
+        const leftNumber = Number(rowValue);
+        const rightNumber = Number(value);
+        if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+          return leftNumber >= rightNumber;
+        }
+        return String(rowValue ?? "") >= String(value ?? "");
+      });
+      return this;
+    }
+
+    in(column: string, values: unknown[]) {
+      this.filters.push((row) => {
+        const rowValue = row[column];
+        return values.includes(rowValue);
+      });
       return this;
     }
 
@@ -64,6 +107,8 @@ function createSandboxClient() {
         created_at: payload.created_at ?? new Date().toISOString(),
         updated_at: payload.updated_at ?? new Date().toISOString(),
       };
+      const rows = store.get(this.table) ?? [];
+      store.set(this.table, [...rows, this.payload]);
       return this;
     }
 
@@ -73,23 +118,30 @@ function createSandboxClient() {
       return this;
     }
 
+    upsert(payload: SandboxRecord | SandboxRecord[], options?: { onConflict?: string }) {
+      this.operation = "upsert";
+      this.payload = payload;
+      this.upsertConflict = options?.onConflict ?? null;
+      return this;
+    }
+
     delete() {
       this.operation = "delete";
       return this;
     }
 
     maybeSingle() {
-      return Promise.resolve({ data: this.getRows()[0] ?? null, error: null });
+      return Promise.resolve(this.executeSelect(true));
     }
 
     single() {
       if (this.operation === "insert") {
-        return Promise.resolve({ data: this.payload ? this.serializeRow(this.payload) : null, error: null });
+        return Promise.resolve({ data: this.payload ? this.serializeRow(this.payload as SandboxRecord) : null, error: null });
       }
 
       if (this.operation === "update") {
         this.applyUpdate();
-        return Promise.resolve({ data: this.getRows()[0] ?? null, error: null });
+        return Promise.resolve(this.executeSelect(true));
       }
 
       if (this.operation === "delete") {
@@ -97,7 +149,12 @@ function createSandboxClient() {
         return Promise.resolve({ data: null, error: null });
       }
 
-      return Promise.resolve({ data: this.getRows()[0] ?? null, error: null });
+      if (this.operation === "upsert") {
+        this.applyUpsert();
+        return Promise.resolve({ data: this.payload ? this.serializeRow(this.payload as SandboxRecord) : null, error: null });
+      }
+
+      return Promise.resolve(this.executeSelect(true));
     }
 
     private readRows() {
@@ -119,13 +176,32 @@ function createSandboxClient() {
       return ordered;
     }
 
-    private getRows() {
-      return this.readRows().map((row) => this.serializeRow(row));
+    private executeSelect(singleOnly: boolean) {
+      const rows = this.readRows();
+      const data = rows.map((row) => this.serializeRow(row));
+      const result = {
+        data: singleOnly ? data[0] ?? null : data,
+        count: this.selectOptions?.count === "exact" ? data.length : undefined,
+        error: null,
+      };
+
+      if (this.selectOptions?.head) {
+        return {
+          ...result,
+          data: [],
+          count: data.length,
+        };
+      }
+
+      return result;
     }
 
     private serializeRow(row: SandboxRecord) {
       if (!this.selectedColumns) return row;
-      const columns = this.selectedColumns.split(",").map((column) => column.trim()).filter(Boolean);
+      const columns = this.selectedColumns
+        .split(",")
+        .map((column) => column.trim())
+        .filter(Boolean);
       return columns.reduce<SandboxRecord>((accumulator, column) => {
         accumulator[column] = row[column];
         return accumulator;
@@ -146,7 +222,35 @@ function createSandboxClient() {
       store.set(this.table, remaining);
     }
 
-    then(resolve: (value: { data: unknown; error: null }) => unknown) {
+    private applyUpsert() {
+      const rows = store.get(this.table) ?? [];
+      const payloadRows = Array.isArray(this.payload) ? this.payload : [this.payload];
+      const nextRows = [...rows];
+
+      for (const incoming of payloadRows) {
+        const sourceRow = incoming ?? {};
+        const rowPayload = {
+          ...sourceRow,
+          id: sourceRow.id ?? crypto.randomUUID(),
+          created_at: sourceRow.created_at ?? new Date().toISOString(),
+          updated_at: sourceRow.updated_at ?? new Date().toISOString(),
+        } as SandboxRecord;
+
+        if (this.upsertConflict && rowPayload[this.upsertConflict] !== undefined) {
+          const existingIndex = nextRows.findIndex((row) => row[this.upsertConflict!] === rowPayload[this.upsertConflict!]);
+          if (existingIndex >= 0) {
+            nextRows[existingIndex] = { ...nextRows[existingIndex], ...rowPayload, updated_at: new Date().toISOString() };
+            continue;
+          }
+        }
+
+        nextRows.push(rowPayload);
+      }
+
+      store.set(this.table, nextRows);
+    }
+
+    then(resolve: (value: { data: unknown; error: null; count?: number }) => unknown) {
       return Promise.resolve(this.single()).then(resolve);
     }
 

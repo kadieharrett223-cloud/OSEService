@@ -15,12 +15,10 @@ type InvoiceSuggestion = {
 
 export function InstallationInvoiceTypeahead({
   initialValue,
-  onSelect,
   targetInputId,
   submitFormId,
 }: {
   initialValue?: string;
-  onSelect: (selection: InvoiceSuggestion) => void;
   targetInputId?: string;
   submitFormId?: string;
 }) {
@@ -139,8 +137,6 @@ export function InstallationInvoiceTypeahead({
                         targetInput.value = nextValue;
                       }
                     }
-
-                    onSelect(suggestion);
 
                     if (submitFormId) {
                       const form = document.getElementById(submitFormId) as HTMLFormElement | null;

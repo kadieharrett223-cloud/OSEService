@@ -4,7 +4,13 @@
 
 create extension if not exists pgcrypto;
 
-create type public.note_type as enum ('internal', 'customer');
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'note_type' and typnamespace = 'public'::regnamespace) then
+    create type public.note_type as enum ('internal', 'customer');
+  end if;
+end
+$$;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,

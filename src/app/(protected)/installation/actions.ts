@@ -30,10 +30,15 @@ function isRedirectLikeError(error: unknown) {
 }
 
 function normalizeInstallationStatus(value: string) {
+  if (value === "New Install" || value === "New" || value === "new") {
+    return "In Progress";
+  }
+
   if (value === "In Progress" || value === "Completed" || value === "Blocked") {
     return value;
   }
-  return "New";
+
+  return "In Progress";
 }
 
 function normalizeLookupQuery(value: string) {

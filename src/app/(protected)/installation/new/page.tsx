@@ -111,8 +111,8 @@ export default async function NewInstallationPage({
             <textarea id="notes" name="notes" rows={6} className="textarea" placeholder="Add a simple log entry with time, status, and follow-up actions." />
             <div>
               <label htmlFor="status" className="label">Status</label>
-              <select id="status" name="status" className="select" defaultValue="New">
-                <option value="New">New</option>
+              <select id="status" name="status" className="select" defaultValue="New Install">
+                <option value="New Install">New Install</option>
                 <option value="In Progress">In Progress</option>
                 <option value="Completed">Completed</option>
                 <option value="Blocked">Blocked</option>

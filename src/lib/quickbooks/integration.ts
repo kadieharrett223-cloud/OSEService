@@ -329,18 +329,26 @@ export async function connectQuickbooksFromCallback(options: {
 
 export async function getQuickbooksConnectionStatus() {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from("quickbooks_connections")
-    .select("id, realm_id, environment, status, last_sync_at, last_sync_status, last_sync_error, updated_at")
-    .eq("status", "connected")
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
 
-  return {
-    connection: (data as ConnectionRow | null) ?? null,
-    error,
-  };
+  try {
+    const { data, error } = await supabase
+      .from("quickbooks_connections")
+      .select("id, realm_id, environment, status, last_sync_at, last_sync_status, last_sync_error, updated_at")
+      .eq("status", "connected")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return {
+      connection: (data as ConnectionRow | null) ?? null,
+      error,
+    };
+  } catch {
+    return {
+      connection: null,
+      error: null,
+    };
+  }
 }
 
 export async function disconnectQuickbooksConnection() {

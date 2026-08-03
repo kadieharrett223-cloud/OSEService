@@ -15,15 +15,28 @@ export default async function ProtectedLayout({
   const user = await requireUser();
   const userName = user.fullName ?? "Unknown User";
   const supabase = getSupabaseAdmin();
-  const quickbooksStatus = await getQuickbooksConnectionStatus();
+  let quickbooksStatus = { connection: null, error: null } as Awaited<ReturnType<typeof getQuickbooksConnectionStatus>>;
+  let quickbooksSnapshotCount = 0;
 
-  const { count: quickbooksSnapshotCount } = await supabase
-    .from("quickbooks_invoices")
-    .select("id", { count: "exact", head: true });
+  try {
+    quickbooksStatus = await getQuickbooksConnectionStatus();
+  } catch {
+    quickbooksStatus = { connection: null, error: null };
+  }
+
+  try {
+    const { count } = await supabase
+      .from("quickbooks_invoices")
+      .select("id", { count: "exact", head: true });
+
+    quickbooksSnapshotCount = count ?? 0;
+  } catch {
+    quickbooksSnapshotCount = 0;
+  }
 
   const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
   const isQboConnected = quickbooksTableMissing
-    ? (quickbooksSnapshotCount ?? 0) > 0
+    ? quickbooksSnapshotCount > 0
     : Boolean(quickbooksStatus.connection);
 
   return (

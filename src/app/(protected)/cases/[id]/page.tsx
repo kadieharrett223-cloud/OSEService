@@ -11,6 +11,7 @@ import {
   deleteAttachmentAction,
   uploadAttachmentAction,
 } from "@/app/(protected)/cases/[id]/actions";
+import { DeleteCaseButton } from "@/app/(protected)/cases/[id]/delete-case-button";
 
 type ActivityRow = {
   id: string;
@@ -447,7 +448,7 @@ export default async function CaseDetailsPage({
 
             return (
               <div key={item.id} className="rounded-md border border-[#ececec] p-2 text-sm">
-                <div className="mb-2 flex h-28 items-center justify-center rounded-md bg-[#f5f7fb]">
+                <div className="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-md bg-[#f5f7fb]">
                   {isImage && item.url ? (
                     <a href={item.url} target="_blank" rel="noreferrer" className="h-full w-full">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -582,6 +583,16 @@ export default async function CaseDetailsPage({
               </Link>
             </div>
           ) : null}
+        </div>
+      </section>
+
+      <section className="card border border-[#f1d5d7] bg-[#fff8f8] p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
+            <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and its uploaded files. Only the original creator can delete it.</p>
+          </div>
+          <DeleteCaseButton caseId={id} />
         </div>
       </section>
     </div>

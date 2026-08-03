@@ -746,3 +746,59 @@ export async function deleteAttachmentAction(formData: FormData) {
 
   revalidatePath(`/cases/${caseId}`);
 }
+
+export async function deleteCaseAction(formData: FormData) {
+  const user = await requireUser();
+
+  const caseId = getString(formData, "case_id");
+  const confirmationCode = getString(formData, "confirmation_code");
+
+  if (!caseId) {
+    redirect("/cases?error=missing_case_reference");
+  }
+
+  if (confirmationCode !== "9822") {
+    redirect(`/cases/${caseId}?error=invalid_delete_confirmation`);
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: existingCase, error: lookupError } = await supabase
+    .from("customer_service_cases")
+    .select("id, case_number, created_by")
+    .eq("id", caseId)
+    .maybeSingle();
+
+  if (lookupError || !existingCase) {
+    redirect("/cases?error=case_not_found");
+  }
+
+  if (existingCase.created_by !== user.id) {
+    redirect("/cases?error=case_delete_forbidden");
+  }
+
+  const { data: attachments } = await supabase
+    .from("case_attachments")
+    .select("file_path")
+    .eq("case_id", caseId);
+
+  const storagePaths = (attachments ?? [])
+    .map((attachment) => (typeof attachment.file_path === "string" ? attachment.file_path : null))
+    .filter((value): value is string => Boolean(value));
+
+  if (storagePaths.length > 0) {
+    await supabase.storage.from("case-attachments").remove(storagePaths);
+  }
+
+  const { error: deleteError } = await supabase
+    .from("customer_service_cases")
+    .delete()
+    .eq("id", caseId);
+
+  if (deleteError) {
+    redirect(`/cases?error=${encodeURIComponent(deleteError.message)}`);
+  }
+
+  revalidatePath("/cases");
+  revalidatePath("/dashboard");
+  redirect("/cases?success=case_deleted");
+}

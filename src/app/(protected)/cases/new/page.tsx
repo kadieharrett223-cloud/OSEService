@@ -112,6 +112,12 @@ export default async function CreateCasePage({
         </p>
       ) : null}
 
+      {params.prefilled === "1" ? null : (
+        <p className="rounded-md border border-[#e7eaef] bg-[#f8fafc] p-3 text-sm text-[#334155]">
+          No QuickBooks match is required. You can enter the customer details manually and create the case directly in sandbox mode.
+        </p>
+      )}
+
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-[#121826]">Find QuickBooks Customer / Invoice</h2>
@@ -147,15 +153,15 @@ export default async function CreateCasePage({
             <div className="space-y-2 lg:col-span-2">
               <div>
                 <label htmlFor="customer_name" className="label">Customer Name</label>
-                <input id="customer_name" name="customer_name" required readOnly className="input bg-[#f8fafc]" defaultValue={params.customer_name ?? ""} />
+                <input id="customer_name" name="customer_name" required readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.customer_name ?? ""} />
               </div>
               <div>
                 <label htmlFor="company_name" className="label">Company</label>
-                <input id="company_name" name="company_name" readOnly className="input bg-[#f8fafc]" defaultValue={params.company_name ?? ""} />
+                <input id="company_name" name="company_name" readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.company_name ?? ""} />
               </div>
               <div>
                 <label htmlFor="shipping_address" className="label">Shipping Address</label>
-                <textarea id="shipping_address" name="shipping_address" rows={4} readOnly className="textarea bg-[#f8fafc]" defaultValue={shippingAddressDisplay} />
+                <textarea id="shipping_address" name="shipping_address" rows={4} readOnly={params.prefilled === "1"} className={`textarea ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={shippingAddressDisplay} />
               </div>
             </div>
 

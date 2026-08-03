@@ -283,7 +283,7 @@ export async function connectQuickbooksFromCallback(options: {
   code: string;
   realmId: string;
   origin: string;
-  connectedBy: string;
+  connectedBy: string | null;
 }) {
   const config = getQuickbooksCredentials();
   if (!config) {

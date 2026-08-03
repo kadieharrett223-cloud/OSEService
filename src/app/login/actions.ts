@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "node:crypto";
 import { redirect } from "next/navigation";
 import { createSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -17,7 +18,7 @@ export async function signInAction(formData: FormData) {
     redirect("/login?error=invalid_access_code");
   }
 
-  const sessionUserId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const sessionUserId = crypto.randomUUID();
   await createSession(sessionUserId, firstName);
 
   try {

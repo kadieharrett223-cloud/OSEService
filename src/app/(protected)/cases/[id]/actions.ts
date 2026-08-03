@@ -46,43 +46,87 @@ function isSandboxMode() {
   return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function ensureAccessUserId(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   user: { id: string; fullName: string | null },
 ) {
-  try {
-    const { data: accessUser, error: accessUserError } = await supabase
-      .from("access_users")
-      .select("id")
-      .eq("id", user.id)
-      .maybeSingle();
+  const userIdIsUuid = isUuid(user.id);
+  const fallbackName = user.fullName?.trim() || "Sandbox User";
 
-    if (!accessUserError && accessUser?.id) {
-      return accessUser.id;
+  try {
+    if (userIdIsUuid) {
+      const { data: accessUser, error: accessUserError } = await supabase
+        .from("access_users")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!accessUserError && accessUser?.id) {
+        return accessUser.id;
+      }
     }
 
-    const fallbackName = user.fullName?.trim() || "Sandbox User";
     const accessCode = `AUTO-${Math.random().toString(36).slice(2, 10)}`;
+    const insertPayload: {
+      id?: string;
+      full_name: string;
+      access_code: string;
+      is_active: boolean;
+    } = {
+      full_name: fallbackName,
+      access_code: accessCode,
+      is_active: true,
+    };
+
+    if (userIdIsUuid) {
+      insertPayload.id = user.id;
+    }
 
     const { data: createdUser, error: createError } = await supabase
       .from("access_users")
-      .insert({
-        id: user.id,
-        full_name: fallbackName,
-        access_code: accessCode,
-        is_active: true,
-      })
+      .insert(insertPayload)
       .select("id")
       .maybeSingle();
 
     if (!createError && createdUser?.id) {
       return createdUser.id;
     }
+
+    const { data: fallbackUser, error: fallbackError } = await supabase
+      .from("access_users")
+      .select("id")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (!fallbackError && fallbackUser?.id) {
+      return fallbackUser.id;
+    }
+
+    const emergencyId = crypto.randomUUID();
+    const { data: emergencyUser, error: emergencyError } = await supabase
+      .from("access_users")
+      .insert({
+        id: emergencyId,
+        full_name: fallbackName,
+        access_code: `AUTO-${Math.random().toString(36).slice(2, 10)}`,
+        is_active: true,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (!emergencyError && emergencyUser?.id) {
+      return emergencyUser.id;
+    }
   } catch {
     // Ignore access-user lookup failures in sandbox environments.
   }
 
-  return user.id;
+  return userIdIsUuid ? user.id : crypto.randomUUID();
 }
 
 async function getCaseOrRedirect(caseId: string) {

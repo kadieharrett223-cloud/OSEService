@@ -8,6 +8,12 @@ import {
 
 const STATE_COOKIE = "qbo_oauth_state";
 
+function asUuidOrNull(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    ? value
+    : null;
+}
+
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
@@ -41,7 +47,7 @@ export async function GET(request: Request) {
       code,
       realmId,
       origin: url.origin,
-      connectedBy: user.id,
+      connectedBy: asUuidOrNull(user.id),
     });
 
     const syncResult = await syncQuickbooksInvoices();

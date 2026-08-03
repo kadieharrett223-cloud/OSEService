@@ -97,16 +97,21 @@ export default async function InstallationDetailPage({
       </div>
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
-        <h2 className="text-xl font-semibold text-[#121826]">Installation Details</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div className="space-y-2 text-sm text-[#334155]">
-            <p><span className="font-semibold">Invoice:</span> {installationJob.invoice_number}</p>
-            <p><span className="font-semibold">Company:</span> {installationJob.company_name ?? "-"}</p>
-            <p><span className="font-semibold">Phone:</span> {installationJob.phone ?? "-"}</p>
-            <p><span className="font-semibold">Email:</span> {installationJob.email ?? "-"}</p>
-            <p><span className="font-semibold">Shipping Address:</span> {installationJob.shipping_address ?? "-"}</p>
-            <p><span className="font-semibold">Updated:</span> {new Date(installationJob.updated_at).toLocaleString()}</p>
-          </div>
+        <h2 className="text-xl font-semibold text-[#121826]">Customer Info</h2>
+        <div className="mt-4 space-y-3 text-sm text-[#334155]">
+          <p><span className="font-semibold">Invoice Number:</span> {installationJob.invoice_number}</p>
+          <p><span className="font-semibold">Customer Name:</span> {installationJob.customer_name}</p>
+          <p><span className="font-semibold">Shipping Address:</span> {installationJob.shipping_address ?? "-"}</p>
+          {installationJob.quickbooks_invoice_id ? (
+            <a
+              href={`https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(installationJob.quickbooks_invoice_id)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-secondary inline-flex"
+            >
+              View Invoice
+            </a>
+          ) : null}
         </div>
       </section>
 

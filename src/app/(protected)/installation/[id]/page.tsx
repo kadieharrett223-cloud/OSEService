@@ -246,11 +246,12 @@ export default async function InstallationDetailPage({
           {invoiceLineItems.length ? (
             <div className="rounded-lg border border-[#ececec] bg-[#fafbfc] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Invoice Line Items</p>
-              <ul className="mt-2 space-y-1 text-sm text-[#334155]">
-                {invoiceLineItems.map((lineItem) => (
-                  <li key={lineItem}>{lineItem}</li>
-                ))}
-              </ul>
+              <textarea
+                readOnly
+                rows={Math.min(Math.max(invoiceLineItems.length + 1, 5), 12)}
+                className="textarea mt-2 bg-[#f8fafc]"
+                value={invoiceLineItems.join("\n")}
+              />
             </div>
           ) : null}
         </div>

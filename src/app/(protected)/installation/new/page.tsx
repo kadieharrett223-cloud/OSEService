@@ -16,6 +16,7 @@ type SearchParams = {
   quickbooks_invoice_id?: string;
   quickbooks_invoice_external_id?: string;
   quickbooks_invoice_link?: string;
+  products_purchased?: string;
 };
 
 export default async function NewInstallationPage({
@@ -75,39 +76,56 @@ export default async function NewInstallationPage({
       <form id="installation-form" action={createInstallationAction} className="space-y-4">
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
           <h2 className="text-xl font-semibold text-[#121826]">Invoice & Customer</h2>
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <div className="space-y-3 lg:col-span-2">
+              <div>
               <label htmlFor="invoice_number" className="label">Invoice Number</label>
               <input id="invoice_number" name="invoice_number" required className="input" defaultValue={params.invoice_number ?? ""} placeholder="Required" />
-            </div>
-            <div>
+              </div>
+              <div>
               <label htmlFor="customer_name" className="label">Customer Name</label>
               <input id="customer_name" name="customer_name" required readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.customer_name ?? ""} placeholder="Required" />
-            </div>
-            <div>
+              </div>
+              <div>
               <label htmlFor="company_name" className="label">Company</label>
               <input id="company_name" name="company_name" readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.company_name ?? ""} />
-            </div>
-            <div>
+              </div>
+              <div>
               <label htmlFor="phone" className="label">Phone</label>
               <input id="phone" name="phone" readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.phone ?? ""} />
-            </div>
-            <div>
+              </div>
+              <div>
               <label htmlFor="email" className="label">Email</label>
               <input id="email" name="email" readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.email ?? ""} />
-            </div>
-            <div>
+              </div>
+              <div>
               <label htmlFor="shipping_address" className="label">Shipping Address</label>
               <input id="shipping_address" name="shipping_address" readOnly={params.prefilled === "1"} className={`input ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={params.shipping_address ?? ""} />
+              </div>
             </div>
+
+            <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6a7281]">Invoice Snapshot</p>
+              <p><span className="font-semibold">Invoice #:</span> {params.invoice_number ?? "-"}</p>
+              <div>
+                <label htmlFor="products_purchased" className="label">Line Items</label>
+                <textarea
+                  id="products_purchased"
+                  readOnly
+                  rows={8}
+                  className="textarea bg-[#f8fafc]"
+                  defaultValue={params.products_purchased ?? ""}
+                />
+              </div>
+              {params.quickbooks_invoice_link ? (
+                <a href={params.quickbooks_invoice_link} target="_blank" rel="noreferrer" className="btn-secondary inline-flex w-full justify-center">View Invoice</a>
+              ) : (
+                <button type="button" disabled className="btn-secondary inline-flex w-full justify-center opacity-60">View Invoice</button>
+              )}
+            </aside>
           </div>
           <input type="hidden" name="quickbooks_invoice_id" value={params.quickbooks_invoice_id ?? ""} />
           <input type="hidden" name="quickbooks_customer_id" value={params.quickbooks_customer_id ?? ""} />
-          {params.quickbooks_invoice_link ? (
-            <div className="mt-4">
-              <a href={params.quickbooks_invoice_link} target="_blank" rel="noreferrer" className="btn-secondary inline-flex">View Invoice</a>
-            </div>
-          ) : null}
         </section>
 
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">

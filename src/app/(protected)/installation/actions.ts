@@ -209,6 +209,42 @@ function extractInvoiceAutofillFallbacks(rawPayload: unknown) {
   return { email, phone, shippingAddress: shippingAddress || billingAddress, billingAddress };
 }
 
+function parseProductsPurchased(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return "";
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  const products = lines
+    .map((line, index) => {
+      if (!line || typeof line !== "object") return null;
+
+      const item = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } };
+      };
+
+      const description = typeof item.Description === "string"
+        ? item.Description.trim()
+        : typeof item.SalesItemLineDetail?.ItemRef?.name === "string"
+          ? item.SalesItemLineDetail.ItemRef.name.trim()
+          : "";
+
+      if (!description) return null;
+
+      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty;
+      const qty = typeof qtyRaw === "number" || typeof qtyRaw === "string"
+        ? String(qtyRaw).trim()
+        : "";
+
+      return `${index + 1}. ${description}${qty ? ` (Qty ${qty})` : ""}`;
+    })
+    .filter((value): value is string => Boolean(value));
+
+  return products.join("\n");
+}
+
 export async function quickbooksInstallationAutofillAction(formData: FormData) {
   await requireUser();
   const supabase = getSupabaseAdmin();
@@ -256,6 +292,7 @@ export async function quickbooksInstallationAutofillAction(formData: FormData) {
       quickbooks_invoice_link: invoice.quickbooks_invoice_id
         ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(invoice.quickbooks_invoice_id)}`
         : "",
+      products_purchased: parseProductsPurchased(invoice.raw_payload),
     }),
   );
 }

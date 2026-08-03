@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const SESSION_COOKIE = "app_access_session";
 const ONE_DAY_SECONDS = 60 * 60 * 24;
@@ -87,25 +86,10 @@ export async function getCurrentAccessUser() {
     return null;
   }
 
-  try {
-    const supabase = getSupabaseAdmin();
-    const { data: accessUser } = await supabase
-      .from("access_users")
-      .select("id, full_name, is_active")
-      .eq("id", session.userId)
-      .maybeSingle();
-
-    if (!accessUser || accessUser.is_active !== true) {
-      return null;
-    }
-
-    return {
-      id: accessUser.id,
-      fullName: accessUser.full_name,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    id: session.userId,
+    fullName: session.fullName,
+  };
 }
 
 export async function requireAccessUser() {

@@ -19,15 +19,10 @@ export async function createAccessUserAction(formData: FormData) {
   const supabase = getSupabaseAdmin();
 
   const fullName = String(formData.get("full_name") ?? "").trim();
-  const providedAccessCode = String(formData.get("access_code") ?? "").trim();
-  const accessCode = providedAccessCode || generateInternalAccessCode();
+  const accessCode = generateInternalAccessCode();
 
   if (!fullName) {
     redirect("/settings?error=Name+is+required");
-  }
-
-  if (accessCode.length < 4) {
-    redirect("/settings?error=Access+code+must+be+at+least+4+characters");
   }
 
   const { error } = await supabase.from("access_users").insert({
@@ -41,7 +36,7 @@ export async function createAccessUserAction(formData: FormData) {
   }
 
   revalidatePath("/settings");
-  redirect(`/settings?message=${encodeURIComponent(`Access user created. Code: ${accessCode}`)}`);
+  redirect("/settings?message=Access+user+created");
 }
 
 export async function setAccessUserActiveAction(formData: FormData) {

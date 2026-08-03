@@ -29,6 +29,45 @@ function isRedirectLikeError(error: unknown) {
     && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
 }
 
+async function ensureAccessUserId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  user: { id: string; fullName: string | null },
+) {
+  try {
+    const { data: accessUser, error: accessUserError } = await supabase
+      .from("access_users")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!accessUserError && accessUser?.id) {
+      return accessUser.id;
+    }
+
+    const fallbackName = user.fullName?.trim() || "Sandbox User";
+    const accessCode = `AUTO-${Math.random().toString(36).slice(2, 10)}`;
+
+    const { data: createdUser, error: createError } = await supabase
+      .from("access_users")
+      .insert({
+        id: user.id,
+        full_name: fallbackName,
+        access_code: accessCode,
+        is_active: true,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (!createError && createdUser?.id) {
+      return createdUser.id;
+    }
+  } catch {
+    // Ignore access-user lookup failures in sandbox environments.
+  }
+
+  return user.id;
+}
+
 function normalizeInstallationStatus(value: string) {
   if (value === "New Install" || value === "New" || value === "new") {
     return "In Progress";
@@ -172,6 +211,7 @@ export async function createInstallationAction(formData: FormData) {
   const supabase = getSupabaseAdmin();
 
   try {
+    const safeUserId = await ensureAccessUserId(supabase, user);
     const invoiceNumber = String(formData.get("invoice_number") ?? "").trim();
     if (!invoiceNumber) {
       redirect("/installation/new?error=Invoice+number+is+required");
@@ -212,7 +252,7 @@ export async function createInstallationAction(formData: FormData) {
         shipping_address: shippingAddress,
         summary: null,
         status,
-        created_by: user.id,
+        created_by: safeUserId,
       })
       .select("id")
       .single();
@@ -225,7 +265,7 @@ export async function createInstallationAction(formData: FormData) {
       await supabase.from("installation_notes").insert({
         installation_job_id: createdJob.id,
         content: notes,
-        created_by: user.id,
+        created_by: safeUserId,
       });
     }
 
@@ -252,7 +292,7 @@ export async function createInstallationAction(formData: FormData) {
         file_name: file.name,
         file_size: file.size,
         mime_type: file.type || null,
-        uploaded_by: user.id,
+        uploaded_by: safeUserId,
       });
 
       if (attachmentError) {

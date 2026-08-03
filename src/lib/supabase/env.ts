@@ -15,10 +15,7 @@ export function getSupabaseEnv() {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey || isPlaceholderEnv(supabaseUrl) || isPlaceholderEnv(supabaseAnonKey)) {
-    return {
-      supabaseUrl: "https://example.supabase.co",
-      supabaseAnonKey: "placeholder-anon-key",
-    };
+    throw new Error("Missing live Supabase public credentials. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
   }
 
   return {

@@ -29,7 +29,7 @@ function isPlaceholderEnv(value: string | undefined) {
 }
 
 function isSandboxMode() {
-  return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
+  return process.env.USE_LOCAL_SUPABASE_SANDBOX === "true";
 }
 
 function getSandboxState() {
@@ -352,8 +352,7 @@ export function getSupabaseAdmin() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey || isPlaceholderEnv(supabaseUrl) || isPlaceholderEnv(serviceRoleKey)) {
-    client = createSandboxClient();
-    return client;
+    throw new Error("Missing live Supabase admin credentials. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
   }
 
   try {
@@ -364,7 +363,7 @@ export function getSupabaseAdmin() {
       },
     });
   } catch {
-    client = createSandboxClient();
+    throw new Error("Unable to create Supabase admin client with live credentials.");
   }
 
   return client;

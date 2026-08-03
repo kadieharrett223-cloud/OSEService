@@ -30,7 +30,7 @@ export default async function SettingsPage({
   ] = await Promise.all([
     supabase
       .from("access_users")
-      .select("id, full_name, is_active, last_login_at, created_at")
+      .select("id, full_name, access_code, is_active, last_login_at, created_at")
       .order("full_name"),
     supabase
       .from("access_login_events")
@@ -150,11 +150,15 @@ export default async function SettingsPage({
 
       <section className="card p-4">
         <h2 className="text-xl">Create Access User</h2>
-        <p className="mt-1 text-sm text-[#5a5a5a]">The shared code is configured by environment variable. Add names here for assignment and audit history.</p>
+        <p className="mt-1 text-sm text-[#5a5a5a]">Create live users and assign a code they can use at login.</p>
         <form action={createAccessUserAction} className="mt-3 grid gap-3 md:grid-cols-3">
           <div>
             <label htmlFor="full_name" className="label">Full Name</label>
             <input id="full_name" name="full_name" className="input" required />
+          </div>
+          <div>
+            <label htmlFor="access_code" className="label">Access Code (optional)</label>
+            <input id="access_code" name="access_code" className="input" placeholder="Auto-generated when empty" />
           </div>
           <div className="flex items-end">
             <button type="submit" className="btn-primary w-full">Create User</button>
@@ -168,6 +172,7 @@ export default async function SettingsPage({
           <thead>
             <tr className="border-b border-[#ececec] text-[#5a5a5a]">
               <th className="px-2 py-2">Name</th>
+              <th className="px-2 py-2">Access Code</th>
               <th className="px-2 py-2">Status</th>
               <th className="px-2 py-2">Last Login</th>
               <th className="px-2 py-2">Actions</th>
@@ -177,6 +182,7 @@ export default async function SettingsPage({
             {(accessUsers ?? []).map((user) => (
               <tr key={user.id} className="border-b border-[#f2f2f2]">
                 <td className="px-2 py-2">{user.full_name}</td>
+                <td className="px-2 py-2 font-mono text-xs">{user.access_code}</td>
                 <td className="px-2 py-2">{user.is_active ? "Active" : "Inactive"}</td>
                 <td className="px-2 py-2">{user.last_login_at ? new Date(user.last_login_at).toLocaleString() : "Never"}</td>
                 <td className="px-2 py-2">

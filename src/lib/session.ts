@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const SESSION_COOKIE = "app_access_session";
-const SANDBOX_SIGNED_OUT_COOKIE = "sandbox_signed_out";
 const ONE_DAY_SECONDS = 60 * 60 * 24;
 
 function getSessionSecret() {
@@ -36,17 +35,6 @@ type SessionPayload = {
   createdAt: string;
 };
 
-function isSandboxMode() {
-  return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
-}
-
-function getDevelopmentFallbackUser() {
-  return {
-    id: process.env.LOCAL_DEV_USER_ID ?? "00000000-0000-0000-0000-000000000000",
-    fullName: process.env.LOCAL_DEV_USER_NAME ?? "Sandbox User",
-  };
-}
-
 export async function createSession(userId: string, fullName: string) {
   const payload: SessionPayload = {
     userId,
@@ -58,7 +46,6 @@ export async function createSession(userId: string, fullName: string) {
   const signature = sign(encodedPayload);
 
   const cookieStore = await cookies();
-  cookieStore.delete(SANDBOX_SIGNED_OUT_COOKIE);
   cookieStore.set(SESSION_COOKIE, `${encodedPayload}.${signature}`, {
     httpOnly: true,
     sameSite: "lax",
@@ -71,13 +58,6 @@ export async function createSession(userId: string, fullName: string) {
 export async function clearSession() {
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
-  cookieStore.set(SANDBOX_SIGNED_OUT_COOKIE, "1", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: ONE_DAY_SECONDS,
-  });
 }
 
 function parseSessionValue(value: string | undefined): SessionPayload | null {
@@ -100,12 +80,32 @@ function parseSessionValue(value: string | undefined): SessionPayload | null {
 
 export async function getCurrentAccessUser() {
   const cookieStore = await cookies();
+  const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
+  const session = parseSessionValue(sessionCookie);
 
-  if (isSandboxMode() && cookieStore.get(SANDBOX_SIGNED_OUT_COOKIE)?.value === "1") {
+  if (!session) {
     return null;
   }
 
-  return getDevelopmentFallbackUser();
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: accessUser } = await supabase
+      .from("access_users")
+      .select("id, full_name, is_active")
+      .eq("id", session.userId)
+      .maybeSingle();
+
+    if (!accessUser || accessUser.is_active !== true) {
+      return null;
+    }
+
+    return {
+      id: accessUser.id,
+      fullName: accessUser.full_name,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function requireAccessUser() {

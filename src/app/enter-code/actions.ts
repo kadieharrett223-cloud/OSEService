@@ -3,5 +3,5 @@
 import { redirect } from "next/navigation";
 
 export async function enterCodeAction(_formData: FormData) {
-  redirect("/dashboard");
+  redirect("/login");
 }

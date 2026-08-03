@@ -4,28 +4,24 @@ import type { Database } from "@/lib/supabase/types";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 
 export async function createClient() {
-  try {
-    const cookieStore = await cookies();
-    const { supabaseUrl, supabaseAnonKey } = getSupabaseEnv();
+  const cookieStore = await cookies();
+  const { supabaseUrl, supabaseAnonKey } = getSupabaseEnv();
 
-    return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options),
-            );
-          } catch {
-            // setAll can be called during server component rendering,
-            // where mutating cookies is not allowed.
-          }
-        },
+  return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    });
-  } catch {
-    return {} as ReturnType<typeof createServerClient<Database>>;
-  }
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options),
+          );
+        } catch {
+          // setAll can be called during server component rendering,
+          // where mutating cookies is not allowed.
+        }
+      },
+    },
+  });
 }

@@ -802,21 +802,13 @@ export async function deleteAttachmentAction(formData: FormData) {
 }
 
 export async function deleteCaseAction(formData: FormData) {
-  const user = await requireUser();
-
   const caseId = getString(formData, "case_id");
-  const confirmationCode = getString(formData, "confirmation_code");
 
   if (!caseId) {
     redirect("/cases?error=missing_case_reference");
   }
 
-  if (!isSandboxMode() && confirmationCode !== "9822") {
-    redirect(`/cases/${caseId}?error=invalid_delete_confirmation`);
-  }
-
   const supabase = getSupabaseAdmin();
-  const safeActorId = await ensureAccessUserId(supabase, user);
   const { data: existingCase, error: lookupError } = await supabase
     .from("customer_service_cases")
     .select("id, case_number, created_by")
@@ -825,10 +817,6 @@ export async function deleteCaseAction(formData: FormData) {
 
   if (lookupError || !existingCase) {
     redirect("/cases?error=case_not_found");
-  }
-
-  if (!isSandboxMode() && existingCase.created_by !== safeActorId) {
-    redirect("/cases?error=case_delete_forbidden");
   }
 
   const { data: attachments } = await supabase

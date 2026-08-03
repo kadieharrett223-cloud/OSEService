@@ -54,68 +54,92 @@ export async function enterCodeAction(formData: FormData) {
       redirect("/enter-code?error=Invalid+code");
     }
 
-    const { data: existingUser, error: existingUserError } = await supabase
-      .from("access_users")
-      .select("id, full_name, is_active")
-      .eq("full_name", fullName)
-      .maybeSingle();
+    let existingUser: { id: string; full_name: string | null; is_active: boolean } | null = null;
+    let userId: string | null = null;
+    let userName = fullName;
 
-    if (existingUserError) {
-      redirectForSupabaseError(existingUserError.message, "Unable to load user");
+    try {
+      const { data, error } = await supabase
+        .from("access_users")
+        .select("id, full_name, is_active")
+        .eq("full_name", fullName)
+        .maybeSingle();
+
+      if (error) {
+        redirectForSupabaseError(error.message, "Unable to load user");
+      }
+
+      existingUser = data as { id: string; full_name: string | null; is_active: boolean } | null;
+    } catch {
+      existingUser = null;
     }
 
     if (existingUser && !existingUser.is_active) {
-      await supabase.from("access_login_events").insert({
-        success: false,
-        full_name_snapshot: existingUser.full_name,
-      });
+      try {
+        await supabase.from("access_login_events").insert({
+          success: false,
+          full_name_snapshot: existingUser.full_name,
+        });
+      } catch {
+        // Ignore login event errors on disabled users.
+      }
       redirect("/enter-code?error=User+is+disabled");
     }
 
-    let userId = existingUser?.id;
-    let userName = existingUser?.full_name ?? fullName;
+    userId = existingUser?.id ?? null;
+    userName = existingUser?.full_name ?? fullName;
 
     if (!userId) {
-      const { data: createdUser, error: createUserError } = await supabase
-        .from("access_users")
-        .insert({
-          full_name: fullName,
-          access_code: generateInternalAccessCode(),
-          is_active: true,
-          last_login_at: new Date().toISOString(),
-        })
-        .select("id, full_name")
-        .single();
+      try {
+        const { data: createdUser, error: createUserError } = await supabase
+          .from("access_users")
+          .insert({
+            full_name: fullName,
+            access_code: generateInternalAccessCode(),
+            is_active: true,
+            last_login_at: new Date().toISOString(),
+          })
+          .select("id, full_name")
+          .single();
 
-      if (createUserError || !createdUser) {
-        redirectForSupabaseError(createUserError?.message, "Unable to create user");
+        if (createUserError || !createdUser) {
+          redirectForSupabaseError(createUserError?.message, "Unable to create user");
+        }
+
+        userId = createdUser.id;
+        userName = createdUser.full_name;
+      } catch {
+        redirect("/enter-code?error=Unable+to+create+user");
       }
-
-      userId = createdUser.id;
-      userName = createdUser.full_name;
     }
 
-    const [updateUserResult, loginEventResult] = await Promise.all([
-      supabase
-        .from("access_users")
-        .update({ last_login_at: new Date().toISOString() })
-        .eq("id", userId),
-      supabase.from("access_login_events").insert({
-        access_user_id: userId,
-        full_name_snapshot: userName,
-        success: true,
-      }),
-    ]);
+    if (userId) {
+      try {
+        const [updateUserResult, loginEventResult] = await Promise.all([
+          supabase
+            .from("access_users")
+            .update({ last_login_at: new Date().toISOString() })
+            .eq("id", userId),
+          supabase.from("access_login_events").insert({
+            access_user_id: userId,
+            full_name_snapshot: userName,
+            success: true,
+          }),
+        ]);
 
-    if (updateUserResult.error) {
-      redirectForSupabaseError(updateUserResult.error.message, "Unable to update login timestamp");
+        if (updateUserResult.error) {
+          redirectForSupabaseError(updateUserResult.error.message, "Unable to update login timestamp");
+        }
+
+        if (loginEventResult.error) {
+          redirectForSupabaseError(loginEventResult.error.message, "Unable to log access event");
+        }
+      } catch {
+        redirect("/enter-code?error=Unable+to+finish+login");
+      }
     }
 
-    if (loginEventResult.error) {
-      redirectForSupabaseError(loginEventResult.error.message, "Unable to log access event");
-    }
-
-    await createSession(userId, userName);
+    await createSession(userId!, userName);
     redirect("/dashboard");
   } catch (error) {
     if (isRedirectLikeError(error)) {

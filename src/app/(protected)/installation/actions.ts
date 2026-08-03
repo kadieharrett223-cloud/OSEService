@@ -84,6 +84,16 @@ function normalizeLookupQuery(value: string) {
   return value.replace(/[%_,()]/g, "").trim();
 }
 
+function getInstallationCreateErrorMessage(message: string | null | undefined) {
+  const normalized = String(message ?? "").toLowerCase();
+
+  if (normalized.includes("could not find the table 'public.installation_jobs' in the schema cache")) {
+    return "Installation workflow is not initialized. Apply migration 202608030001_installation_workflow.sql in Supabase, then retry.";
+  }
+
+  return message ?? "Could not create installation";
+}
+
 function buildAutofillUrl(payload: Record<string, string>) {
   const params = new URLSearchParams();
   params.set("prefilled", "1");
@@ -258,7 +268,8 @@ export async function createInstallationAction(formData: FormData) {
       .single();
 
     if (jobError || !createdJob) {
-      redirect(`/installation/new?error=${encodeURIComponent(jobError?.message ?? "Could not create installation")}`);
+      const safeError = getInstallationCreateErrorMessage(jobError?.message);
+      redirect(`/installation/new?error=${encodeURIComponent(safeError)}`);
     }
 
     if (notes) {

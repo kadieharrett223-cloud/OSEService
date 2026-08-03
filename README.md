@@ -56,8 +56,10 @@ Simple internal web app for customer service case tracking.
 	`supabase/migrations/202607300003_case_workflow_updates.sql`
 5. Run QuickBooks connection migration:
 	`supabase/migrations/202607300004_quickbooks_connections.sql`
-6. Confirm bucket `case-attachments` exists.
-7. In `/settings`, create at least one access user.
+6. Run installation workflow migration:
+	`supabase/migrations/202608030001_installation_workflow.sql`
+7. Confirm bucket `case-attachments` exists.
+8. In `/settings`, create at least one access user.
 
 ## QuickBooks Autofill Behavior
 

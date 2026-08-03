@@ -339,7 +339,7 @@ export type Database = {
           phone: string | null;
           email: string | null;
           shipping_address: string | null;
-          summary: string;
+          summary: string | null;
           status: "New" | "In Progress" | "Completed" | "Blocked";
           created_by: string | null;
           created_at: string;
@@ -355,7 +355,7 @@ export type Database = {
           phone?: string | null;
           email?: string | null;
           shipping_address?: string | null;
-          summary: string;
+          summary?: string | null;
           status?: "New" | "In Progress" | "Completed" | "Blocked";
           created_by?: string | null;
           created_at?: string;
@@ -370,7 +370,7 @@ export type Database = {
           phone?: string | null;
           email?: string | null;
           shipping_address?: string | null;
-          summary?: string;
+          summary?: string | null;
           status?: "New" | "In Progress" | "Completed" | "Blocked";
           created_by?: string | null;
           updated_at?: string;

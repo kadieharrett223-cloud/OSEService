@@ -11,7 +11,7 @@ create table if not exists public.installation_jobs (
   phone text,
   email text,
   shipping_address text,
-  summary text not null,
+  summary text,
   status text not null default 'New' check (status in ('New', 'In Progress', 'Completed', 'Blocked')),
   created_by uuid references public.access_users(id) on delete set null,
   created_at timestamptz not null default now(),

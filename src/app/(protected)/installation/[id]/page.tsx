@@ -99,10 +99,6 @@ export default async function InstallationDetailPage({
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Installation Details</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <div>
-            <p className="text-sm font-semibold text-[#64748b]">Summary</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-[#334155]">{installationJob.summary}</p>
-          </div>
           <div className="space-y-2 text-sm text-[#334155]">
             <p><span className="font-semibold">Invoice:</span> {installationJob.invoice_number}</p>
             <p><span className="font-semibold">Company:</span> {installationJob.company_name ?? "-"}</p>

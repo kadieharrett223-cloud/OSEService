@@ -4,6 +4,13 @@ import { redirect } from "next/navigation";
 import { createSession } from "@/lib/session";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+function normalizeName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 export async function signInAction(formData: FormData) {
   const fullName = String(formData.get("full_name") ?? "").trim();
   const accessCode = String(formData.get("access_code") ?? "").trim();
@@ -34,9 +41,13 @@ export async function signInAction(formData: FormData) {
     redirect("/login?error=invalid_credentials");
   }
 
-  const normalizedProvidedName = fullName.toLowerCase();
-  const normalizedStoredName = accessUser.full_name.trim().toLowerCase();
-  if (normalizedProvidedName !== normalizedStoredName) {
+  const normalizedProvidedName = normalizeName(fullName);
+  const normalizedStoredName = normalizeName(accessUser.full_name);
+  const providedMatchesStored = normalizedProvidedName === normalizedStoredName
+    || normalizedStoredName.startsWith(`${normalizedProvidedName} `)
+    || normalizedStoredName === normalizedProvidedName;
+
+  if (!providedMatchesStored) {
     await supabase.from("access_login_events").insert({
       access_user_id: accessUser.id,
       full_name_snapshot: accessUser.full_name,

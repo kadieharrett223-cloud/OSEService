@@ -45,14 +45,20 @@ export function AttachmentDropzone({
     inputRef.current.files = dataTransfer.files;
   }
 
-  function updateFiles(files: File[]) {
-    selected.forEach((item) => {
-      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-    });
+  function updateFiles(files: File[], append = true) {
+    const incoming = filesToSelected(files);
 
-    const next = filesToSelected(files);
-    setSelected(next);
-    syncInputFiles(files);
+    setSelected((current) => {
+      const combined = append
+        ? [...current, ...incoming]
+        : incoming;
+
+      const uniqueById = combined.filter((item, index, list) => list.findIndex((candidate) => candidate.id === item.id) === index);
+      const nextFiles = uniqueById.map((item) => item.file);
+
+      syncInputFiles(nextFiles);
+      return uniqueById;
+    });
   }
 
   function removeFile(fileId: string) {
@@ -70,7 +76,8 @@ export function AttachmentDropzone({
 
   function onInputChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
-    updateFiles(files);
+    updateFiles(files, true);
+    event.target.value = "";
   }
 
   function onDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -78,7 +85,7 @@ export function AttachmentDropzone({
     setDragActive(false);
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length === 0) return;
-    updateFiles(files);
+    updateFiles(files, true);
   }
 
   useEffect(() => {

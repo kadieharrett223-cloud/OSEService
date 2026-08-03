@@ -58,12 +58,12 @@ export default async function InstallationDetailPage({
       .maybeSingle(),
     supabase
       .from("installation_notes")
-      .select("id, content, created_at, creator:access_users!installation_notes_created_by_access_user_fkey(full_name)")
+      .select("id, content, created_at, creator:access_users!installation_notes_created_by_fkey(full_name)")
       .eq("installation_job_id", id)
       .order("created_at", { ascending: false }),
     supabase
       .from("installation_photos")
-      .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!installation_photos_uploaded_by_access_user_fkey(full_name)")
+      .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!installation_photos_uploaded_by_fkey(full_name)")
       .eq("installation_job_id", id)
       .order("created_at", { ascending: false }),
   ]);

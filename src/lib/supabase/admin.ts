@@ -18,6 +18,10 @@ function isPlaceholderEnv(value: string | undefined) {
     || normalized.includes("replace-me");
 }
 
+function isSandboxMode() {
+  return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
+}
+
 function createSandboxClient() {
   const store = new Map<string, SandboxRecord[]>();
   const storageFiles = new Map<string, SandboxRecord[]>();
@@ -295,6 +299,11 @@ function createSandboxClient() {
 
 export function getSupabaseAdmin() {
   if (client) return client;
+
+  if (isSandboxMode()) {
+    client = createSandboxClient();
+    return client;
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

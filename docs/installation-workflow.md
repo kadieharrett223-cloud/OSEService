@@ -22,3 +22,7 @@ Apply the migration:
 ## Notes
 
 This workflow is intentionally separate from customer service cases so installers can focus on installation progress without changing the existing case flow.
+
+## Invoice lookup experience
+
+When creating a new installation, the invoice field now supports type-ahead suggestions while typing. Matching invoices appear in a dropdown so installers can choose the right invoice even when there are similar or duplicate invoice numbers. Selecting a suggestion pre-fills the invoice value and triggers the existing invoice autofill flow.

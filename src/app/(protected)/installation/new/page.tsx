@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { createInstallationAction, quickbooksInstallationAutofillAction } from "@/app/(protected)/installation/actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
+import { InstallationInvoiceTypeahead } from "@/app/(protected)/installation/invoice-typeahead";
 
 type SearchParams = {
   error?: string;
@@ -49,11 +50,15 @@ export default async function NewInstallationPage({
         </p>
       ) : null}
 
-      <form action={quickbooksInstallationAutofillAction} className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
+      <form id="invoice-autofill-form" action={quickbooksInstallationAutofillAction} className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex-1 min-w-[220px]">
-            <label htmlFor="invoice_number_lookup" className="label">Invoice Number</label>
-            <input id="invoice_number_lookup" name="invoice_number" required className="input" defaultValue={params.invoice_number ?? ""} placeholder="Enter invoice number" />
+            <InstallationInvoiceTypeahead
+              initialValue={params.invoice_number ?? ""}
+              targetInputId="invoice_number"
+              submitFormId="invoice-autofill-form"
+              onSelect={() => undefined}
+            />
           </div>
           <button type="submit" className="btn-secondary">Find Invoice</button>
         </div>

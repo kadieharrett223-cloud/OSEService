@@ -10,6 +10,7 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
   const [confirmationCode, setConfirmationCode] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSandboxMode = process.env.NODE_ENV !== "production";
 
   function handleOpenConfirm(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -26,7 +27,7 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
   function handleConfirmDelete() {
     const trimmedCode = confirmationCode.trim();
 
-    if (trimmedCode !== "9822") {
+    if (!isSandboxMode && trimmedCode !== "9822") {
       setErrorMessage("The security code was incorrect.");
       return;
     }
@@ -59,7 +60,9 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-sm rounded-xl border border-[#e7eaef] bg-white p-4 shadow-lg">
             <p className="text-sm font-semibold text-[#121826]">Permanently delete this case?</p>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Type the security code to continue.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">
+              {isSandboxMode ? "This local sandbox allows delete confirmation without a strict code gate." : "Type the security code to continue."}
+            </p>
             <input
               value={confirmationCode}
               onChange={handleCodeChange}

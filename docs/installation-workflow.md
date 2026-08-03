@@ -8,6 +8,7 @@ The Installation workflow provides a dedicated space for installers to record ne
 - New submission form: /installation/new
 - Job detail view: /installation/[id]
 - Shared storage for photos using the existing case-attachments bucket
+- Photo uploads on new installations and additional photo uploads on existing installation detail pages
 - Installer-specific tables:
   - installation_jobs
   - installation_notes

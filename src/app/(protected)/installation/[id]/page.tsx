@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
+import { addInstallationPhotosAction } from "@/app/(protected)/installation/actions";
 
 type InstallationJobRecord = {
   id: string;
@@ -110,11 +112,14 @@ function parseInvoiceLineItems(rawPayload: unknown) {
 
 export default async function InstallationDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
+  const { error, success } = await searchParams;
   const supabase = getSupabaseAdmin();
 
   let job: InstallationJobRecord | null = null;
@@ -227,6 +232,14 @@ export default async function InstallationDetailPage({
         <Link href="/installation" className="btn-secondary">Back to List</Link>
       </div>
 
+      {error ? (
+        <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</p>
+      ) : null}
+
+      {success === "photos_uploaded" ? (
+        <p className="rounded-md border border-[#ccebd7] bg-[#f2fff6] p-3 text-sm text-[#0f6f35]">Photos uploaded successfully.</p>
+      ) : null}
+
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Customer Info</h2>
         <div className="mt-4 space-y-3 text-sm text-[#334155]">
@@ -275,6 +288,14 @@ export default async function InstallationDetailPage({
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Photos</h2>
+        <form action={addInstallationPhotosAction} className="mt-4 space-y-3 rounded-lg border border-[#ececec] bg-[#fafbfc] p-3">
+          <input type="hidden" name="installation_job_id" value={installationJob.id} />
+          <p className="text-sm text-[#334155]">Add new photos to this installation.</p>
+          <AttachmentDropzone uploadedBy={user.fullName ?? "Unknown"} />
+          <div className="flex justify-end">
+            <button type="submit" className="btn-primary">Upload Photos</button>
+          </div>
+        </form>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {signedPhotoUrls.length ? (
             signedPhotoUrls.map((photo) => (

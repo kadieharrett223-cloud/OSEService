@@ -402,3 +402,71 @@ export async function createInstallationAction(formData: FormData) {
     redirect("/installation/new?error=Unable+to+create+installation");
   }
 }
+
+export async function addInstallationPhotosAction(formData: FormData) {
+  const user = await requireUser();
+  const supabase = getSupabaseAdmin();
+
+  const installationJobId = String(formData.get("installation_job_id") ?? "").trim();
+  if (!installationJobId) {
+    redirect("/installation?error=invalid_installation");
+  }
+
+  try {
+    const safeUserId = await ensureAccessUserId(supabase, user);
+    const uploadedFiles = formData
+      .getAll("attachments")
+      .filter((item): item is File => item instanceof File && item.size > 0);
+
+    if (uploadedFiles.length === 0) {
+      redirect(`/installation/${installationJobId}?error=${encodeURIComponent("Select at least one file to upload")}`);
+    }
+
+    for (const file of uploadedFiles) {
+      if (!isAllowedAttachment(file)) {
+        redirect(`/installation/${installationJobId}?error=${encodeURIComponent("Unsupported file type. Use JPG, PNG, HEIC, PDF, or MP4")}`);
+      }
+    }
+
+    for (const file of uploadedFiles) {
+      const fileExtension = getFileExtension(file.name) || "bin";
+      const safeFileName = `${Date.now()}-${crypto.randomUUID()}.${fileExtension}`;
+      const storagePath = `${installationJobId}/${safeFileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("case-attachments")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+      if (uploadError) {
+        redirect(`/installation/${installationJobId}?error=${encodeURIComponent(uploadError.message)}`);
+      }
+
+      const { error: photoInsertError } = await supabase.from("installation_photos").insert({
+        installation_job_id: installationJobId,
+        file_path: storagePath,
+        file_name: file.name,
+        file_size: file.size,
+        mime_type: file.type || null,
+        uploaded_by: safeUserId,
+      });
+
+      if (photoInsertError) {
+        redirect(`/installation/${installationJobId}?error=${encodeURIComponent(photoInsertError.message)}`);
+      }
+    }
+
+    revalidatePath(`/installation/${installationJobId}`);
+    revalidatePath("/installation");
+    redirect(`/installation/${installationJobId}?success=photos_uploaded`);
+  } catch (error) {
+    if (isRedirectLikeError(error)) {
+      throw error;
+    }
+
+    redirect(`/installation/${installationJobId}?error=${encodeURIComponent("Unable to upload photos")}`);
+  }
+}

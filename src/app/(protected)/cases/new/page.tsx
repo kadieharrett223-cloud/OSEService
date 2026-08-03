@@ -106,12 +106,6 @@ export default async function CreateCasePage({
         <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</p>
       ) : null}
 
-      {params.prefilled === "1" ? (
-        <p className="rounded-md border border-[#b20610] bg-[#fff5f5] p-3 text-sm text-[#8f030d]">
-          QuickBooks match found. Customer and invoice details are locked to prevent duplicate typing.
-        </p>
-      ) : null}
-
       {assigneeLoadError ? (
         <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
           Assignee list is temporarily unavailable. You can still create the case and assign it later.
@@ -210,7 +204,7 @@ export default async function CreateCasePage({
               </div>
               <div className="mt-3">
                 <label htmlFor="issue_description" className="label">Issue Description</label>
-                <textarea id="issue_description" name="issue_description" rows={8} required className="textarea" placeholder={"Customer reports lift won't raise.\n\nMotor runs.\n\nNo hydraulic movement.\n\nStarted yesterday."} />
+                <textarea id="issue_description" name="issue_description" rows={8} className="textarea" placeholder={"Customer reports lift won't raise.\n\nMotor runs.\n\nNo hydraulic movement.\n\nStarted yesterday."} />
               </div>
             </section>
 

@@ -435,7 +435,6 @@ export async function createCaseAction(formData: FormData) {
         etaDate ? `ETA: ${etaDate}` : null,
         trackingNumber ? `Tracking number: ${trackingNumber}` : null,
       ].filter(Boolean).join("\n") || null,
-      customer_facing_notes: emptyToNull(formData.get("customer_facing_notes")),
       created_by: safeUserId,
     };
 
@@ -467,30 +466,6 @@ export async function createCaseAction(formData: FormData) {
       });
     } catch {
       // Ignore activity logging errors in sandbox environments.
-    }
-
-    if (customerNote) {
-      try {
-        await supabase.from("case_notes").insert({
-          case_id: createdCase.id,
-          note_type: "customer",
-          content: customerNote,
-          created_by: safeUserId,
-        });
-      } catch {
-        // Ignore note insert errors in sandbox environments.
-      }
-
-      try {
-        await supabase.from("case_activity").insert({
-          case_id: createdCase.id,
-          actor_id: safeUserId,
-          activity_type: "note_added",
-          summary: "Customer note added",
-        });
-      } catch {
-        // Ignore activity logging errors in sandbox environments.
-      }
     }
 
     const allInternalNotes = [

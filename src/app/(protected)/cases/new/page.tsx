@@ -234,10 +234,6 @@ export default async function CreateCasePage({
               <DraftTimelineNotes />
             </div>
 
-            <div className="mt-4">
-              <label htmlFor="customer_facing_notes" className="label">Customer-Facing Notes</label>
-              <textarea id="customer_facing_notes" name="customer_facing_notes" rows={4} className="textarea" placeholder="Notes safe to share with customer." />
-            </div>
           </section>
         </div>
 

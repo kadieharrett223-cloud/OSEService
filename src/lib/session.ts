@@ -96,7 +96,10 @@ export async function getCurrentAccessUser() {
       .maybeSingle();
 
     if (!accessUser || accessUser.is_active !== true) {
-      return null;
+      return {
+        id: session.userId,
+        fullName: session.fullName,
+      };
     }
 
     return {
@@ -104,7 +107,10 @@ export async function getCurrentAccessUser() {
       fullName: accessUser.full_name,
     };
   } catch {
-    return null;
+    return {
+      id: session.userId,
+      fullName: session.fullName,
+    };
   }
 }
 

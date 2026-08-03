@@ -1,6 +1,8 @@
 -- Phase 2A: QuickBooks connection state and sync tracking
 -- Stores OAuth token material server-side for read-only invoice sync.
 
+create extension if not exists pgcrypto;
+
 create table if not exists public.quickbooks_connections (
   id uuid primary key default gen_random_uuid(),
   realm_id text not null unique,
@@ -30,6 +32,9 @@ before update on public.quickbooks_connections
 for each row execute function public.update_updated_at_column();
 
 alter table public.quickbooks_connections enable row level security;
+
+drop policy if exists "quickbooks_connections_read_all" on public.quickbooks_connections;
+drop policy if exists "quickbooks_connections_write_authenticated" on public.quickbooks_connections;
 
 create policy "quickbooks_connections_read_all" on public.quickbooks_connections
 for select to authenticated

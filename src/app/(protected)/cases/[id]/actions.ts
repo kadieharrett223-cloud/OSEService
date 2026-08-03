@@ -42,6 +42,45 @@ function isRedirectLikeError(error: unknown) {
     && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
 }
 
+async function ensureAccessUserId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  user: { id: string; fullName: string | null },
+) {
+  try {
+    const { data: accessUser, error: accessUserError } = await supabase
+      .from("access_users")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (!accessUserError && accessUser?.id) {
+      return accessUser.id;
+    }
+
+    const fallbackName = user.fullName?.trim() || "Sandbox User";
+    const accessCode = `AUTO-${Math.random().toString(36).slice(2, 10)}`;
+
+    const { data: createdUser, error: createError } = await supabase
+      .from("access_users")
+      .insert({
+        id: user.id,
+        full_name: fallbackName,
+        access_code: accessCode,
+        is_active: true,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (!createError && createdUser?.id) {
+      return createdUser.id;
+    }
+  } catch {
+    // Ignore access-user lookup failures in sandbox environments.
+  }
+
+  return user.id;
+}
+
 async function getCaseOrRedirect(caseId: string) {
   const supabase = getSupabaseAdmin();
   const { data: existingCase } = await supabase
@@ -222,12 +261,13 @@ export async function addNoteAction(formData: FormData) {
   }
 
   const { supabase } = await getCaseOrRedirect(caseId);
+  const safeActorId = await ensureAccessUserId(supabase, user);
 
   const { error } = await supabase.from("case_notes").insert({
     case_id: caseId,
     note_type: noteType,
     content,
-    created_by: user.id,
+    created_by: safeActorId,
   });
 
   if (error) {
@@ -236,7 +276,7 @@ export async function addNoteAction(formData: FormData) {
 
   await supabase.from("case_activity").insert({
     case_id: caseId,
-    actor_id: user.id,
+    actor_id: safeActorId,
     activity_type: "note_added",
     summary: content.length > 160 ? `${content.slice(0, 157)}...` : content,
   });

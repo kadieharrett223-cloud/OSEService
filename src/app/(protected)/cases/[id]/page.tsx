@@ -69,6 +69,14 @@ type AttachmentRow = {
   uploader: { full_name: string | null } | null;
 };
 
+type InternalNoteRow = {
+  id: string;
+  note_type: string;
+  content: string;
+  created_at: string;
+  access_users: { full_name: string | null } | null;
+};
+
 function formatBytes(size: number | null) {
   if (!size || size < 0) return "-";
   if (size < 1024) return `${size} B`;
@@ -262,9 +270,10 @@ export default async function CaseDetailsPage({
   let creatorRow: CaseRecord["creator"] | null = null;
   let activity: ActivityRow[] = [];
   let attachments: AttachmentRow[] = [];
+  let internalNotes: InternalNoteRow[] = [];
 
   if (caseRecord && !caseError) {
-    const [customerResult, invoiceResult, assignedResult, creatorResult, activityResult, attachmentResult] = await Promise.all([
+    const [customerResult, invoiceResult, assignedResult, creatorResult, activityResult, attachmentResult, internalNoteResult] = await Promise.all([
       caseRecord.customer_id
         ? supabase.from("customers").select("full_name, company_name, phone, email, shipping_address, quickbooks_customer_id").eq("id", caseRecord.customer_id).maybeSingle()
         : Promise.resolve({ data: null }),
@@ -279,6 +288,7 @@ export default async function CaseDetailsPage({
         : Promise.resolve({ data: null }),
       supabase.from("case_activity").select("id, activity_type, summary, details, created_at, access_users:actor_id(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
       supabase.from("case_attachments").select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!case_attachments_uploaded_by_access_user_fkey(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
+      supabase.from("case_notes").select("id, note_type, content, created_at, access_users:created_by(full_name)").eq("case_id", id).eq("note_type", "internal").order("created_at", { ascending: false }),
     ]);
 
     customerRow = (customerResult.data as CaseRecord["customers"] | null) ?? null;
@@ -287,6 +297,7 @@ export default async function CaseDetailsPage({
     creatorRow = (creatorResult.data as CaseRecord["creator"] | null) ?? null;
     activity = (activityResult.data ?? []) as ActivityRow[];
     attachments = (attachmentResult.data ?? []) as AttachmentRow[];
+    internalNotes = (internalNoteResult.data ?? []) as InternalNoteRow[];
   }
 
   if (!caseRecord) {
@@ -332,7 +343,7 @@ export default async function CaseDetailsPage({
 
   const productsPurchased = parseProductsPurchased(caseRecordWithRelations.invoice?.raw_payload);
   const allActivityRows = activity as ActivityRow[];
-  const activityRows = allActivityRows;
+  const activityRows = allActivityRows.filter((row) => row.activity_type !== "note_added");
   const showAllTimeline = timeline === "all";
   const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
   const normalizedStatus = normalizeStatusLabel(caseRecordWithRelations.status);
@@ -546,76 +557,107 @@ export default async function CaseDetailsPage({
 
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-[#121826]">Activity Timeline</h2>
+          <h2 className="text-xl font-semibold text-[#121826]">Activity Timeline & Internal Notes</h2>
           <span className="badge badge-status">Auto</span>
         </div>
-        <p className="mt-2 text-sm text-[#5a5a5a]">Every action is captured in chronological order with timestamp, employee, and details.</p>
+        <p className="mt-2 text-sm text-[#5a5a5a]">The timeline captures automatic updates from the case, while the right-side panel keeps the live internal conversation organized.</p>
 
-        <form action={addNoteAction} className="mt-3 rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input type="hidden" name="case_id" value={id} />
-          <input type="hidden" name="note_type" value="internal" />
-          <label htmlFor="timeline_internal_note" className="label">Add Internal Note</label>
-          <textarea
-            id="timeline_internal_note"
-            name="content"
-            rows={3}
-            required
-            className="textarea"
-            placeholder="Add a note that will appear in the timeline"
-          />
-          <div className="mt-2 flex justify-end">
-            <button type="submit" className="btn-primary">Add Note</button>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1.25fr_0.9fr]">
+          <div>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">Timeline</h3>
+              <span className="text-xs text-[#64748b]">Auto-updating</span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {visibleTimelineRows.map((row) => (
+                <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#f1f5f9] text-[11px] font-bold text-[#475569]">
+                        {activityIcon(row.activity_type)}
+                      </span>
+                      <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
+                    </div>
+                    <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
+                  <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
+                  {row.activity_type === "add_tracking_number" && ((row.details?.tracking_number as string | undefined) || row.summary.includes(":")) ? (
+                    <a
+                      href={buildTrackingUrl((row.details?.tracking_number as string | undefined) ?? row.summary.split(":").slice(1).join(":").trim())}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline"
+                    >
+                      Track package
+                    </a>
+                  ) : null}
+                  {row.details && row.activity_type !== "add_tracking_number" ? (
+                    <div className="mt-1 rounded bg-[#f8fafc] px-2 py-1 text-xs text-[#475569]">
+                      {Object.entries(row.details)
+                        .filter(([, value]) => value != null && value !== "")
+                        .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value)}`)
+                        .join(" | ")}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {activityRows.length === 0 ? (
+                <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
+              ) : null}
+
+              {activityRows.length > 5 ? (
+                <div className="pt-1 text-right">
+                  <Link
+                    href={showAllTimeline ? `/cases/${id}` : `/cases/${id}?timeline=all`}
+                    className="inline-flex text-xs font-semibold text-[#b20610] underline"
+                  >
+                    {showAllTimeline ? "Show Less" : "View All"}
+                  </Link>
+                </div>
+              ) : null}
+            </div>
           </div>
-        </form>
 
-        <div className="mt-3 space-y-2">
-          {visibleTimelineRows.map((row) => (
-            <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#f1f5f9] text-[11px] font-bold text-[#475569]">
-                    {activityIcon(row.activity_type)}
-                  </span>
-                  <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
-                </div>
-                <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
+          <div className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">Internal Notes</h3>
+              <span className="text-xs text-[#64748b]">Right-side conversation</span>
+            </div>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Log follow-ups, status updates, and customer communication here. Each note stamps the date, time, and author.</p>
+
+            <form action={addNoteAction} className="mt-3 rounded-md border border-[#edf0f4] bg-white p-3">
+              <input type="hidden" name="case_id" value={id} />
+              <input type="hidden" name="note_type" value="internal" />
+              <label htmlFor="timeline_internal_note" className="label">Add Internal Note</label>
+              <textarea
+                id="timeline_internal_note"
+                name="content"
+                rows={4}
+                required
+                className="textarea"
+                placeholder="Example: Waiting on customer to get back to me"
+              />
+              <div className="mt-2 flex justify-end">
+                <button type="submit" className="btn-primary">Save Note</button>
               </div>
-              <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
-              <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
-              {row.activity_type === "add_tracking_number" && ((row.details?.tracking_number as string | undefined) || row.summary.includes(":")) ? (
-                <a
-                  href={buildTrackingUrl((row.details?.tracking_number as string | undefined) ?? row.summary.split(":").slice(1).join(":").trim())}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-flex text-xs font-semibold text-[#b20610] underline"
-                >
-                  Track package
-                </a>
-              ) : null}
-              {row.details && row.activity_type !== "add_tracking_number" ? (
-                <div className="mt-1 rounded bg-[#f8fafc] px-2 py-1 text-xs text-[#475569]">
-                  {Object.entries(row.details)
-                    .filter(([, value]) => value != null && value !== "")
-                    .map(([key, value]) => `${key.replaceAll("_", " ")}: ${String(value)}`)
-                    .join(" | ")}
-                </div>
-              ) : null}
-            </div>
-          ))}
-          {activityRows.length === 0 ? (
-            <p className="rounded-md border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No timeline events yet.</p>
-          ) : null}
+            </form>
 
-          {activityRows.length > 5 ? (
-            <div className="pt-1 text-right">
-              <Link
-                href={showAllTimeline ? `/cases/${id}` : `/cases/${id}?timeline=all`}
-                className="inline-flex text-xs font-semibold text-[#b20610] underline"
-              >
-                {showAllTimeline ? "Show Less" : "View All"}
-              </Link>
+            <div className="mt-3 space-y-2">
+              {internalNotes.map((note) => (
+                <div key={note.id} className="rounded-md border border-[#ececec] bg-white p-3 text-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-semibold text-[#1f2937]">{note.access_users?.full_name ?? "Unknown"}</p>
+                    <span className="text-xs text-[#6a6a6a]">{new Date(note.created_at).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-2 whitespace-pre-wrap text-[#334155]">{note.content}</p>
+                </div>
+              ))}
+              {internalNotes.length === 0 ? (
+                <p className="rounded-md border border-[#edf0f4] bg-white p-3 text-sm text-[#64748b]">No internal notes yet.</p>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </div>
       </section>
 

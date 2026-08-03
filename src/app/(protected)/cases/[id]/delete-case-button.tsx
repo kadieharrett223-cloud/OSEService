@@ -9,14 +9,14 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault();
-    const confirmationCode = window.prompt("Type 9822 to permanently delete this case.");
+    const confirmationCode = window.prompt("Type the security code to permanently delete this case.");
 
     if (confirmationCode === null) {
       return;
     }
 
     if (confirmationCode.trim() !== "9822") {
-      window.alert("The delete code was incorrect.");
+      window.alert("The security code was incorrect.");
       return;
     }
 

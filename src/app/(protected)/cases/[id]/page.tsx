@@ -36,6 +36,8 @@ type CaseRecord = {
   quickbooks_invoice_number: string | null;
   quickbooks_invoice_link: string | null;
   created_by: string;
+  customer_id: string | null;
+  quickbooks_invoice_id: string | null;
   customers: {
     full_name: string | null;
     company_name: string | null;
@@ -244,34 +246,48 @@ export default async function CaseDetailsPage({
   const { error, timeline } = await searchParams;
   const supabase = getSupabaseAdmin();
 
-  const [{ data: caseRecordRaw }, { data: activity }, { data: attachments }] =
-    await Promise.all([
-      supabase
-        .from("customer_service_cases")
-        .select(
-          `
-          *,
-          customers(*),
-          invoice:quickbooks_invoices(invoice_date, invoice_total, payment_status, billing_address, shipping_address, raw_payload, quickbooks_invoice_id),
-          assigned:access_users!customer_service_cases_assigned_employee_id_access_user_fkey(full_name),
-          creator:access_users!customer_service_cases_created_by_access_user_fkey(full_name)
-        `,
-        )
-        .eq("id", id)
-        .maybeSingle(),
-      supabase
-        .from("case_activity")
-        .select("id, activity_type, summary, details, created_at, access_users:actor_id(full_name)")
-        .eq("case_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("case_attachments")
-        .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!case_attachments_uploaded_by_access_user_fkey(full_name)")
-        .eq("case_id", id)
-        .order("created_at", { ascending: false }),
-    ]);
+  const { data: caseRecordRaw, error: caseError } = await supabase
+    .from("customer_service_cases")
+    .select(
+      "id, case_number, created_at, case_type, status, priority, issue_reported_at, issue_description, assigned_employee_id, date_of_purchase, quickbooks_invoice_number, quickbooks_invoice_link, created_by, customer_id, quickbooks_invoice_id",
+    )
+    .eq("id", id)
+    .maybeSingle();
 
   const caseRecord = caseRecordRaw as unknown as CaseRecord | null;
+
+  let customerRow: CaseRecord["customers"] | null = null;
+  let invoiceRow: CaseRecord["invoice"] | null = null;
+  let assignedRow: CaseRecord["assigned"] | null = null;
+  let creatorRow: CaseRecord["creator"] | null = null;
+  let activity: ActivityRow[] = [];
+  let attachments: AttachmentRow[] = [];
+
+  if (caseRecord && !caseError) {
+    const [customerResult, invoiceResult, assignedResult, creatorResult, activityResult, attachmentResult] = await Promise.all([
+      caseRecord.customer_id
+        ? supabase.from("customers").select("full_name, company_name, phone, email, shipping_address, quickbooks_customer_id").eq("id", caseRecord.customer_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      caseRecord.quickbooks_invoice_id
+        ? supabase.from("quickbooks_invoices").select("invoice_date, invoice_total, payment_status, billing_address, shipping_address, raw_payload, quickbooks_invoice_id").eq("id", caseRecord.quickbooks_invoice_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      caseRecord.assigned_employee_id
+        ? supabase.from("access_users").select("full_name").eq("id", caseRecord.assigned_employee_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      caseRecord.created_by
+        ? supabase.from("access_users").select("full_name").eq("id", caseRecord.created_by).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase.from("case_activity").select("id, activity_type, summary, details, created_at, access_users:actor_id(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
+      supabase.from("case_attachments").select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!case_attachments_uploaded_by_access_user_fkey(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
+    ]);
+
+    customerRow = (customerResult.data as CaseRecord["customers"] | null) ?? null;
+    invoiceRow = (invoiceResult.data as CaseRecord["invoice"] | null) ?? null;
+    assignedRow = (assignedResult.data as CaseRecord["assigned"] | null) ?? null;
+    creatorRow = (creatorResult.data as CaseRecord["creator"] | null) ?? null;
+    activity = (activityResult.data ?? []) as ActivityRow[];
+    attachments = (attachmentResult.data ?? []) as AttachmentRow[];
+  }
 
   if (!caseRecord) {
     return (
@@ -288,26 +304,43 @@ export default async function CaseDetailsPage({
     .select("id, full_name")
     .order("full_name", { ascending: true });
 
+  const caseRecordWithRelations = {
+    ...caseRecord,
+    customers: customerRow,
+    invoice: invoiceRow,
+    assigned: assignedRow,
+    creator: creatorRow,
+  } as CaseRecord;
+
   const attachmentLinks = await Promise.all(
     ((attachments ?? []) as AttachmentRow[]).map(async (item) => {
-      const { data } = await supabase.storage
-        .from("case-attachments")
-        .createSignedUrl(item.file_path, 60 * 60);
-      return { ...item, url: data?.signedUrl ?? null };
+      try {
+        const { data, error } = await supabase.storage
+          .from("case-attachments")
+          .createSignedUrl(item.file_path, 60 * 60);
+
+        if (error) {
+          return { ...item, url: null };
+        }
+
+        return { ...item, url: data?.signedUrl ?? null };
+      } catch {
+        return { ...item, url: null };
+      }
     }),
   );
 
-  const productsPurchased = parseProductsPurchased(caseRecord.invoice?.raw_payload);
-  const allActivityRows = (activity ?? []) as ActivityRow[];
+  const productsPurchased = parseProductsPurchased(caseRecordWithRelations.invoice?.raw_payload);
+  const allActivityRows = activity as ActivityRow[];
   const activityRows = allActivityRows;
   const showAllTimeline = timeline === "all";
   const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
-  const normalizedStatus = normalizeStatusLabel(caseRecord.status);
+  const normalizedStatus = normalizeStatusLabel(caseRecordWithRelations.status);
   const isResolvedStatus = normalizedStatus === "Resolved";
-  const priorityBadgeLabel = isResolvedStatus ? "Complete" : caseRecord.priority;
+  const priorityBadgeLabel = isResolvedStatus ? "Complete" : caseRecordWithRelations.priority;
   const priorityBadgeClass = isResolvedStatus
     ? "badge-complete"
-    : caseRecord.priority === "High"
+    : caseRecordWithRelations.priority === "High"
       ? "badge-priority-high"
       : "badge-status";
   const statusOptions = CASE_STATUSES.filter((status) => status !== "Completed" && status !== "Closed");
@@ -323,20 +356,20 @@ export default async function CaseDetailsPage({
   const latestEtaDate = typeof latestNextActionEvent?.details?.eta_date === "string"
     ? safeInputDate(latestNextActionEvent.details.eta_date)
     : "";
-  const invoiceLink = caseRecord.quickbooks_invoice_link
-    || (caseRecord.invoice?.quickbooks_invoice_id
-      ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecord.invoice.quickbooks_invoice_id)}`
+  const invoiceLink = caseRecordWithRelations.quickbooks_invoice_link
+    || (caseRecordWithRelations.invoice?.quickbooks_invoice_id
+      ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(caseRecordWithRelations.invoice.quickbooks_invoice_id)}`
       : null);
-  const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecord.invoice?.raw_payload);
-  const invoiceRaw = caseRecord.invoice?.raw_payload as Record<string, unknown> | undefined;
+  const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecordWithRelations.invoice?.raw_payload);
+  const invoiceRaw = caseRecordWithRelations.invoice?.raw_payload as Record<string, unknown> | undefined;
   const invoiceShippingFromRaw = formatAddressFromRaw(invoiceRaw?.ShipAddr) || formatAddressFromRaw(invoiceRaw?.BillAddr);
   const shippingAddress = invoiceShippingFromRaw
-    || caseRecord.invoice?.shipping_address
-    || caseRecord.customers?.shipping_address
-    || caseRecord.invoice?.billing_address
+    || caseRecordWithRelations.invoice?.shipping_address
+    || caseRecordWithRelations.customers?.shipping_address
+    || caseRecordWithRelations.invoice?.billing_address
     || "";
-  const issueReportedDisplay = new Date(caseRecord.issue_reported_at || caseRecord.created_at).toLocaleString();
-  const caseCreatedDisplay = new Date(caseRecord.created_at).toLocaleDateString(undefined, {
+  const issueReportedDisplay = new Date(caseRecordWithRelations.issue_reported_at || caseRecordWithRelations.created_at).toLocaleString();
+  const caseCreatedDisplay = new Date(caseRecordWithRelations.created_at).toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -347,8 +380,8 @@ export default async function CaseDetailsPage({
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-4xl leading-tight text-[#121826]">{caseRecord.case_number}</h1>
-            <p className="text-sm font-semibold text-[#334155]">{caseRecord.case_type} Case</p>
+            <h1 className="text-4xl leading-tight text-[#121826]">{caseRecordWithRelations.case_number}</h1>
+            <p className="text-sm font-semibold text-[#334155]">{caseRecordWithRelations.case_type} Case</p>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className={`rounded-full px-3 py-1 font-semibold ${statusBadgeClass(normalizedStatus)}`}>{normalizedStatus}</span>
               <span className={`badge ${priorityBadgeClass}`}>{priorityBadgeLabel}</span>
@@ -357,7 +390,7 @@ export default async function CaseDetailsPage({
 
           <div className="grid gap-2 text-sm text-[#334155] sm:grid-cols-2">
             <p><span className="font-semibold">Created:</span> {caseCreatedDisplay}</p>
-            <p><span className="font-semibold">Assigned To:</span> {caseRecord.assigned?.full_name ?? "Unassigned"}</p>
+            <p><span className="font-semibold">Assigned To:</span> {caseRecordWithRelations.assigned?.full_name ?? "Unassigned"}</p>
             <p><span className="font-semibold">Reported:</span> {issueReportedDisplay}</p>
             <div className="text-right sm:text-left">
               <Link href="/cases" className="btn-secondary inline-flex">Back to Cases</Link>
@@ -379,19 +412,19 @@ export default async function CaseDetailsPage({
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
               <label className="label">Customer Name</label>
-              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.full_name ?? "-"} />
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecordWithRelations.customers?.full_name ?? "-"} />
             </div>
             <div>
               <label className="label">Company</label>
-              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.company_name ?? "-"} />
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecordWithRelations.customers?.company_name ?? "-"} />
             </div>
             <div>
               <label className="label">Phone</label>
-              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.phone ?? invoiceContactFallbacks.phone ?? "-"} />
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecordWithRelations.customers?.phone ?? invoiceContactFallbacks.phone ?? "-"} />
             </div>
             <div>
               <label className="label">Email</label>
-              <input readOnly className="input bg-[#f8fafc]" value={caseRecord.customers?.email ?? invoiceContactFallbacks.email ?? "-"} />
+              <input readOnly className="input bg-[#f8fafc]" value={caseRecordWithRelations.customers?.email ?? invoiceContactFallbacks.email ?? "-"} />
             </div>
             <div className="sm:col-span-2">
               <label className="label">Shipping Address</label>
@@ -401,11 +434,11 @@ export default async function CaseDetailsPage({
 
           <aside className="space-y-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm">
             <div className="grid grid-cols-2 gap-x-3 gap-y-2">
-              <p><span className="font-semibold">Invoice #:</span> {caseRecord.quickbooks_invoice_number ?? "-"}</p>
-              <p><span className="font-semibold">Invoice Date:</span> {caseRecord.invoice?.invoice_date ?? "-"}</p>
-              <p><span className="font-semibold">Purchase Date:</span> {caseRecord.date_of_purchase ?? caseRecord.invoice?.invoice_date ?? "-"}</p>
-              <p><span className="font-semibold">Invoice Total:</span> {caseRecord.invoice?.invoice_total != null ? `$${caseRecord.invoice.invoice_total.toFixed(2)}` : "-"}</p>
-              <p className="col-span-2"><span className="font-semibold">Payment Status:</span> {caseRecord.invoice?.payment_status ?? "-"}</p>
+              <p><span className="font-semibold">Invoice #:</span> {caseRecordWithRelations.quickbooks_invoice_number ?? "-"}</p>
+              <p><span className="font-semibold">Invoice Date:</span> {caseRecordWithRelations.invoice?.invoice_date ?? "-"}</p>
+              <p><span className="font-semibold">Purchase Date:</span> {caseRecordWithRelations.date_of_purchase ?? caseRecordWithRelations.invoice?.invoice_date ?? "-"}</p>
+              <p><span className="font-semibold">Invoice Total:</span> {caseRecordWithRelations.invoice?.invoice_total != null ? `$${caseRecordWithRelations.invoice.invoice_total.toFixed(2)}` : "-"}</p>
+              <p className="col-span-2"><span className="font-semibold">Payment Status:</span> {caseRecordWithRelations.invoice?.payment_status ?? "-"}</p>
             </div>
             <div>
               <label className="label">Products Purchased</label>
@@ -424,9 +457,9 @@ export default async function CaseDetailsPage({
         <h2 className="text-xl font-semibold text-[#121826]">Issue Details</h2>
         <IssueDetailsAutosaveForm
           caseId={id}
-          caseType={caseRecord.case_type ?? "General"}
-          priority={caseRecord.priority}
-          issueDescription={caseRecord.issue_description}
+          caseType={caseRecordWithRelations.case_type ?? "General"}
+          priority={caseRecordWithRelations.priority}
+          issueDescription={caseRecordWithRelations.issue_description}
           caseTypeOptions={CASE_TYPES}
           priorityOptions={PRIORITIES}
         />
@@ -491,7 +524,7 @@ export default async function CaseDetailsPage({
             caseId={id}
             status={normalizedStatus}
             statusOptions={statusOptions}
-            assigneeId={caseRecord.assigned_employee_id ?? ""}
+            assigneeId={caseRecordWithRelations.assigned_employee_id ?? ""}
             assignees={(assignees ?? []) as Array<{ id: string; full_name: string | null }>}
             nextAction={latestNextAction}
             etaDate={latestEtaDate}

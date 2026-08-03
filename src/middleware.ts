@@ -10,14 +10,6 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  const hasSessionCookie = Boolean(request.cookies.get("app_access_session")?.value);
-  const sandboxMode = process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
-  if (!hasSessionCookie && !sandboxMode) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/enter-code";
-    return NextResponse.redirect(url);
-  }
-
   return NextResponse.next();
 }
 

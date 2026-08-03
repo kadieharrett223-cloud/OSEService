@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent } from "react";
+import { Suspense, type FormEvent } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 function toTitle(segment: string) {
@@ -10,7 +10,7 @@ function toTitle(segment: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function TopbarTools() {
+function TopbarToolsContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -71,5 +71,13 @@ export function TopbarTools() {
         </button>
       </div>
     </div>
+  );
+}
+
+export function TopbarTools() {
+  return (
+    <Suspense fallback={null}>
+      <TopbarToolsContent />
+    </Suspense>
   );
 }

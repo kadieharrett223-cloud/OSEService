@@ -5,5 +5,5 @@ import { clearSession } from "@/lib/session";
 
 export async function signOutAction() {
   await clearSession();
-  redirect("/enter-code");
+  redirect("/dashboard");
 }

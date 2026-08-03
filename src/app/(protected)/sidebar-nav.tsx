@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
 type NavItem = {
@@ -36,7 +37,7 @@ function isItemActive(item: NavItem, pathname: string, searchParams: URLSearchPa
   return actualValue === expectedValue;
 }
 
-export function SidebarNav() {
+function SidebarNavContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -71,5 +72,13 @@ export function SidebarNav() {
         </div>
       ))}
     </div>
+  );
+}
+
+export function SidebarNav() {
+  return (
+    <Suspense fallback={null}>
+      <SidebarNavContent />
+    </Suspense>
   );
 }

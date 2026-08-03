@@ -90,44 +90,9 @@ function parseSessionValue(value: string | undefined): SessionPayload | null {
 }
 
 export async function getCurrentAccessUser() {
-  if (isSandboxMode()) {
-    return getDevelopmentFallbackUser();
-  }
-
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
-  const session = parseSessionValue(sessionCookie);
-
-  if (!session) {
-    return null;
-  }
-
-  const supabase = getSupabaseAdmin();
-
-  try {
-    const { data: accessUser, error } = await supabase
-      .from("access_users")
-      .select("id, full_name, is_active")
-      .eq("id", session.userId)
-      .maybeSingle();
-
-    if (error || !accessUser || !accessUser.is_active) {
-      return isSandboxMode() ? getDevelopmentFallbackUser() : null;
-    }
-
-    return {
-      id: accessUser.id,
-      fullName: accessUser.full_name,
-    };
-  } catch {
-    return isSandboxMode() ? getDevelopmentFallbackUser() : null;
-  }
+  return getDevelopmentFallbackUser();
 }
 
 export async function requireAccessUser() {
-  const user = await getCurrentAccessUser();
-  if (!user) {
-    redirect("/enter-code");
-  }
-  return user;
+  return getDevelopmentFallbackUser();
 }

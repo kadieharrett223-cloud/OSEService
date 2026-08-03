@@ -50,25 +50,45 @@ export default async function InstallationDetailPage({
   const { id } = await params;
   const supabase = getSupabaseAdmin();
 
-  const [{ data: job }, { data: notes }, { data: photos }] = await Promise.all([
-    supabase
-      .from("installation_jobs")
-      .select("id, invoice_number, quickbooks_invoice_id, customer_name, company_name, phone, email, shipping_address, summary, status, created_at, updated_at")
-      .eq("id", id)
-      .maybeSingle(),
-    supabase
-      .from("installation_notes")
-      .select("id, content, created_at, creator:access_users!installation_notes_created_by_fkey(full_name)")
-      .eq("installation_job_id", id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("installation_photos")
-      .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!installation_photos_uploaded_by_fkey(full_name)")
-      .eq("installation_job_id", id)
-      .order("created_at", { ascending: false }),
-  ]);
+  let job: InstallationJobRecord | null = null;
+  let notes: InstallationNoteRow[] = [];
+  let photos: InstallationPhotoRow[] = [];
 
-  const installationJob = job as InstallationJobRecord | null;
+  try {
+    const [jobResult, notesResult, photosResult] = await Promise.all([
+      supabase
+        .from("installation_jobs")
+        .select("id, invoice_number, quickbooks_invoice_id, customer_name, company_name, phone, email, shipping_address, summary, status, created_at, updated_at")
+        .eq("id", id)
+        .maybeSingle(),
+      supabase
+        .from("installation_notes")
+        .select("id, content, created_at, creator:access_users!installation_notes_created_by_fkey(full_name)")
+        .eq("installation_job_id", id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("installation_photos")
+        .select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!installation_photos_uploaded_by_fkey(full_name)")
+        .eq("installation_job_id", id)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    if (!jobResult.error) {
+      job = jobResult.data as InstallationJobRecord | null;
+    }
+    if (!notesResult.error) {
+      notes = (notesResult.data ?? []) as InstallationNoteRow[];
+    }
+    if (!photosResult.error) {
+      photos = (photosResult.data ?? []) as InstallationPhotoRow[];
+    }
+  } catch {
+    job = null;
+    notes = [];
+    photos = [];
+  }
+
+  const installationJob = job;
   if (!installationJob) {
     return (
       <div className="card p-6">
@@ -80,9 +100,13 @@ export default async function InstallationDetailPage({
   }
 
   const signedPhotoUrls = await Promise.all(
-    ((photos ?? []) as InstallationPhotoRow[]).map(async (photo) => {
-      const { data } = await supabase.storage.from("case-attachments").createSignedUrl(photo.file_path, 60 * 60);
-      return { ...photo, url: data?.signedUrl ?? null };
+    (photos as InstallationPhotoRow[]).map(async (photo) => {
+      try {
+        const { data } = await supabase.storage.from("case-attachments").createSignedUrl(photo.file_path, 60 * 60);
+        return { ...photo, url: data?.signedUrl ?? null };
+      } catch {
+        return { ...photo, url: null };
+      }
     }),
   );
 
@@ -118,8 +142,8 @@ export default async function InstallationDetailPage({
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <h2 className="text-xl font-semibold text-[#121826]">Notes</h2>
         <div className="mt-4 space-y-3">
-          {(notes ?? []).length ? (
-            (notes as InstallationNoteRow[]).map((note) => (
+          {notes.length ? (
+            notes.map((note) => (
               <div key={note.id} className="rounded-lg border border-[#ececec] bg-[#fafbfc] p-3 text-sm text-[#334155]">
                 <p className="whitespace-pre-wrap">{note.content}</p>
                 <p className="mt-2 text-xs text-[#64748b]">{note.creator?.full_name ?? "Unknown"} • {new Date(note.created_at).toLocaleString()}</p>

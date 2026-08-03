@@ -17,12 +17,20 @@ export default async function InstallationPage() {
   await requireUser();
   const supabase = getSupabaseAdmin();
 
-  const { data: rows } = await supabase
-    .from("installation_jobs")
-    .select("id, invoice_number, customer_name, company_name, status, summary, created_at, updated_at")
-    .order("created_at", { ascending: false });
+  let installationRows: InstallationJobRow[] = [];
 
-  const installationRows = (rows ?? []) as InstallationJobRow[];
+  try {
+    const { data: rows, error } = await supabase
+      .from("installation_jobs")
+      .select("id, invoice_number, customer_name, company_name, status, summary, created_at, updated_at")
+      .order("created_at", { ascending: false });
+
+    if (!error) {
+      installationRows = (rows ?? []) as InstallationJobRow[];
+    }
+  } catch {
+    installationRows = [];
+  }
 
   return (
     <div className="space-y-5">

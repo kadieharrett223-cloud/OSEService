@@ -88,20 +88,25 @@ export async function getCurrentAccessUser() {
   }
 
   const supabase = getSupabaseAdmin();
-  const { data: accessUser } = await supabase
-    .from("access_users")
-    .select("id, full_name, is_active")
-    .eq("id", session.userId)
-    .maybeSingle();
 
-  if (!accessUser || !accessUser.is_active) {
+  try {
+    const { data: accessUser, error } = await supabase
+      .from("access_users")
+      .select("id, full_name, is_active")
+      .eq("id", session.userId)
+      .maybeSingle();
+
+    if (error || !accessUser || !accessUser.is_active) {
+      return null;
+    }
+
+    return {
+      id: accessUser.id,
+      fullName: accessUser.full_name,
+    };
+  } catch {
     return null;
   }
-
-  return {
-    id: accessUser.id,
-    fullName: accessUser.full_name,
-  };
 }
 
 export async function requireAccessUser() {

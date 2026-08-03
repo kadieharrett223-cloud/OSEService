@@ -35,6 +35,17 @@ type SessionPayload = {
   createdAt: string;
 };
 
+function isSandboxMode() {
+  return process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
+}
+
+function getDevelopmentFallbackUser() {
+  return {
+    id: process.env.LOCAL_DEV_USER_ID ?? "00000000-0000-0000-0000-000000000000",
+    fullName: process.env.LOCAL_DEV_USER_NAME ?? "Sandbox User",
+  };
+}
+
 export async function createSession(userId: string, fullName: string) {
   const payload: SessionPayload = {
     userId,
@@ -84,7 +95,7 @@ export async function getCurrentAccessUser() {
   const session = parseSessionValue(sessionCookie);
 
   if (!session) {
-    return null;
+    return isSandboxMode() ? getDevelopmentFallbackUser() : null;
   }
 
   const supabase = getSupabaseAdmin();
@@ -97,7 +108,7 @@ export async function getCurrentAccessUser() {
       .maybeSingle();
 
     if (error || !accessUser || !accessUser.is_active) {
-      return null;
+      return isSandboxMode() ? getDevelopmentFallbackUser() : null;
     }
 
     return {
@@ -105,7 +116,7 @@ export async function getCurrentAccessUser() {
       fullName: accessUser.full_name,
     };
   } catch {
-    return null;
+    return isSandboxMode() ? getDevelopmentFallbackUser() : null;
   }
 }
 

@@ -40,6 +40,12 @@ export default async function NewInstallationPage({
         </div>
       </div>
 
+      {process.env.NODE_ENV !== "production" ? (
+        <p className="rounded-md border border-[#e7eaef] bg-[#f8fafc] p-3 text-sm text-[#334155]">
+          Sandbox mode is active, so the installation form will work locally even before a full access session is established.
+        </p>
+      ) : null}
+
       {params.error ? (
         <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{params.error}</p>
       ) : null}

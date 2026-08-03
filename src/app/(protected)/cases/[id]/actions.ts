@@ -285,7 +285,11 @@ export async function addNoteAction(formData: FormData) {
     case_id: caseId,
     actor_id: safeActorId,
     activity_type: "note_added",
-    summary: content.length > 160 ? `${content.slice(0, 157)}...` : content,
+    summary: `${user.fullName ?? "User"} wrote ${noteType} note`,
+    details: {
+      note_type: noteType,
+      note_preview: content.length > 120 ? `${content.slice(0, 117)}...` : content,
+    },
   });
 
   revalidatePath(`/cases/${caseId}`);
@@ -803,9 +807,14 @@ export async function deleteAttachmentAction(formData: FormData) {
 
 export async function deleteCaseAction(formData: FormData) {
   const caseId = getString(formData, "case_id");
+  const confirmationCode = getString(formData, "confirmation_code");
 
   if (!caseId) {
     redirect("/cases?error=missing_case_reference");
+  }
+
+  if (confirmationCode !== "9822") {
+    redirect(`/cases/${caseId}?error=invalid_delete_confirmation`);
   }
 
   const supabase = getSupabaseAdmin();

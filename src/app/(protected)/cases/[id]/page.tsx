@@ -15,6 +15,7 @@ import { DeleteCaseButton } from "@/app/(protected)/cases/[id]/delete-case-butto
 
 type ActivityRow = {
   id: string;
+  actor_id: string | null;
   activity_type: string;
   summary: string;
   details?: Record<string, unknown> | null;
@@ -71,6 +72,7 @@ type AttachmentRow = {
 
 type InternalNoteRow = {
   id: string;
+  created_by: string | null;
   note_type: string;
   content: string;
   created_at: string;
@@ -187,6 +189,19 @@ function safeInputDate(value: string | null | undefined) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function formatPacificDateTime(value: string) {
+  return new Date(value).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  });
+}
+
 function buildTrackingUrl(trackingNumber: string) {
   return `https://www.17track.net/en/track?nums=${encodeURIComponent(trackingNumber)}`;
 }
@@ -286,9 +301,9 @@ export default async function CaseDetailsPage({
       caseRecord.created_by
         ? supabase.from("access_users").select("full_name").eq("id", caseRecord.created_by).maybeSingle()
         : Promise.resolve({ data: null }),
-      supabase.from("case_activity").select("id, activity_type, summary, details, created_at, access_users:actor_id(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
+      supabase.from("case_activity").select("id, actor_id, activity_type, summary, details, created_at, access_users:actor_id(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
       supabase.from("case_attachments").select("id, file_name, file_path, file_size, mime_type, created_at, uploader:access_users!case_attachments_uploaded_by_access_user_fkey(full_name)").eq("case_id", id).order("created_at", { ascending: false }),
-      supabase.from("case_notes").select("id, note_type, content, created_at, access_users:created_by(full_name)").eq("case_id", id).eq("note_type", "internal").order("created_at", { ascending: false }),
+      supabase.from("case_notes").select("id, created_by, note_type, content, created_at, access_users:created_by(full_name)").eq("case_id", id).eq("note_type", "internal").order("created_at", { ascending: false }),
     ]);
 
     customerRow = (customerResult.data as CaseRecord["customers"] | null) ?? null;
@@ -322,6 +337,9 @@ export default async function CaseDetailsPage({
     assigned: assignedRow,
     creator: creatorRow,
   } as CaseRecord;
+  const accessUsersById = new Map(
+    ((assignees ?? []) as Array<{ id: string; full_name: string | null }>).map((assignee) => [assignee.id, assignee.full_name ?? "Unknown"]),
+  );
 
   const attachmentLinks = await Promise.all(
     ((attachments ?? []) as AttachmentRow[]).map(async (item) => {
@@ -343,7 +361,7 @@ export default async function CaseDetailsPage({
 
   const productsPurchased = parseProductsPurchased(caseRecordWithRelations.invoice?.raw_payload);
   const allActivityRows = activity as ActivityRow[];
-  const activityRows = allActivityRows.filter((row) => row.activity_type !== "note_added");
+  const activityRows = allActivityRows;
   const showAllTimeline = timeline === "all";
   const visibleTimelineRows = showAllTimeline ? activityRows : activityRows.slice(0, 5);
   const normalizedStatus = normalizeStatusLabel(caseRecordWithRelations.status);
@@ -555,25 +573,15 @@ export default async function CaseDetailsPage({
         </div>
       </section>
 
-      <section className="card border border-[#f1d5d7] bg-[#fff8f8] p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
-            <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and its uploaded files. Only the original creator can delete it.</p>
-          </div>
-          <DeleteCaseButton caseId={id} />
-        </div>
-      </section>
-
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-[#121826]">Timeline & Internal Notes</h2>
+          <h2 className="text-xl font-semibold text-[#121826]">Timeline</h2>
           <span className="badge badge-status">Auto</span>
         </div>
-        <p className="mt-2 text-sm text-[#5a5a5a]">The timeline below auto-updates whenever anything changes on the case. The right-side panel is for internal notes only.</p>
+        <p className="mt-2 text-sm text-[#5a5a5a]">Timeline tracks operational actions only: who changed status, who added tracking, who wrote notes, and when.</p>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-[1.25fr_0.9fr]">
-          <div>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">Timeline</h3>
               <span className="text-xs text-[#64748b]">Auto-updating</span>
@@ -581,6 +589,13 @@ export default async function CaseDetailsPage({
             <div className="mt-3 space-y-2">
               {visibleTimelineRows.map((row) => (
                 <div key={row.id} className="rounded-md border border-[#ececec] p-3 text-sm">
+                  {(() => {
+                    const actorName = row.access_users?.full_name
+                      ?? (row.actor_id ? accessUsersById.get(row.actor_id) : null)
+                      ?? (row.summary.includes(" wrote ") ? row.summary.split(" wrote ")[0] : "System");
+
+                    return (
+                      <>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#f1f5f9] text-[11px] font-bold text-[#475569]">
@@ -588,10 +603,10 @@ export default async function CaseDetailsPage({
                       </span>
                       <span className="rounded bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-semibold text-[#475569]">{activityLabel(row.activity_type)}</span>
                     </div>
-                    <span className="text-xs text-[#6a6a6a]">{new Date(row.created_at).toLocaleString()}</span>
+                    <span className="text-xs text-[#6a6a6a]">{formatPacificDateTime(row.created_at)}</span>
                   </div>
                   <p className="mt-1 font-semibold text-[#1f2937]">{row.summary}</p>
-                  <p className="text-xs text-[#6a6a6a]">By {row.access_users?.full_name ?? "System"}</p>
+                  <p className="text-xs text-[#6a6a6a]">By {actorName}</p>
                   {row.activity_type === "add_tracking_number" && ((row.details?.tracking_number as string | undefined) || row.summary.includes(":")) ? (
                     <a
                       href={buildTrackingUrl((row.details?.tracking_number as string | undefined) ?? row.summary.split(":").slice(1).join(":").trim())}
@@ -602,7 +617,7 @@ export default async function CaseDetailsPage({
                       Track package
                     </a>
                   ) : null}
-                  {row.details && row.activity_type !== "add_tracking_number" ? (
+                  {row.details && row.activity_type !== "add_tracking_number" && row.activity_type !== "note_added" ? (
                     <div className="mt-1 rounded bg-[#f8fafc] px-2 py-1 text-xs text-[#475569]">
                       {Object.entries(row.details)
                         .filter(([, value]) => value != null && value !== "")
@@ -610,6 +625,9 @@ export default async function CaseDetailsPage({
                         .join(" | ")}
                     </div>
                   ) : null}
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
               {activityRows.length === 0 ? (
@@ -627,14 +645,24 @@ export default async function CaseDetailsPage({
                 </div>
               ) : null}
             </div>
+
+            <section className="card border border-[#f1d5d7] bg-[#fff8f8] p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
+                  <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and attachments. Secret code 9822 is required.</p>
+                </div>
+                <DeleteCaseButton caseId={id} />
+              </div>
+            </section>
           </div>
 
-          <div className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
+          <aside className="self-start rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 lg:sticky lg:top-24">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">Internal Notes</h3>
               <span className="text-xs text-[#64748b]">Internal only</span>
             </div>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Use this panel for internal follow-ups and team communication. Each note stamps the date, time, and author.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Internal communication panel for team follow-ups. Include customer-contact outcomes and next internal steps.</p>
 
             <form action={addNoteAction} className="mt-3 rounded-md border border-[#edf0f4] bg-white p-3">
               <input type="hidden" name="case_id" value={id} />
@@ -654,20 +682,23 @@ export default async function CaseDetailsPage({
             </form>
 
             <div className="mt-3 space-y-2">
-              {internalNotes.map((note) => (
-                <div key={note.id} className="rounded-md border border-[#ececec] bg-white p-3 text-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-[#1f2937]">{note.access_users?.full_name ?? "Unknown"}</p>
-                    <span className="text-xs text-[#6a6a6a]">{new Date(note.created_at).toLocaleString()}</span>
+              {internalNotes.map((note) => {
+                const authorName = note.access_users?.full_name
+                  ?? (note.created_by ? accessUsersById.get(note.created_by) : null)
+                  ?? "Unknown";
+
+                return (
+                  <div key={note.id} className="rounded-md border border-[#ececec] bg-white p-3 text-sm">
+                    <p className="font-semibold text-[#1f2937]">{authorName + " " + formatPacificDateTime(note.created_at) + ":"}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-[#334155]">{note.content}</p>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap text-[#334155]">{note.content}</p>
-                </div>
-              ))}
+                );
+              })}
               {internalNotes.length === 0 ? (
                 <p className="rounded-md border border-[#edf0f4] bg-white p-3 text-sm text-[#64748b]">No internal notes yet.</p>
               ) : null}
             </div>
-          </div>
+          </aside>
         </div>
       </section>
     </div>

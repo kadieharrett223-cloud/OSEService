@@ -549,7 +549,7 @@ export default async function CaseDetailsPage({
           </form>
           {latestTrackingUrl ? (
             <a href={latestTrackingUrl} target="_blank" rel="noreferrer" className="inline-flex text-xs font-semibold text-[#b20610] underline">
-              Track latest package ({latestTracking})
+              Open universal tracker for {latestTracking}
             </a>
           ) : null}
         </div>

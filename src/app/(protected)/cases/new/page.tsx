@@ -271,6 +271,9 @@ export default async function CreateCasePage({
             <div>
               <label htmlFor="tracking_number" className="label">Tracking Number</label>
               <input id="tracking_number" name="tracking_number" className="input" placeholder="Optional" />
+              <p className="mt-1 text-xs text-[#64748b]">
+                Enter a tracking number and use the link that appears after saving to open a universal package tracker.
+              </p>
             </div>
           </div>
         </section>

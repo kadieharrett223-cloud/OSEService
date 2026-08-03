@@ -11,6 +11,7 @@ type DashboardCaseRow = {
   updated_at: string;
   customers: { full_name: string | null; company_name: string | null } | null;
   access_users: { full_name: string | null } | null;
+  creator: { full_name: string | null } | null;
 };
 
 type DashboardParams = {
@@ -94,7 +95,7 @@ export default async function DashboardPage({
   let latestCasesQuery = supabase
     .from("customer_service_cases")
     .select(
-      `id, case_number, status, priority, updated_at, customers(full_name, company_name), access_users:assigned_employee_id(full_name)`,
+      `id, case_number, status, priority, updated_at, customers(full_name, company_name), access_users:assigned_employee_id(full_name), creator:created_by(full_name)`,
     )
     .order("updated_at", { ascending: false })
     .limit(10);
@@ -179,6 +180,7 @@ export default async function DashboardPage({
                 <th className="px-2 py-2">Status</th>
                 <th className="px-2 py-2">Priority</th>
                 <th className="px-2 py-2">Assigned</th>
+                <th className="px-2 py-2">Created by</th>
                 <th className="px-2 py-2">Updated</th>
               </tr>
             </thead>
@@ -210,6 +212,7 @@ export default async function DashboardPage({
                       </span>
                     </td>
                     <td className="px-2 py-2">{row.access_users?.full_name ?? "Unassigned"}</td>
+                    <td className="px-2 py-2">{row.creator?.full_name ?? "Unknown"}</td>
                     <td className="px-2 py-2 text-[#6b7280]">{formatRelative(row.updated_at)}</td>
                   </tr>
                 ))

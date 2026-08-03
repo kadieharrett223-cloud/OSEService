@@ -77,7 +77,6 @@ export function AttachmentDropzone({
   function onInputChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     updateFiles(files, true);
-    event.target.value = "";
   }
 
   function onDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -96,7 +95,7 @@ export function AttachmentDropzone({
         }
       });
     };
-  }, [selected]);
+  }, []);
 
   return (
     <div className="space-y-3">

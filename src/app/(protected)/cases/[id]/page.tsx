@@ -448,7 +448,7 @@ export default async function CaseDetailsPage({
 
             return (
               <div key={item.id} className="rounded-md border border-[#ececec] p-2 text-sm">
-                <div className="mb-2 flex aspect-square items-center justify-center overflow-hidden rounded-md bg-[#f5f7fb]">
+                <div className="mb-2 flex h-28 items-center justify-center rounded-md bg-[#f5f7fb]">
                   {isImage && item.url ? (
                     <a href={item.url} target="_blank" rel="noreferrer" className="h-full w-full">
                       {/* eslint-disable-next-line @next/next/no-img-element */}

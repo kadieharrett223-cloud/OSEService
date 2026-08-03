@@ -16,6 +16,7 @@ const navGroups: NavItem[][] = [
     { href: "/dashboard", label: "Dashboard", matchPath: "/dashboard", icon: "DB" },
     { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
     { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
+    { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },
     { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },
   ],
   [{ href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" }],

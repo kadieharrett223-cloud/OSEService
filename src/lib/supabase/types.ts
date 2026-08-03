@@ -328,6 +328,106 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      installation_jobs: {
+        Row: {
+          id: string;
+          invoice_number: string;
+          quickbooks_invoice_id: string | null;
+          quickbooks_customer_id: string | null;
+          customer_name: string;
+          company_name: string | null;
+          phone: string | null;
+          email: string | null;
+          shipping_address: string | null;
+          summary: string;
+          status: "New" | "In Progress" | "Completed" | "Blocked";
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          invoice_number: string;
+          quickbooks_invoice_id?: string | null;
+          quickbooks_customer_id?: string | null;
+          customer_name: string;
+          company_name?: string | null;
+          phone?: string | null;
+          email?: string | null;
+          shipping_address?: string | null;
+          summary: string;
+          status?: "New" | "In Progress" | "Completed" | "Blocked";
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          invoice_number?: string;
+          quickbooks_invoice_id?: string | null;
+          quickbooks_customer_id?: string | null;
+          customer_name?: string;
+          company_name?: string | null;
+          phone?: string | null;
+          email?: string | null;
+          shipping_address?: string | null;
+          summary?: string;
+          status?: "New" | "In Progress" | "Completed" | "Blocked";
+          created_by?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      installation_notes: {
+        Row: {
+          id: string;
+          installation_job_id: string;
+          content: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          installation_job_id: string;
+          content: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          content?: string;
+          created_by?: string | null;
+        };
+        Relationships: [];
+      };
+      installation_photos: {
+        Row: {
+          id: string;
+          installation_job_id: string;
+          file_path: string;
+          file_name: string;
+          file_size: number | null;
+          mime_type: string | null;
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          installation_job_id: string;
+          file_path: string;
+          file_name: string;
+          file_size?: number | null;
+          mime_type?: string | null;
+          uploaded_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          file_name?: string;
+          file_path?: string;
+          file_size?: number | null;
+          mime_type?: string | null;
+          uploaded_by?: string | null;
+        };
+        Relationships: [];
+      };
       replacement_parts: {
         Row: {
           id: string;

@@ -1,17 +1,28 @@
-const requiredEnv = {
-  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-};
+function isPlaceholderEnv(value: string | undefined) {
+  if (!value) return true;
+  const normalized = value.trim();
+  return normalized === "[SENSITIVE]"
+    || normalized.startsWith("your-")
+    || normalized.startsWith("changeme")
+    || normalized.includes("example.com")
+    || normalized.includes("<")
+    || normalized.includes(">")
+    || normalized.includes("replace-me");
+}
 
 export function getSupabaseEnv() {
-  if (!requiredEnv.supabaseUrl || !requiredEnv.supabaseAnonKey) {
-    throw new Error(
-      "Missing Supabase environment variables. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-    );
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey || isPlaceholderEnv(supabaseUrl) || isPlaceholderEnv(supabaseAnonKey)) {
+    return {
+      supabaseUrl: "https://example.supabase.co",
+      supabaseAnonKey: "placeholder-anon-key",
+    };
   }
 
   return {
-    supabaseUrl: requiredEnv.supabaseUrl,
-    supabaseAnonKey: requiredEnv.supabaseAnonKey,
+    supabaseUrl,
+    supabaseAnonKey,
   };
 }

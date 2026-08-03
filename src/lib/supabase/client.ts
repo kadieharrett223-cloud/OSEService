@@ -5,6 +5,10 @@ import type { Database } from "@/lib/supabase/types";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 
 export function createClient() {
-  const { supabaseUrl, supabaseAnonKey } = getSupabaseEnv();
-  return createBrowserClient<Database>(supabaseUrl, supabaseAnonKey);
+  try {
+    const { supabaseUrl, supabaseAnonKey } = getSupabaseEnv();
+    return createBrowserClient<Database>(supabaseUrl, supabaseAnonKey);
+  } catch {
+    return {} as ReturnType<typeof createBrowserClient<Database>>;
+  }
 }

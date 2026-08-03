@@ -555,12 +555,22 @@ export default async function CaseDetailsPage({
         </div>
       </section>
 
+      <section className="card border border-[#f1d5d7] bg-[#fff8f8] p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
+            <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and its uploaded files. Only the original creator can delete it.</p>
+          </div>
+          <DeleteCaseButton caseId={id} />
+        </div>
+      </section>
+
       <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-[#121826]">Activity Timeline & Internal Notes</h2>
+          <h2 className="text-xl font-semibold text-[#121826]">Timeline & Internal Notes</h2>
           <span className="badge badge-status">Auto</span>
         </div>
-        <p className="mt-2 text-sm text-[#5a5a5a]">The timeline captures automatic updates from the case, while the right-side panel keeps the live internal conversation organized.</p>
+        <p className="mt-2 text-sm text-[#5a5a5a]">The timeline below auto-updates whenever anything changes on the case. The right-side panel is for internal notes only.</p>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-[1.25fr_0.9fr]">
           <div>
@@ -622,9 +632,9 @@ export default async function CaseDetailsPage({
           <div className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#64748b]">Internal Notes</h3>
-              <span className="text-xs text-[#64748b]">Right-side conversation</span>
+              <span className="text-xs text-[#64748b]">Internal only</span>
             </div>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Log follow-ups, status updates, and customer communication here. Each note stamps the date, time, and author.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Use this panel for internal follow-ups and team communication. Each note stamps the date, time, and author.</p>
 
             <form action={addNoteAction} className="mt-3 rounded-md border border-[#edf0f4] bg-white p-3">
               <input type="hidden" name="case_id" value={id} />
@@ -658,16 +668,6 @@ export default async function CaseDetailsPage({
               ) : null}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="card border border-[#f1d5d7] bg-[#fff8f8] p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
-            <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and its uploaded files. Only the original creator can delete it.</p>
-          </div>
-          <DeleteCaseButton caseId={id} />
         </div>
       </section>
     </div>

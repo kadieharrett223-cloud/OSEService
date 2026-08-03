@@ -34,6 +34,11 @@ type InstallationPhotoRow = {
   uploader: { full_name: string | null } | null;
 };
 
+type QuickbooksInvoiceRow = {
+  quickbooks_invoice_id: string;
+  raw_payload: unknown;
+};
+
 function getFileExtension(fileName: string) {
   if (!fileName.includes(".")) return "";
   return fileName.split(".").pop()?.toLowerCase() ?? "";
@@ -65,6 +70,44 @@ function formatBytes(size: number | null) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parseInvoiceLineItems(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return [] as string[];
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  return lines
+    .map((line, index) => {
+      if (!line || typeof line !== "object") return null;
+
+      const item = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } };
+      };
+
+      const description = typeof item.Description === "string"
+        ? item.Description.trim()
+        : typeof item.SalesItemLineDetail?.ItemRef?.name === "string"
+          ? item.SalesItemLineDetail.ItemRef.name.trim()
+          : "";
+
+      if (!description) return null;
+
+      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty;
+      const qty = typeof qtyRaw === "number" || typeof qtyRaw === "string"
+        ? String(qtyRaw).trim()
+        : "";
+
+      return `${index + 1}. ${description}${qty ? ` (Qty ${qty})` : ""}`;
+    })
+    .filter((line): line is string => Boolean(line));
+}
+
 export default async function InstallationDetailPage({
   params,
 }: {
@@ -77,6 +120,7 @@ export default async function InstallationDetailPage({
   let job: InstallationJobRecord | null = null;
   let notes: InstallationNoteRow[] = [];
   let photos: InstallationPhotoRow[] = [];
+  let quickbooksInvoice: QuickbooksInvoiceRow | null = null;
 
   try {
     const [jobResult, notesResult, photosResult] = await Promise.all([
@@ -123,6 +167,39 @@ export default async function InstallationDetailPage({
     );
   }
 
+  if (installationJob.quickbooks_invoice_id) {
+    try {
+      const lookupByUuid = isUuid(installationJob.quickbooks_invoice_id);
+      const invoiceQuery = lookupByUuid
+        ? supabase
+            .from("quickbooks_invoices")
+            .select("quickbooks_invoice_id, raw_payload")
+            .eq("id", installationJob.quickbooks_invoice_id)
+            .maybeSingle()
+        : supabase
+            .from("quickbooks_invoices")
+            .select("quickbooks_invoice_id, raw_payload")
+            .eq("quickbooks_invoice_id", installationJob.quickbooks_invoice_id)
+            .maybeSingle();
+
+      const { data } = await invoiceQuery;
+      quickbooksInvoice = (data as QuickbooksInvoiceRow | null) ?? null;
+
+      // Support legacy records that may store external QuickBooks invoice ids in quickbooks_invoice_id.
+      if (!quickbooksInvoice && lookupByUuid) {
+        const { data: fallbackInvoice } = await supabase
+          .from("quickbooks_invoices")
+          .select("quickbooks_invoice_id, raw_payload")
+          .eq("quickbooks_invoice_id", installationJob.quickbooks_invoice_id)
+          .maybeSingle();
+
+        quickbooksInvoice = (fallbackInvoice as QuickbooksInvoiceRow | null) ?? null;
+      }
+    } catch {
+      quickbooksInvoice = null;
+    }
+  }
+
   const signedPhotoUrls = await Promise.all(
     (photos as InstallationPhotoRow[]).map(async (photo) => {
       try {
@@ -133,6 +210,12 @@ export default async function InstallationDetailPage({
       }
     }),
   );
+  const invoiceLineItems = parseInvoiceLineItems(quickbooksInvoice?.raw_payload);
+  const invoiceLink = quickbooksInvoice?.quickbooks_invoice_id
+    ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(quickbooksInvoice.quickbooks_invoice_id)}`
+    : installationJob.quickbooks_invoice_id
+      ? `https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(installationJob.quickbooks_invoice_id)}`
+      : null;
 
   return (
     <div className="space-y-4">
@@ -150,15 +233,25 @@ export default async function InstallationDetailPage({
           <p><span className="font-semibold">Invoice Number:</span> {installationJob.invoice_number}</p>
           <p><span className="font-semibold">Customer Name:</span> {installationJob.customer_name}</p>
           <p><span className="font-semibold">Shipping Address:</span> {installationJob.shipping_address ?? "-"}</p>
-          {installationJob.quickbooks_invoice_id ? (
+          {invoiceLink ? (
             <a
-              href={`https://app.qbo.intuit.com/app/invoice?txnId=${encodeURIComponent(installationJob.quickbooks_invoice_id)}`}
+              href={invoiceLink}
               target="_blank"
               rel="noreferrer"
               className="btn-secondary inline-flex"
             >
               View Invoice
             </a>
+          ) : null}
+          {invoiceLineItems.length ? (
+            <div className="rounded-lg border border-[#ececec] bg-[#fafbfc] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#64748b]">Invoice Line Items</p>
+              <ul className="mt-2 space-y-1 text-sm text-[#334155]">
+                {invoiceLineItems.map((lineItem) => (
+                  <li key={lineItem}>{lineItem}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
       </section>

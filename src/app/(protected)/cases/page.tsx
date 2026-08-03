@@ -71,8 +71,6 @@ export default async function CasesPage({
 
   if (params.status && CASE_STATUSES.includes(params.status as (typeof CASE_STATUSES)[number])) {
     dbQuery = dbQuery.eq("status", params.status as CaseStatus);
-  } else if (!query) {
-    dbQuery = dbQuery.not("status", "in", "(Completed,Resolved,Closed)");
   }
 
   if (params.priority && PRIORITIES.includes(params.priority as (typeof PRIORITIES)[number])) {
@@ -93,6 +91,11 @@ export default async function CasesPage({
   ]);
 
   const filteredRows = ((rows ?? []) as unknown as CaseListRow[]).filter((row) => {
+    const shouldHideCompletedByDefault = !params.status && !params.priority && !params.employee && !params.case_type && !query;
+    if (shouldHideCompletedByDefault && ["Completed", "Resolved", "Closed"].includes(row.status)) {
+      return false;
+    }
+
     if (!query) return true;
 
     const searchableValues = [

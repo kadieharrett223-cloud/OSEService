@@ -46,14 +46,14 @@ function formatRelative(dateIso: string) {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
-async function getCountByStatus(status: CaseStatus) {
+async function getCaseSummaryRows() {
   const supabase = getSupabaseAdmin();
-  const { count } = await supabase
+  const { data } = await supabase
     .from("customer_service_cases")
-    .select("id", { count: "exact", head: true })
-    .eq("status", status);
+    .select("id, status, priority, updated_at")
+    .order("updated_at", { ascending: false });
 
-  return count ?? 0;
+  return ((data ?? []) as Array<{ id: string; status: string; priority: string; updated_at: string }>);
 }
 
 export default async function DashboardPage({
@@ -72,25 +72,19 @@ export default async function DashboardPage({
       ? "in-progress"
       : "all";
 
-  const [{ count: openCases }, { count: highPriority }, { count: recentlyUpdated }, waitingForCustomer, partsNeeded, partsShipped] =
-    await Promise.all([
-      supabase
-        .from("customer_service_cases")
-        .select("id", { count: "exact", head: true })
-        .not("status", "in", '("Resolved","Closed")'),
-      supabase
-        .from("customer_service_cases")
-        .select("id", { count: "exact", head: true })
-        .eq("priority", "High")
-        .not("status", "in", '("Resolved","Completed","Closed")'),
-      supabase
-        .from("customer_service_cases")
-        .select("id", { count: "exact", head: true })
-        .gte("updated_at", sevenDaysAgo.toISOString()),
-      getCountByStatus("Waiting for Customer"),
-      getCountByStatus("Parts Needed"),
-      getCountByStatus("Parts Shipped"),
-    ]);
+  const [caseRows, { count: recentlyUpdated }] = await Promise.all([
+    getCaseSummaryRows(),
+    supabase
+      .from("customer_service_cases")
+      .select("id", { count: "exact", head: true })
+      .gte("updated_at", sevenDaysAgo.toISOString()),
+  ]);
+
+  const openCases = caseRows.filter((row) => !isResolvedStatus(row.status)).length;
+  const highPriority = caseRows.filter((row) => row.priority === "High" && !isResolvedStatus(row.status)).length;
+  const waitingForCustomer = caseRows.filter((row) => row.status === "Waiting for Customer").length;
+  const partsNeeded = caseRows.filter((row) => row.status === "Parts Needed").length;
+  const partsShipped = caseRows.filter((row) => row.status === "Parts Shipped").length;
 
   let latestCasesQuery = supabase
     .from("customer_service_cases")

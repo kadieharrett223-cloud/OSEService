@@ -34,6 +34,30 @@ type InstallationPhotoRow = {
   uploader: { full_name: string | null } | null;
 };
 
+function getFileExtension(fileName: string) {
+  if (!fileName.includes(".")) return "";
+  return fileName.split(".").pop()?.toLowerCase() ?? "";
+}
+
+function getPreviewType(photo: { mime_type: string | null; file_name: string }) {
+  const mime = (photo.mime_type ?? "").toLowerCase();
+  const extension = getFileExtension(photo.file_name);
+
+  if (mime.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(extension)) {
+    return "image";
+  }
+
+  if (mime.startsWith("video/") || ["mp4", "mov", "webm", "ogg"].includes(extension)) {
+    return "video";
+  }
+
+  if (mime === "application/pdf" || extension === "pdf") {
+    return "pdf";
+  }
+
+  return "file";
+}
+
 function formatBytes(size: number | null) {
   if (!size || size < 0) return "-";
   if (size < 1024) return `${size} B`;
@@ -161,6 +185,43 @@ export default async function InstallationDetailPage({
           {signedPhotoUrls.length ? (
             signedPhotoUrls.map((photo) => (
               <div key={photo.id} className="rounded-lg border border-[#ececec] p-3">
+                {photo.url ? (
+                  <div className="mb-3 overflow-hidden rounded-md border border-[#e7eaef] bg-[#f8fafc]">
+                    {getPreviewType(photo) === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={photo.url}
+                        alt={photo.file_name}
+                        className="h-52 w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : null}
+
+                    {getPreviewType(photo) === "video" ? (
+                      <video
+                        src={photo.url}
+                        controls
+                        preload="metadata"
+                        className="h-52 w-full bg-black object-contain"
+                      />
+                    ) : null}
+
+                    {getPreviewType(photo) === "pdf" ? (
+                      <iframe
+                        src={photo.url}
+                        title={photo.file_name}
+                        className="h-52 w-full"
+                      />
+                    ) : null}
+
+                    {getPreviewType(photo) === "file" ? (
+                      <div className="flex h-52 items-center justify-center px-4 text-center text-sm text-[#64748b]">
+                        Preview is not available for this file type.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <p className="text-sm font-semibold">{photo.file_name}</p>
                 <p className="text-xs text-[#64748b]">{formatBytes(photo.file_size)} • {photo.uploader?.full_name ?? "Unknown"}</p>
                 {photo.url ? (

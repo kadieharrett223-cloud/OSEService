@@ -35,7 +35,7 @@ Phase 1 implements only internal customer service case tracking:
 - Multi-file attachment gallery with upload, download, and delete controls
 - Workflow-first create-case workspace with dedicated sections for Customer Information, Issue Details, Photos/Attachments, Timeline/Notes, and Resolution/Status
 - Case details timeline defaults to the 5 most recent events with a View All toggle for full history
-- QuickBooks-prefilled customer/invoice card on intake with read-only operational fields and editable customer notes only
+- QuickBooks-prefilled customer/invoice card on intake with editable local shipping address (saved in app only; no QuickBooks writeback) and editable customer notes
 - Create-time attachment queue previews with filename, size, selected time, selected by, and remove control before submit
 - Create-time internal notes queue that is converted into case notes and case_activity timeline rows on save
 

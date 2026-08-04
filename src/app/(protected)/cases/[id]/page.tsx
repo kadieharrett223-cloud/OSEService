@@ -392,9 +392,9 @@ export default async function CaseDetailsPage({
   const invoiceContactFallbacks = extractInvoiceContactFallbacks(caseRecordWithRelations.invoice?.raw_payload);
   const invoiceRaw = caseRecordWithRelations.invoice?.raw_payload as Record<string, unknown> | undefined;
   const invoiceShippingFromRaw = formatAddressFromRaw(invoiceRaw?.ShipAddr) || formatAddressFromRaw(invoiceRaw?.BillAddr);
-  const shippingAddress = invoiceShippingFromRaw
+  const shippingAddress = caseRecordWithRelations.customers?.shipping_address
+    || invoiceShippingFromRaw
     || caseRecordWithRelations.invoice?.shipping_address
-    || caseRecordWithRelations.customers?.shipping_address
     || caseRecordWithRelations.invoice?.billing_address
     || "";
   const issueReportedDisplay = new Date(caseRecordWithRelations.issue_reported_at || caseRecordWithRelations.created_at).toLocaleString();

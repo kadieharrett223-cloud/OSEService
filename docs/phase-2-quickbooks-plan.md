@@ -13,7 +13,7 @@
 - Lookup includes typeahead suggestions while typing via `/api/quickbooks/suggestions`.
 - Autofill now carries fuller snapshot details (invoice date, total, payment status, billing/shipping address) into intake review fields.
 - Autofill now includes invoice product lines (parsed from `quickbooks_invoices.raw_payload`) and a direct "View Full Invoice" link for intake visibility.
-- Create-case customer card now treats QuickBooks customer/invoice data as read-only to reduce duplicate data entry.
+- Create-case customer card auto-fills from QuickBooks, but shipping address is editable in-app for support corrections and does not write back to QuickBooks.
 - Intake defaults to unassigned case creation and captures an explicit enter date for reporting timestamp fallback.
 - Protected app header now surfaces QuickBooks status as connected/disconnected using snapshot availability, with a Connect action when disconnected.
 - Settings now includes live QuickBooks OAuth connect, disconnect, and manual invoice sync.

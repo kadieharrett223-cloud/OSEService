@@ -427,7 +427,12 @@ export async function createCaseAction(formData: FormData) {
 
     let customerId = existingCustomer?.id;
 
-    if (!customerId) {
+    if (customerId) {
+      await supabase
+        .from("customers")
+        .update({ shipping_address: shippingAddress })
+        .eq("id", customerId);
+    } else {
       const { data: customerInsert, error: customerError } = await supabase
         .from("customers")
         .insert({

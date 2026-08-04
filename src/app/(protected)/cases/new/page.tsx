@@ -147,7 +147,7 @@ export default async function CreateCasePage({
         <section className="card border border-[#e7eaef] bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-xl font-semibold text-[#121826]">Customer Information</h2>
-            <span className="rounded-full bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#334155]">Read-only from QuickBooks</span>
+            <span className="rounded-full bg-[#eef2f7] px-2 py-1 text-xs font-semibold text-[#334155]">QuickBooks autofill (shipping editable in app)</span>
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-3">
             <div className="space-y-2 lg:col-span-2">
@@ -161,7 +161,8 @@ export default async function CreateCasePage({
               </div>
               <div>
                 <label htmlFor="shipping_address" className="label">Shipping Address</label>
-                <textarea id="shipping_address" name="shipping_address" rows={4} readOnly={params.prefilled === "1"} className={`textarea ${params.prefilled === "1" ? "bg-[#f8fafc]" : ""}`} defaultValue={shippingAddressDisplay} />
+                <textarea id="shipping_address" name="shipping_address" rows={4} className="textarea" defaultValue={shippingAddressDisplay} />
+                <p className="mt-1 text-xs text-[#64748b]">Auto-filled from QuickBooks when available. Changes save only in this app and do not update QuickBooks.</p>
               </div>
             </div>
 

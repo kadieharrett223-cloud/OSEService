@@ -741,6 +741,81 @@ export async function autosaveWorkflowWorkspaceAction(
   }
 }
 
+export async function autosaveCustomerInfoWorkspaceAction(
+  _prevState: AutoSaveState,
+  formData: FormData,
+): Promise<AutoSaveState> {
+  try {
+    const user = await requireUser();
+
+    const caseId = getString(formData, "case_id");
+    const shippingAddress = getNullableString(formData, "shipping_address");
+
+    if (!caseId) {
+      return { ok: false, error: "Missing case reference" };
+    }
+
+    const { supabase, existingCase } = await getCaseOrRedirect(caseId);
+    const safeActorId = await ensureAccessUserId(supabase, user);
+
+    const { data: caseCustomer, error: caseLookupError } = await supabase
+      .from("customer_service_cases")
+      .select("customer_id")
+      .eq("id", caseId)
+      .maybeSingle();
+
+    if (caseLookupError || !caseCustomer) {
+      return { ok: false, error: caseLookupError?.message ?? "Case not found" };
+    }
+
+    if (!caseCustomer.customer_id) {
+      return { ok: false, error: "No customer is linked to this case" };
+    }
+
+    const { data: currentCustomer, error: customerLookupError } = await supabase
+      .from("customers")
+      .select("shipping_address")
+      .eq("id", caseCustomer.customer_id)
+      .maybeSingle();
+
+    if (customerLookupError || !currentCustomer) {
+      return { ok: false, error: customerLookupError?.message ?? "Customer not found" };
+    }
+
+    if ((currentCustomer.shipping_address ?? null) === shippingAddress) {
+      return { ok: true, savedAt: new Date().toISOString() };
+    }
+
+    const { error: updateError } = await supabase
+      .from("customers")
+      .update({ shipping_address: shippingAddress } as never)
+      .eq("id", caseCustomer.customer_id);
+
+    if (updateError) {
+      return { ok: false, error: updateError.message };
+    }
+
+    await supabase.from("case_activity").insert({
+      case_id: caseId,
+      actor_id: safeActorId,
+      activity_type: "customer_info_updated",
+      summary: "Customer shipping address updated",
+      details: {
+        case_number: existingCase.case_number,
+      },
+    });
+
+    revalidatePath(`/cases/${caseId}`);
+    revalidatePath("/cases");
+    revalidatePath("/dashboard");
+
+    return { ok: true, savedAt: new Date().toISOString() };
+  } catch (error) {
+    if (isRedirectLikeError(error)) throw error;
+    return { ok: false, error: error instanceof Error ? error.message : "Could not autosave customer info" };
+  }
+}
+
 export async function uploadAttachmentAction(formData: FormData) {
   const user = await requireUser();
 

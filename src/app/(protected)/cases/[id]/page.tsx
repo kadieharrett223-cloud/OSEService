@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { CASE_STATUSES, CASE_TYPES, PRIORITIES } from "@/lib/constants";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
+import { CustomerInfoAutosaveForm } from "@/app/(protected)/cases/[id]/customer-info-autosave-form";
 import { IssueDetailsAutosaveForm } from "@/app/(protected)/cases/[id]/issue-details-autosave-form";
 import { WorkflowAutosaveForm } from "@/app/(protected)/cases/[id]/workflow-autosave-form";
 import {
@@ -141,6 +142,7 @@ function activityLabel(activityType: string) {
     assigned_user_changed: "ASSIGNED",
     next_action_set: "NEXT",
     issue_details_updated: "ISSUE",
+    customer_info_updated: "CUSTOMER",
   };
 
   return map[activityType] ?? "EVENT";
@@ -165,6 +167,7 @@ function activityIcon(activityType: string) {
     assigned_user_changed: "A",
     next_action_set: "N",
     issue_details_updated: "I",
+    customer_info_updated: "C",
   };
 
   return map[activityType] ?? "*";
@@ -457,7 +460,10 @@ export default async function CaseDetailsPage({
             </div>
             <div className="sm:col-span-2">
               <label className="label">Shipping Address</label>
-              <textarea readOnly rows={4} className="textarea bg-[#f8fafc]" value={shippingAddress} />
+              <CustomerInfoAutosaveForm
+                caseId={id}
+                shippingAddress={shippingAddress}
+              />
             </div>
           </div>
 

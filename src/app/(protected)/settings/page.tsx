@@ -194,6 +194,17 @@ export default async function SettingsPage({
       </section>
 
       <section className="card p-4">
+        <h2 className="text-xl">Item Mapping</h2>
+        <p className="mt-1 text-sm text-[#5a5a5a]">
+          Review and map imported invoice lines to products before approval and fulfillment.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <a href="/shipping-review" className="btn-secondary">Open Shipping Review</a>
+          <a href="/products" className="btn-secondary">Open Product Catalog</a>
+        </div>
+      </section>
+
+      <section className="card p-4">
         <h2 className="text-xl">Create Access User</h2>
         <p className="mt-1 text-sm text-[#5a5a5a]">Create live users for assignment and audit history.</p>
         <form action={createAccessUserAction} className="mt-3 grid gap-3 md:grid-cols-3">

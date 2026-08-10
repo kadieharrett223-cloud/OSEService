@@ -327,7 +327,7 @@ export default async function InventoryOverviewPage({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="w-full max-w-full overflow-x-hidden space-y-5">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -342,7 +342,7 @@ export default async function InventoryOverviewPage({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1fr_300px]">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="grid gap-3 md:grid-cols-5">
             <article className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">On Floor</p>
@@ -371,16 +371,16 @@ export default async function InventoryOverviewPage({
             </article>
           </div>
 
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-            <form className="grid gap-2 md:grid-cols-[1.4fr_1fr_1fr_auto_auto]">
-              <input name="q" defaultValue={params.q ?? ""} placeholder="Search by SKU or product name..." className="input" />
-              <select name="status" defaultValue={statusFilter} className="select">
+          <section className="min-w-0 rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+            <form className="flex flex-wrap items-center gap-2">
+              <input name="q" defaultValue={params.q ?? ""} placeholder="Search by SKU or product name..." className="input min-w-[220px] flex-1" />
+              <select name="status" defaultValue={statusFilter} className="select min-w-[170px]">
                 <option value="all">All Statuses</option>
                 <option value="in-stock">In Stock</option>
                 <option value="low">Low Stock</option>
                 <option value="out">Out of Stock</option>
               </select>
-              <label className="inline-flex items-center gap-2 rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm text-[#334155]">
+              <label className="inline-flex min-w-[170px] items-center gap-2 rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm text-[#334155]">
                 <input type="checkbox" name="lowStock" value="1" defaultChecked={lowStockOnly} />
                 Low / Out of Stock
               </label>
@@ -388,7 +388,7 @@ export default async function InventoryOverviewPage({
               <Link href="/inventory" className="btn-ghost">Clear</Link>
             </form>
 
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-4 max-w-full overflow-x-auto">
               <table className="w-full min-w-[980px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.07em] text-[#64748b]">
@@ -441,12 +441,12 @@ export default async function InventoryOverviewPage({
             </div>
 
             {filteredRows.length > 0 ? (
-              <div className="mt-4 rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+              <div className="mt-4 min-w-0 rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="font-semibold text-[#111827]">Orders waiting (sample)</h3>
                   <Link href="/orders?tab=accepted" className="text-xs font-semibold text-[#2563eb] hover:underline">View All Orders</Link>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="max-w-full overflow-x-auto">
                   <table className="w-full min-w-[720px] text-left text-xs">
                     <thead>
                       <tr className="border-b border-[#e2e8f0] text-[#64748b]">
@@ -479,9 +479,9 @@ export default async function InventoryOverviewPage({
           </section>
 
           <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-            <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+            <section className="min-w-0 rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#111827]">Incoming Containers Summary</h2>
-              <div className="mt-3 overflow-x-auto">
+              <div className="mt-3 max-w-full overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-xs">
                   <thead>
                     <tr className="border-b border-[#eceff3] text-[#64748b]">
@@ -519,9 +519,9 @@ export default async function InventoryOverviewPage({
               </div>
             </section>
 
-            <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+            <section className="min-w-0 rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#111827]">Low Stock SKUs (Top 5)</h2>
-              <div className="mt-3 overflow-x-auto">
+              <div className="mt-3 max-w-full overflow-x-auto">
                 <table className="w-full min-w-[280px] text-left text-xs">
                   <thead>
                     <tr className="border-b border-[#eceff3] text-[#64748b]">
@@ -554,7 +554,7 @@ export default async function InventoryOverviewPage({
           </div>
         </div>
 
-        <aside className="space-y-4">
+        <aside className="min-w-0 space-y-4">
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#111827]">Inventory Alerts</h2>
             <div className="mt-3 space-y-2">

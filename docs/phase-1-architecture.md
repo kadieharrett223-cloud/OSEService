@@ -50,6 +50,7 @@ The app now includes an additive operations layer while preserving the original 
 - Orders is the shipping operations workflow with tabs (New/Review, Accepted, In Warehouse, Shipped, Fulfilled) and line-level assignment/shipment controls.
 - Schedule is a dedicated shared shipping calendar view backed by `shipping_orders.promised_ship_date` and linked to order detail.
 - Containers remains inbound supply and ETA workflow.
+- Container detail now includes a customer-impact acceptance step: before marking a container received, operators see the affected customer/invoice lines and can run one action to mark only applicable allocated lines as `IN_WAREHOUSE` based on available received quantity for that container.
 - My Sales is a read-only salesperson status view over the same shipping data (queue, assignment, ETA, tracking) without shipping controls.
 - Service remains case/install-focused workflow.
 - Settings is admin-gated: an admin code unlock (same validator used by Delete Case) is required before viewing login activity, managing access users, or running QuickBooks connect/sync/disconnect actions.

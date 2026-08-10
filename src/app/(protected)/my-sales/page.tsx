@@ -1,33 +1,58 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireUser } from "@/lib/auth";
 import { canViewMySales } from "@/lib/roles";
 import { redirect } from "next/navigation";
 
-type InvoiceLineSummary = {
+type SalesOrder = {
   id: string;
-  qbo_sku: string | null;
-  source_description: string | null;
-  ordered_qty: number | null;
-  approval_status: string | null;
-  warehouse_status: string | null;
-  allocation_status: string | null;
-  fulfillment_status: string | null;
-  product_id: string | null;
-  products: { sku: string | null; canonical_name: string | null } | null;
+  review_status: string | null;
+  promised_ship_date: string | null;
+  tracking_number: string | null;
+  carrier: string | null;
+  qbo_invoices?: {
+    invoice_number: string | null;
+    payment_status: string | null;
+    customers?: {
+      full_name: string | null;
+      company_name: string | null;
+    } | null;
+  } | null;
+  shipping_order_lines?: Array<{
+    id: string;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+    approval_status: string | null;
+    warehouse_status: string | null;
+    fulfillment_status: string | null;
+    queue_position_start: number | null;
+    products?: {
+      sku: string | null;
+      canonical_name: string | null;
+    } | null;
+    inventory_allocations?: Array<{
+      source_type: string | null;
+      containers?: {
+        container_number: string | null;
+        lifecycle_status: string | null;
+        eta_confirmed_date: string | null;
+        eta_estimated_date: string | null;
+      } | null;
+    }>;
+  }>;
 };
 
-type InvoiceSummary = {
-  id: string;
-  invoice_number: string | null;
-  payment_status: string | null;
-  invoice_date: string | null;
-  raw_payload: unknown;
-  customer_id: string | null;
-  customers: { full_name: string | null; company_name: string | null } | null;
-  qbo_invoice_lines?: InvoiceLineSummary[];
-};
+type FilterValue = "all" | "waiting" | "warehouse" | "shipped" | "fulfilled";
 
-type FilterValue = "all" | "awaiting-review" | "approved-waiting" | "ready" | "partial" | "shipped";
+function normalizeFilter(value: string | undefined): FilterValue {
+  if (value === "waiting" || value === "warehouse" || value === "shipped" || value === "fulfilled") return value;
+  return "all";
+}
+
+function formatStatus(value: string | null | undefined) {
+  if (!value) return "Pending";
+  return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -36,54 +61,31 @@ function formatDate(value: string | null | undefined) {
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function normalizeFilter(value: string | undefined): FilterValue {
-  if (value === "awaiting-review" || value === "approved-waiting" || value === "ready" || value === "partial" || value === "shipped") {
-    return value;
-  }
-  return "all";
+function lineAssignment(line: NonNullable<SalesOrder["shipping_order_lines"]>[number]) {
+  const allocations = line.inventory_allocations ?? [];
+  if (allocations.length === 0) return "Unassigned";
+  return allocations.map((allocation) => {
+    if (allocation.source_type === "FLOOR") return "On Floor";
+    const container = allocation.containers?.container_number ?? "Container";
+    const status = formatStatus(allocation.containers?.lifecycle_status);
+    const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
+    return `${container} · ${status} · ETA ${eta}`;
+  }).join("; ");
 }
 
-function getInvoiceStage(invoice: InvoiceSummary): FilterValue {
-  const lines = invoice.qbo_invoice_lines ?? [];
-  if (lines.length === 0) return "all";
+function orderStage(order: SalesOrder): FilterValue {
+  const lines = order.shipping_order_lines ?? [];
+  const allFulfilled = lines.length > 0 && lines.every((line) => line.fulfillment_status === "FULFILLED");
+  const anyShipped = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED");
+  const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
 
-  const anyShipped = lines.some((line) => line.fulfillment_status === "FULFILLED");
-  const anyPartial = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED");
-  const anyReady = lines.some((line) => line.warehouse_status === "READY_TO_SHIP" || line.warehouse_status === "IN_WAREHOUSE");
-  const anyApproved = lines.some((line) => line.approval_status === "APPROVED");
-
+  if (allFulfilled) return "fulfilled";
   if (anyShipped) return "shipped";
-  if (anyPartial) return "partial";
-  if (anyReady) return "ready";
-  if (anyApproved) return "approved-waiting";
-  return "awaiting-review";
+  if (anyWarehouse) return "warehouse";
+  return "waiting";
 }
 
-function getLineStatus(line: InvoiceLineSummary) {
-  if (line.fulfillment_status === "FULFILLED") {
-    return { label: "Shipped", inventory: "Shipped", container: "Completed" };
-  }
-
-  if (line.fulfillment_status === "PARTIALLY_FULFILLED") {
-    return { label: "Partial", inventory: "Partially fulfilled", container: "In progress" };
-  }
-
-  if (line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "READY_TO_SHIP") {
-    return { label: line.warehouse_status === "READY_TO_SHIP" ? "Ready" : "In Warehouse", inventory: "In stock", container: "Warehouse ready" };
-  }
-
-  if (line.approval_status === "APPROVED") {
-    return { label: "Approved / Waiting", inventory: "Waiting on inventory", container: "Incoming container pending" };
-  }
-
-  return { label: "Awaiting Review", inventory: "Waiting on inventory", container: "Incoming container pending" };
-}
-
-export default async function MySalesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; filter?: string }>;
-}) {
+export default async function MySalesPage({ searchParams }: { searchParams: Promise<{ q?: string; filter?: string }> }) {
   const user = await requireUser();
   if (!canViewMySales(user.fullName)) {
     redirect("/dashboard");
@@ -94,147 +96,139 @@ export default async function MySalesPage({
   const filter = normalizeFilter(params.filter);
 
   const supabase = await createClient();
-
-  const { data: invoiceRows, error } = await supabase
-    .from("qbo_invoices")
+  const { data: rows, error } = await supabase
+    .from("shipping_orders")
     .select(`
       id,
-      invoice_number,
-      payment_status,
-      invoice_date,
-      raw_payload,
-      customer_id,
-      customers (full_name, company_name),
-      qbo_invoice_lines (
+      review_status,
+      promised_ship_date,
+      tracking_number,
+      carrier,
+      qbo_invoices (
+        invoice_number,
+        payment_status,
+        customers (full_name, company_name)
+      ),
+      shipping_order_lines (
         id,
-        qbo_sku,
-        source_description,
-        ordered_qty,
+        approved_qty,
+        fulfilled_qty,
         approval_status,
         warehouse_status,
-        allocation_status,
         fulfillment_status,
-        product_id,
-        products (sku, canonical_name)
+        queue_position_start,
+        products (sku, canonical_name),
+        inventory_allocations (
+          source_type,
+          containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
+        )
       )
     `)
-    .order("invoice_date", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(300);
 
-  const invoices = ((invoiceRows ?? []) as InvoiceSummary[]).filter((invoice) => {
-    const customerText = `${invoice.customers?.full_name ?? ""} ${invoice.customers?.company_name ?? ""} ${invoice.invoice_number ?? ""}`.toLowerCase();
-    if (query && !customerText.includes(query)) {
-      return false;
-    }
-
-    if (filter === "all") {
+  const orders = ((rows ?? []) as SalesOrder[])
+    .filter((order) => order.qbo_invoices?.payment_status === "Paid")
+    .filter((order) => {
+      const customer = `${order.qbo_invoices?.customers?.full_name ?? ""} ${order.qbo_invoices?.customers?.company_name ?? ""}`.toLowerCase();
+      const invoice = `${order.qbo_invoices?.invoice_number ?? ""}`.toLowerCase();
+      if (query && !customer.includes(query) && !invoice.includes(query)) return false;
+      if (filter !== "all" && orderStage(order) !== filter) return false;
       return true;
-    }
-
-    return getInvoiceStage(invoice) === filter;
-  });
+    });
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-semibold text-[#111827]">My Sales</h1>
-            <p className="mt-2 text-sm text-[#5a5a5a]">
-              Read-only visibility into paid orders after they enter the shipping workflow. Shipping remains responsible for approvals and fulfillment updates.
-            </p>
-          </div>
-          <div className="rounded-full bg-[#eef2f7] px-3 py-1 text-sm font-medium text-[#334155]">
-            {user.fullName ?? "Sales User"}
-          </div>
-        </div>
+        <h1 className="text-3xl font-semibold text-[#111827]">My Sales</h1>
+        <p className="mt-2 text-sm text-[#5a5a5a]">Read-only status for paid customers: queue position, assignment, ETA, warehouse status, and tracking.</p>
       </div>
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-[#111827]">Paid Orders in Shipping Workflow</h2>
-          <p className="text-sm text-[#6b7280]">This is a visibility dashboard only. Shipping manages the operational status.</p>
-        </div>
-
-        <form method="get" action="/my-sales" className="mb-5 flex flex-wrap gap-3 rounded-xl border border-[#e5e7eb] bg-[#f9fafb] p-3">
-          <input
-            type="text"
-            name="q"
-            defaultValue={query}
-            placeholder="Search customer or invoice"
-            className="input min-w-[240px]"
-          />
-          <select name="filter" defaultValue={filter} className="select min-w-[180px]">
+      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <form method="get" action="/my-sales" className="flex flex-wrap gap-2">
+          <input name="q" defaultValue={params.q ?? ""} placeholder="Search customer or invoice" className="input min-w-[240px] flex-1" />
+          <select name="filter" defaultValue={filter} className="select min-w-[170px]">
             <option value="all">All</option>
-            <option value="awaiting-review">Awaiting Review</option>
-            <option value="approved-waiting">Approved / Waiting</option>
-            <option value="ready">Ready</option>
-            <option value="partial">Partial</option>
+            <option value="waiting">Waiting</option>
+            <option value="warehouse">In Warehouse</option>
             <option value="shipped">Shipped</option>
+            <option value="fulfilled">Fulfilled</option>
           </select>
           <button type="submit" className="btn-secondary">Apply</button>
-          <a href="/my-sales" className="btn-secondary inline-flex">Reset</a>
+          <Link href="/my-sales" className="btn-ghost">Reset</Link>
         </form>
+      </section>
 
+      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         {error ? (
-          <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">Unable to load sales visibility data right now.</div>
+          <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">Unable to load sales tracking right now.</div>
         ) : null}
 
-        {!error && invoices.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
-            No paid invoices match the current search or filter.
-          </div>
+        {!error && orders.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">No paid customer orders match this filter.</div>
         ) : null}
 
-        {!error && invoices.length > 0 ? (
+        {!error && orders.length > 0 ? (
           <div className="space-y-4">
-            {invoices.map((invoice) => {
-              const stage = getInvoiceStage(invoice);
+            {orders.map((order) => {
+              const customer = order.qbo_invoices?.customers?.company_name ?? order.qbo_invoices?.customers?.full_name ?? "Customer pending";
+              const invoice = order.qbo_invoices?.invoice_number ?? "—";
+              const stage = orderStage(order);
               return (
-                <details key={invoice.id} className="group rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
-                  <summary className="cursor-pointer list-none">
+                <details key={order.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+                  <summary className="list-none cursor-pointer">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-lg font-semibold text-[#111827]">Invoice #{invoice.invoice_number ?? "—"}</h3>
-                        <p className="text-sm text-[#5a5a5a]">
-                          {invoice.customers?.full_name ?? "Unknown customer"}
-                          {invoice.customers?.company_name ? ` • ${invoice.customers.company_name}` : ""}
-                        </p>
+                        <p className="text-lg font-semibold text-[#111827]">Invoice {invoice}</p>
+                        <p className="text-sm text-[#5a5a5a]">{customer}</p>
                       </div>
-                      <div className="text-sm text-[#6b7280]">
-                        <div>Paid date: {formatDate(invoice.invoice_date)}</div>
-                        <div className="mt-1 font-medium text-[#334155]">Status: {stage === "awaiting-review" ? "Awaiting Review" : stage === "approved-waiting" ? "Approved / Waiting" : stage === "ready" ? "Ready" : stage === "partial" ? "Partial" : stage === "shipped" ? "Shipped" : "All"}</div>
+                      <div className="text-right text-sm text-[#475569]">
+                        <p className="font-semibold">{formatStatus(stage.toUpperCase())}</p>
+                        <p>Scheduled: {formatDate(order.promised_ship_date)}</p>
+                        <p>Tracking: {order.tracking_number ?? "—"}</p>
                       </div>
                     </div>
                   </summary>
 
-                  <div className="mt-4 space-y-2">
-                    {(invoice.qbo_invoice_lines ?? []).map((line) => {
-                      const productName = line.products?.canonical_name ?? line.products?.sku ?? line.source_description ?? "Unmapped product";
-                      const lineStatus = getLineStatus(line);
-                      return (
-                        <div key={line.id} className="rounded-lg border border-[#e5e7eb] bg-white p-3 text-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="font-medium text-[#111827]">{productName}</p>
-                              <p className="text-[#6b7280]">Qty {line.ordered_qty ?? 0}</p>
-                            </div>
-                            <div className="flex-1 text-right text-[#374151]">
-                              <p className="font-medium">{lineStatus.label}</p>
-                              <p className="text-xs text-[#6b7280]">Inventory: {lineStatus.inventory}</p>
-                              <p className="text-xs text-[#6b7280]">Queue: {line.approval_status === "APPROVED" ? "Approved" : line.approval_status === "PENDING_REVIEW" ? "Awaiting Review" : "Pending"}</p>
-                              <p className="text-xs text-[#6b7280]">Container: {lineStatus.container}</p>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full min-w-[840px] text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-[#dbe3ee] text-[#64748b]">
+                          <th className="px-2 py-1">SKU</th>
+                          <th className="px-2 py-1">Qty Remaining</th>
+                          <th className="px-2 py-1">Queue Position</th>
+                          <th className="px-2 py-1">Assigned</th>
+                          <th className="px-2 py-1">Warehouse</th>
+                          <th className="px-2 py-1">Fulfillment</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(order.shipping_order_lines ?? []).map((line) => {
+                          const remaining = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+                          return (
+                            <tr key={line.id} className="border-b border-[#edf2f7]">
+                              <td className="px-2 py-1">{line.products?.sku ?? line.products?.canonical_name ?? "SKU"}</td>
+                              <td className="px-2 py-1">{remaining}</td>
+                              <td className="px-2 py-1">{line.queue_position_start ?? "—"}</td>
+                              <td className="px-2 py-1">{lineAssignment(line)}</td>
+                              <td className="px-2 py-1">{formatStatus(line.warehouse_status)}</td>
+                              <td className="px-2 py-1">{formatStatus(line.fulfillment_status)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3">
+                    <Link href={`/orders/${order.id}`} className="text-sm font-semibold text-[#2563eb] hover:underline">Open shipping order</Link>
                   </div>
                 </details>
               );
             })}
           </div>
         ) : null}
-      </div>
+      </section>
     </div>
   );
 }

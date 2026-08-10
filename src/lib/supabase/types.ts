@@ -419,6 +419,11 @@ export type Database = {
           order_number: string | null;
           source_type: string;
           review_status: string;
+          promised_ship_date: string | null;
+          shipping_method: string | null;
+          notes: string | null;
+          tracking_number: string | null;
+          carrier: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -429,6 +434,11 @@ export type Database = {
           order_number?: string | null;
           source_type?: string;
           review_status?: string;
+          promised_ship_date?: string | null;
+          shipping_method?: string | null;
+          notes?: string | null;
+          tracking_number?: string | null;
+          carrier?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -438,6 +448,11 @@ export type Database = {
           order_number?: string | null;
           source_type?: string;
           review_status?: string;
+          promised_ship_date?: string | null;
+          shipping_method?: string | null;
+          notes?: string | null;
+          tracking_number?: string | null;
+          carrier?: string | null;
           updated_at?: string;
         };
         Relationships: [];

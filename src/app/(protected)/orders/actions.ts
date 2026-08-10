@@ -19,6 +19,12 @@ function getString(formData: FormData, key: string) {
   return typeof value === "string" ? value : null;
 }
 
+function getPositiveNumber(formData: FormData, key: string) {
+  const raw = Number(getString(formData, key) ?? "0");
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return raw;
+}
+
 function getFileExtension(fileName: string) {
   if (!fileName.includes(".")) return "";
   return fileName.split(".").pop()?.toLowerCase() ?? "";
@@ -100,6 +106,49 @@ export async function updateOrderLineStatusAction(formData: FormData) {
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
+}
+
+export async function updateOrderScheduleAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const scheduleDate = getString(formData, "schedule_date");
+  const shippingMethod = getString(formData, "shipping_method");
+  const scheduleNotes = getString(formData, "schedule_notes");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId) {
+    redirect("/orders?error=Missing+order+reference");
+  }
+
+  const payload: {
+    promised_ship_date?: string | null;
+    shipping_method?: string | null;
+    notes?: string | null;
+  } = {
+    promised_ship_date: scheduleDate && scheduleDate.trim() ? scheduleDate.trim() : null,
+    shipping_method: shippingMethod && shippingMethod.trim() ? shippingMethod.trim() : null,
+    notes: scheduleNotes && scheduleNotes.trim() ? scheduleNotes.trim() : null,
+  };
+
+  const { error } = await adminClient
+    .from("shipping_orders")
+    .update(payload)
+    .eq("id", orderId);
+
+  if (error) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_SCHEDULE_UPDATED", {
+    promised_ship_date: payload.promised_ship_date ?? null,
+    shipping_method: payload.shipping_method ?? null,
+  });
+
+  revalidatePath("/schedule");
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Schedule+updated`);
 }
 
 export async function addOrderNoteAction(formData: FormData) {
@@ -211,6 +260,122 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Assignment+updated`);
+}
+
+export async function markOrderLineShippedAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  const trackingNumber = (getString(formData, "tracking_number") ?? "").trim();
+  const shipmentDate = (getString(formData, "shipment_date") ?? "").trim();
+  const carrier = (getString(formData, "carrier") ?? "").trim();
+  const shipQty = getPositiveNumber(formData, "ship_qty");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !lineId) {
+    redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
+  }
+
+  if (!trackingNumber) {
+    redirect(`/orders/${orderId}?error=Tracking+number+is+required+to+mark+as+shipped`);
+  }
+
+  if (!shipmentDate) {
+    redirect(`/orders/${orderId}?error=Shipment+date+is+required+to+mark+as+shipped`);
+  }
+
+  if (shipQty <= 0) {
+    redirect(`/orders/${orderId}?error=Ship+quantity+must+be+greater+than+zero`);
+  }
+
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, approved_qty, fulfilled_qty")
+    .eq("id", lineId)
+    .maybeSingle();
+
+  const lineRow = line as {
+    id: string;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+  } | null;
+
+  if (lineError || !lineRow) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+  }
+
+  const approvedQty = Number(lineRow.approved_qty ?? 0);
+  const fulfilledQty = Number(lineRow.fulfilled_qty ?? 0);
+  const remainingQty = Math.max(0, approvedQty - fulfilledQty);
+
+  if (shipQty > remainingQty) {
+    redirect(`/orders/${orderId}?error=Ship+quantity+cannot+exceed+remaining+quantity`);
+  }
+
+  const nextFulfilledQty = fulfilledQty + shipQty;
+  const isComplete = nextFulfilledQty >= approvedQty && approvedQty > 0;
+
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update({
+      fulfilled_qty: nextFulfilledQty,
+      fulfillment_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+      warehouse_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+    })
+    .eq("id", lineId);
+
+  if (updateError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  const fulfilledAtIso = `${shipmentDate}T12:00:00.000Z`;
+  const shipmentNumber = `SHIP-${Date.now()}`;
+
+  const { error: fulfillmentInsertError } = await adminClient
+    .from("fulfillments")
+    .insert({
+      shipping_order_line_id: lineId,
+      fulfilled_qty: shipQty,
+      fulfilled_at: fulfilledAtIso,
+      shipment_number: shipmentNumber,
+      carrier: carrier || null,
+      tracking_number: trackingNumber,
+      reason: "Order line marked shipped",
+      source_event_key: crypto.randomUUID(),
+    });
+
+  if (fulfillmentInsertError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentInsertError.message)}`);
+  }
+
+  const { error: orderUpdateError } = await adminClient
+    .from("shipping_orders")
+    .update({
+      tracking_number: trackingNumber,
+      carrier: carrier || null,
+      review_status: isComplete ? "FULFILLED" : "APPROVED",
+    })
+    .eq("id", orderId);
+
+  if (orderUpdateError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(orderUpdateError.message)}`);
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_LINE_SHIPPED", {
+    line_id: lineId,
+    ship_qty: shipQty,
+    tracking_number: trackingNumber,
+    carrier: carrier || null,
+    shipment_date: shipmentDate,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath("/schedule");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Shipment+recorded`);
 }
 
 export async function uploadOrderAttachmentAction(formData: FormData) {

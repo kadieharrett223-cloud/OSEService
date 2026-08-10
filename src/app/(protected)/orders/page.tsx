@@ -54,7 +54,7 @@ function parseSalesperson(rawPayload: unknown) {
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const supabase = await createClient();
   const params = await searchParams;
-  const activeTab = params.tab ?? "new";
+  const activeTab = params.tab ?? "review";
 
   const { data: orders, error } = await supabase
     .from("shipping_orders")
@@ -80,28 +80,33 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     .order("created_at", { ascending: false });
 
   const orderSummaries = ((orders ?? []) as OrderSummary[]).filter((order) => {
-    const lineStatuses = (order.shipping_order_lines ?? []).map((line) => line.fulfillment_status ?? "PENDING");
-    const hasFulfilled = lineStatuses.includes("FULFILLED");
-    const hasOpen = lineStatuses.some((status) => status !== "FULFILLED");
+    const lines = order.shipping_order_lines ?? [];
+    const hasLines = lines.length > 0;
+    const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
+    const anyApproved = lines.some((line) => line.approval_status === "APPROVED" || line.approval_status === "PARTIAL");
+    const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
+    const anyShipped = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED");
+    const anyReview = lines.some((line) => line.approval_status === "PENDING_REVIEW");
 
     switch (activeTab) {
+      case "review":
+        return order.review_status === "PENDING_REVIEW" || !hasLines || anyReview;
       case "accepted":
-        return (order.review_status === "APPROVED" || (order.shipping_order_lines ?? []).some((line) => line.approval_status === "APPROVED")) && hasOpen && !hasFulfilled;
+        return anyApproved && !anyWarehouse && !anyShipped && !allFulfilled;
       case "warehouse":
-        return (order.shipping_order_lines ?? []).some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP") && hasOpen;
+        return anyWarehouse && !allFulfilled;
       case "shipped":
-        return (order.shipping_order_lines ?? []).some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED" || line.fulfillment_status === "FULFILLED") && hasOpen;
+        return anyShipped && !allFulfilled;
       case "fulfilled":
-        return (!hasOpen && (order.shipping_order_lines ?? []).length > 0) || (order.review_status === "FULFILLED");
-      case "new":
+        return allFulfilled || order.review_status === "FULFILLED";
       default:
-        return order.review_status === "PENDING_REVIEW" || (order.shipping_order_lines ?? []).length === 0;
+        return true;
     }
   });
 
   const tabs = [
-    { id: "new", label: "New" },
-    { id: "accepted", label: "Accepted / Queue" },
+    { id: "review", label: "New / Review" },
+    { id: "accepted", label: "Accepted" },
     { id: "warehouse", label: "In Warehouse" },
     { id: "shipped", label: "Shipped" },
     { id: "fulfilled", label: "Fulfilled" },
@@ -112,15 +117,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Inventory</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
             <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Orders</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#5a5a5a]">
-              Shipping review and order fulfillment now operate as a single operational screen under Inventory.
+              Shipping operations for review, assignment, warehouse execution, shipment, and final fulfillment.
             </p>
           </div>
-          <Link href="/orders/new" className="btn-primary inline-flex">
-            Create Order View
-          </Link>
+          <Link href="/schedule" className="btn-secondary inline-flex">Open Schedule</Link>
         </div>
       </div>
 

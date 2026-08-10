@@ -30,13 +30,20 @@ const navGroups: NavGroup[] = [
     title: "Inventory",
     items: [
       { href: "/inventory", label: "Inventory", matchPath: "/inventory", icon: "IV" },
-      { href: "/orders", label: "Orders", matchPath: "/orders", icon: "OR" },
       { href: "/containers", label: "Containers", matchPath: "/containers", icon: "CT" },
+    ],
+  },
+  {
+    title: "Orders & Shipping",
+    items: [
+      { href: "/orders", label: "Orders", matchPath: "/orders", icon: "OR" },
+      { href: "/schedule", label: "Schedule", matchPath: "/schedule", icon: "SC" },
     ],
   },
   {
     title: "Service",
     items: [
+      { href: "/cases?view=service", label: "Service Dashboard", matchPath: "/cases", matchQuery: "view=service", icon: "SD" },
       { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
       { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
       { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },

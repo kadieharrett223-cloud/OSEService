@@ -46,10 +46,11 @@ The app now includes an additive operations layer while preserving the original 
 
 - Main Dashboard is now company-wide: Inventory, Orders, Containers, Service widgets, plus cross-domain Recent Activity links.
 - Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
-- Inventory remains the product/stock workspace and now uses an operations board layout: top inventory KPIs, filterable SKU table, right-rail alerts/actions, incoming container summary, and low-stock SKU panel.
-- Inventory now starts with a Ready to Ship invoice-level operational section that rolls up per-line readiness from real `inventory_allocations` + `containers` records (On Floor / Container / Unassigned) and links directly into order operations.
-- Orders remains the shipping acceptance and fulfillment workflow.
+- Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
+- Orders is the shipping operations workflow with tabs (New/Review, Accepted, In Warehouse, Shipped, Fulfilled) and line-level assignment/shipment controls.
+- Schedule is a dedicated shared shipping calendar view backed by `shipping_orders.promised_ship_date` and linked to order detail.
 - Containers remains inbound supply and ETA workflow.
+- My Sales is a read-only salesperson status view over the same shipping data (queue, assignment, ETA, tracking) without shipping controls.
 - Service remains case/install-focused workflow.
 - Settings is admin-gated: an admin code unlock (same validator used by Delete Case) is required before viewing login activity, managing access users, or running QuickBooks connect/sync/disconnect actions.
 

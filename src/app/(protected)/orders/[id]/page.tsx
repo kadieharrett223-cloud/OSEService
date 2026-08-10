@@ -1,11 +1,24 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { addOrderNoteAction, deleteOrderAttachmentAction, updateOrderLineAssignmentAction, updateOrderLineStatusAction, uploadOrderAttachmentAction } from "../actions";
+import {
+  addOrderNoteAction,
+  deleteOrderAttachmentAction,
+  markOrderLineShippedAction,
+  updateOrderLineAssignmentAction,
+  updateOrderLineStatusAction,
+  updateOrderScheduleAction,
+  uploadOrderAttachmentAction,
+} from "../actions";
 
 type OrderDetailRow = {
   id: string;
   order_number: string | null;
   review_status: string | null;
+  promised_ship_date: string | null;
+  shipping_method: string | null;
+  notes: string | null;
+  tracking_number: string | null;
+  carrier: string | null;
   created_at: string;
   customers?: { company_name: string | null; full_name: string | null; email: string | null; phone: string | null } | null;
   qbo_invoices?: {
@@ -123,6 +136,11 @@ export default async function OrderDetailPage({
         id,
         order_number,
         review_status,
+        promised_ship_date,
+        shipping_method,
+        notes,
+        tracking_number,
+        carrier,
         created_at,
         customers (company_name, full_name, email, phone),
         qbo_invoices (id, invoice_number, payment_status, invoice_date, raw_payload),
@@ -168,14 +186,18 @@ export default async function OrderDetailPage({
   const orderRecord = order as OrderDetailRow | null;
   const activities = (activityRows ?? []) as OrderActivityEntry[];
   const attachments = (attachmentRows ?? []) as OrderAttachmentEntry[];
+
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
   }
 
   const containerOptions = (containerRows ?? []) as ContainerOption[];
-
   const salesperson = parseSalesperson(orderRecord.qbo_invoices?.raw_payload);
-  const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED") ? "Fulfilled" : orderRecord.shipping_order_lines?.some((line) => line.warehouse_status === "IN_WAREHOUSE") ? "In Warehouse" : orderRecord.review_status ?? "Pending";
+  const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED")
+    ? "Fulfilled"
+    : orderRecord.shipping_order_lines?.some((line) => line.warehouse_status === "IN_WAREHOUSE")
+      ? "In Warehouse"
+      : orderRecord.review_status ?? "Pending";
 
   const attachmentLinks = await Promise.all(
     attachments.map(async (attachment) => {
@@ -201,9 +223,9 @@ export default async function OrderDetailPage({
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Inventory</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
             <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Order Detail</h1>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Operational record for this order and its line-item shipping workflow.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Operational workflow for shipping review, warehouse, assignment, shipment, and history.</p>
           </div>
           <Link href="/orders" className="btn-secondary inline-flex">Back to orders</Link>
         </div>
@@ -229,25 +251,54 @@ export default async function OrderDetailPage({
               <p className="text-sm font-medium text-[#6b7280]">Status</p>
               <p className="mt-1 font-semibold text-[#111827]">{overallStatus}</p>
             </div>
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Tracking</p>
+              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.tracking_number ?? "Not set"}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Carrier</p>
+              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.carrier ?? "Not set"}</p>
+            </div>
           </div>
         </div>
 
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-[#111827]">Line items</h2>
-          <div className="mt-4 space-y-3">
-            {(orderRecord.shipping_order_lines ?? []).map((line) => {
-              const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-              return (
-                <div key={line.id} className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm">
-                  <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
-                  <p className="mt-1 text-[#5a5a5a]">Ordered {line.ordered_qty ?? 0} • Approved {line.approved_qty ?? 0} • Remaining {remainingQty}</p>
-                  <p className="mt-1 text-[#5a5a5a]">Warehouse {formatStatus(line.warehouse_status)} • Fulfillment {formatStatus(line.fulfillment_status)}</p>
-                  <p className="mt-1 text-[#5a5a5a]">Priority {line.priority ?? "NORMAL"} • Queue {line.queue_position_start ?? "—"}</p>
-                  <p className="mt-1 text-[#1f2937]"><span className="font-semibold">Inventory Source:</span> {formatAssignmentSource(line)}</p>
-                </div>
-              );
-            })}
-          </div>
+          <h2 className="text-xl font-semibold text-[#111827]">Schedule</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">Scheduling updates feed the shared shipping calendar immediately.</p>
+          <form action={updateOrderScheduleAction} className="mt-4 grid gap-3">
+            <input type="hidden" name="orderId" value={orderRecord.id} />
+            <div>
+              <label htmlFor="schedule_date" className="text-sm font-medium text-[#334155]">Shipment / Pickup Date</label>
+              <input id="schedule_date" type="date" name="schedule_date" defaultValue={orderRecord.promised_ship_date ?? ""} className="input mt-1" />
+            </div>
+            <div>
+              <label htmlFor="shipping_method" className="text-sm font-medium text-[#334155]">Method</label>
+              <input id="shipping_method" name="shipping_method" defaultValue={orderRecord.shipping_method ?? ""} className="input mt-1" placeholder="Pickup, LTL, Olympic Delivery" />
+            </div>
+            <div>
+              <label htmlFor="schedule_notes" className="text-sm font-medium text-[#334155]">Schedule Notes</label>
+              <textarea id="schedule_notes" name="schedule_notes" rows={3} defaultValue={orderRecord.notes ?? ""} className="textarea mt-1" placeholder="Optional notes for scheduling" />
+            </div>
+            <button className="btn-secondary" type="submit">Update Schedule</button>
+          </form>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#111827]">Line items</h2>
+        <div className="mt-4 space-y-3">
+          {(orderRecord.shipping_order_lines ?? []).map((line) => {
+            const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+            return (
+              <div key={line.id} className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm">
+                <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
+                <p className="mt-1 text-[#5a5a5a]">Ordered {line.ordered_qty ?? 0} • Approved {line.approved_qty ?? 0} • Remaining {remainingQty}</p>
+                <p className="mt-1 text-[#5a5a5a]">Warehouse {formatStatus(line.warehouse_status)} • Fulfillment {formatStatus(line.fulfillment_status)}</p>
+                <p className="mt-1 text-[#5a5a5a]">Priority {line.priority ?? "NORMAL"} • Queue {line.queue_position_start ?? "—"}</p>
+                <p className="mt-1 text-[#1f2937]"><span className="font-semibold">Inventory Source:</span> {formatAssignmentSource(line)}</p>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -255,7 +306,7 @@ export default async function OrderDetailPage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold text-[#111827]">Workflow actions</h2>
-            <p className="mt-1 text-sm text-[#5a5a5a]">Use these actions to move an order line through review, warehouse, and fulfillment.</p>
+            <p className="mt-1 text-sm text-[#5a5a5a]">Use these actions to move an order line through review, warehouse, assignment, and shipping.</p>
           </div>
         </div>
         <div className="mt-4 space-y-3">
@@ -278,12 +329,6 @@ export default async function OrderDetailPage({
                     <input type="hidden" name="orderId" value={orderRecord.id} />
                     <input type="hidden" name="action" value="queue" />
                     <button className="btn-secondary">Queue</button>
-                  </form>
-                  <form action={updateOrderLineStatusAction}>
-                    <input type="hidden" name="lineId" value={line.id} />
-                    <input type="hidden" name="orderId" value={orderRecord.id} />
-                    <input type="hidden" name="action" value="fulfill" />
-                    <button className="btn-secondary">Fulfill</button>
                   </form>
                   <form action={updateOrderLineStatusAction}>
                     <input type="hidden" name="lineId" value={line.id} />
@@ -316,6 +361,34 @@ export default async function OrderDetailPage({
                   <button className="btn-secondary" type="submit">Update Assignment</button>
                 </form>
               </div>
+
+              <form action={markOrderLineShippedAction} className="mt-3 rounded-lg border border-[#dbe5f0] bg-white p-3">
+                <input type="hidden" name="orderId" value={orderRecord.id} />
+                <input type="hidden" name="lineId" value={line.id} />
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">Mark Shipped</p>
+                <p className="mt-1 text-xs text-[#64748b]">Tracking number and shipment date are required. Carrier is optional if not applicable. Upload shipping docs in Attachments.</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-4">
+                  <div>
+                    <label className="text-xs font-medium text-[#334155]">Qty</label>
+                    <input name="ship_qty" type="number" min="1" step="1" defaultValue={Math.max(1, Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)))} className="input mt-1" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#334155]">Tracking</label>
+                    <input name="tracking_number" className="input mt-1" required />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#334155]">Carrier</label>
+                    <input name="carrier" className="input mt-1" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-[#334155]">Shipment Date</label>
+                    <input name="shipment_date" type="date" className="input mt-1" required />
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button className="btn-primary" type="submit">Mark Shipped</button>
+                </div>
+              </form>
             </div>
           ))}
         </div>

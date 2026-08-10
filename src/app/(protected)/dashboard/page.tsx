@@ -347,49 +347,49 @@ export default async function DashboardPage() {
       <div className="grid gap-4 xl:grid-cols-[1fr_270px]">
         <div className="space-y-4">
           <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-4">
-            <article className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#1f3f9c]">Inventory</p>
-              <div className="mt-3 space-y-2 text-sm">
+            <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#1f3f9c]">📦 Inventory</p>
+              <div className="mt-3 flex-1 space-y-2 text-sm">
                 <Link href="/inventory" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#1f3f9c]"><span>Available Inventory</span><span className="font-semibold text-[#1d4ed8]">{formatNumber(availableInventory)}</span></Link>
                 <Link href="/inventory" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#1f3f9c]"><span>Low / Out of Stock SKUs</span><span className="font-semibold text-[#dc2626]">{formatNumber(lowOutOfStock)}</span></Link>
                 <Link href="/inventory" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#1f3f9c]"><span>Incoming Inventory</span><span className="font-semibold text-[#2563eb]">{formatNumber(incomingInventory)}</span></Link>
                 <Link href="/inventory" className="flex items-center justify-between hover:text-[#1f3f9c]"><span>On Floor Inventory</span><span className="font-semibold text-[#2563eb]">{formatNumber(onFloorInventory)}</span></Link>
               </div>
-              <Link href="/inventory" className="mt-4 inline-flex text-sm font-semibold text-[#2563eb] hover:underline">View Inventory</Link>
+              <Link href="/inventory" className="mt-auto inline-flex pt-4 text-sm font-semibold text-[#2563eb] hover:underline">View Inventory</Link>
             </article>
 
-            <article className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#047857]">Orders</p>
-              <div className="mt-3 space-y-2 text-sm">
+            <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#047857]">📋 Orders</p>
+              <div className="mt-3 flex-1 space-y-2 text-sm">
                 <Link href="/orders?tab=new" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>New Orders (Review)</span><span className="font-semibold text-[#047857]">{formatNumber(newOrders)}</span></Link>
                 <Link href="/orders?tab=accepted" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Open / Queued</span><span className="font-semibold text-[#047857]">{formatNumber(openQueuedOrders)}</span></Link>
                 <Link href="/orders?tab=warehouse" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>In Warehouse</span><span className="font-semibold text-[#d97706]">{formatNumber(inWarehouse)}</span></Link>
                 <Link href="/orders?tab=shipped" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Shipped / In Transit</span><span className="font-semibold text-[#2563eb]">{formatNumber(shippedInTransit)}</span></Link>
                 <Link href="/orders?tab=fulfilled" className="flex items-center justify-between hover:text-[#047857]"><span>Fulfilled</span><span className="font-semibold text-[#059669]">{formatNumber(fulfilledOrders)}</span></Link>
               </div>
-              <Link href="/orders" className="mt-4 inline-flex text-sm font-semibold text-[#059669] hover:underline">View Orders</Link>
+              <Link href="/orders" className="mt-auto inline-flex pt-4 text-sm font-semibold text-[#059669] hover:underline">View Orders</Link>
             </article>
 
-            <article className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#5b21b6]">Containers</p>
-              <div className="mt-3 space-y-2 text-sm">
+            <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#5b21b6]">🚢 Containers</p>
+              <div className="mt-3 flex-1 space-y-2 text-sm">
                 <Link href="/containers" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#5b21b6]"><span>Active Containers</span><span className="font-semibold text-[#5b21b6]">{formatNumber(activeContainers)}</span></Link>
                 <Link href="/containers" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#5b21b6]"><span>In Production</span><span className="font-semibold text-[#5b21b6]">{formatNumber(inProduction)}</span></Link>
                 <Link href="/containers" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#5b21b6]"><span>Inbound</span><span className="font-semibold text-[#5b21b6]">{formatNumber(inbound)}</span></Link>
                 <Link href="/containers" className="flex items-center justify-between hover:text-[#5b21b6]"><span>Next Arrival</span><span className="font-semibold text-[#7c3aed]">{nextArrivalContainer?.container.container_number ?? "Pending"}</span></Link>
                 <p className="text-xs text-[#6b7280]">ETA: {nextArrivalContainer ? formatDate(nextArrivalContainer.eta.toISOString()) : "Pending"}</p>
               </div>
-              <Link href="/containers" className="mt-4 inline-flex text-sm font-semibold text-[#7c3aed] hover:underline">View Containers</Link>
+              <Link href="/containers" className="mt-auto inline-flex pt-4 text-sm font-semibold text-[#7c3aed] hover:underline">View Containers</Link>
             </article>
 
-            <article className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#b91c1c]">Service</p>
-              <div className="mt-3 space-y-2 text-sm">
+            <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#b91c1c]">🛠 Service</p>
+              <div className="mt-3 flex-1 space-y-2 text-sm">
                 <Link href="/cases" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#b91c1c]"><span>Open Cases</span><span className="font-semibold text-[#dc2626]">{formatNumber(openCases)}</span></Link>
                 <Link href="/cases?priority=High" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#b91c1c]"><span>High Priority Cases</span><span className="font-semibold text-[#dc2626]">{formatNumber(highPriorityCases)}</span></Link>
                 <Link href="/installation?status=attention" className="flex items-center justify-between hover:text-[#b91c1c]"><span>Installations Needing Attention</span><span className="font-semibold text-[#dc2626]">{formatNumber(installationsNeedingAttention)}</span></Link>
               </div>
-              <Link href="/cases" className="mt-4 inline-flex text-sm font-semibold text-[#dc2626] hover:underline">View Service Dashboard</Link>
+              <Link href="/cases" className="mt-auto inline-flex pt-4 text-sm font-semibold text-[#dc2626] hover:underline">View Service Dashboard</Link>
             </article>
           </section>
 

@@ -77,6 +77,14 @@ create table if not exists public.shipping_orders (
   order_number text,
   source_type text not null default 'QBO_INVOICE' check (source_type in ('QBO_INVOICE', 'MANUAL', 'INTERNAL')),
   review_status text not null default 'PENDING_REVIEW' check (review_status in ('PENDING_REVIEW', 'APPROVED', 'HOLD', 'FULFILLED', 'CANCELLED')),
+  fulfillment_status text not null default 'PENDING' check (fulfillment_status in ('PENDING', 'PARTIALLY_FULFILLED', 'FULFILLED', 'CANCELLED')),
+  priority text not null default 'NORMAL' check (priority in ('LOW', 'NORMAL', 'HIGH', 'CRITICAL')),
+  promised_ship_date date,
+  promised_delivery_date date,
+  shipping_method text,
+  tracking_number text,
+  carrier text,
+  notes text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint shipping_orders_unique_invoice unique (source_invoice_id, source_type)
@@ -184,6 +192,17 @@ create table if not exists public.fulfillments (
   constraint fulfillments_unique_event unique (shipping_order_line_id, source_event_key)
 );
 
+create table if not exists public.order_attachments (
+  id uuid primary key default gen_random_uuid(),
+  shipping_order_id uuid not null references public.shipping_orders(id) on delete cascade,
+  file_name text not null,
+  file_path text not null,
+  file_size bigint,
+  mime_type text,
+  uploaded_by uuid references public.access_users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.audit_log (
   id uuid primary key default gen_random_uuid(),
   entity_type text not null,
@@ -204,6 +223,7 @@ create index if not exists idx_container_lines_product on public.container_lines
 create index if not exists idx_inventory_transactions_product on public.inventory_transactions(product_id, created_at desc);
 create index if not exists idx_inventory_allocations_line on public.inventory_allocations(shipping_order_line_id, product_id);
 create index if not exists idx_fulfillments_line on public.fulfillments(shipping_order_line_id, fulfilled_at desc);
+create index if not exists idx_order_attachments_order on public.order_attachments(shipping_order_id, created_at desc);
 create index if not exists idx_audit_log_entity on public.audit_log(entity_type, entity_id, created_at desc);
 
 create trigger products_updated_at
@@ -249,6 +269,7 @@ alter table public.container_lines enable row level security;
 alter table public.inventory_transactions enable row level security;
 alter table public.inventory_allocations enable row level security;
 alter table public.fulfillments enable row level security;
+alter table public.order_attachments enable row level security;
 alter table public.audit_log enable row level security;
 
 create policy "products_read_all" on public.products
@@ -346,6 +367,15 @@ for select to authenticated
 using (true);
 
 create policy "fulfillments_write_authenticated" on public.fulfillments
+for all to authenticated
+using (true)
+with check (true);
+
+create policy "order_attachments_read_all" on public.order_attachments
+for select to authenticated
+using (true);
+
+create policy "order_attachments_write_authenticated" on public.order_attachments
 for all to authenticated
 using (true)
 with check (true);

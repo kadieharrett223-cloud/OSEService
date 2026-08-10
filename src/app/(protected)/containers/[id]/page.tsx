@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { acceptContainerToWarehouseAction } from "../actions";
+import { ReceiveContainerConfirmForm } from "./receive-container-confirm-form";
 
 type ContainerDetailRow = {
   id: string;
@@ -296,10 +296,13 @@ export default async function ContainerDetailPage({
             </p>
           </div>
           {container.lifecycle_status !== "RECEIVED" ? (
-            <form action={acceptContainerToWarehouseAction}>
-              <input type="hidden" name="container_id" value={container.id} />
-              <button type="submit" className="btn-primary">Mark These As In Warehouse</button>
-            </form>
+            <ReceiveContainerConfirmForm
+              containerId={container.id}
+              containerNumber={container.container_number}
+              eligibleLineCount={eligibleLineIds.size}
+              waitingLineCount={customerRows.filter((row) => !row.willMarkInWarehouse).length}
+              requireFullReceiptConfirmation={!hasExplicitReceipts}
+            />
           ) : (
             <span className="rounded-full bg-[#e7f7ed] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">
               Already Received
@@ -309,7 +312,7 @@ export default async function ContainerDetailPage({
 
         <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
           <p>
-            {eligibleLineIds.size} line(s) will move to In Warehouse now.
+            This will mark Container {container.container_number} as Received and move {eligibleLineIds.size} eligible order lines to In Warehouse. {customerRows.filter((row) => !row.willMarkInWarehouse).length} other lines will remain waiting.
           </p>
           <p className="mt-1 text-xs text-[#64748b]">
             Receipt mode: {hasExplicitReceipts ? "using Qty Received from container lines" : "using ordered quantity fallback because Qty Received is empty"}.

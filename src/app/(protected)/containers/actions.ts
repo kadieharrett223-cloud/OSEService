@@ -149,10 +149,15 @@ type ContainerAllocationRow = {
   shipping_order_line_id: string | null;
   shipping_order_lines?: {
     id: string;
+    shipping_order_id: string;
     approved_qty: number | null;
     fulfilled_qty: number | null;
     warehouse_status: string | null;
     queue_position_start: number | null;
+    products?: {
+      sku: string | null;
+      canonical_name: string | null;
+    } | null;
   } | null;
 };
 
@@ -161,6 +166,8 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   const supabase = getSupabaseAdmin();
 
   const containerId = String(formData.get("container_id") ?? "").trim();
+  const containerNumber = String(formData.get("container_number") ?? "").trim();
+  const fullReceiptConfirmed = String(formData.get("full_receipt_confirmed") ?? "") === "yes";
   if (!containerId || !isUuid(containerId)) {
     redirect("/containers?error=Invalid+container+reference");
   }
@@ -187,6 +194,11 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   const typedContainerLines = (containerLines ?? []) as ContainerLineAvailability[];
   const hasExplicitReceipts = typedContainerLines.some((line) => Number(line.received_qty ?? 0) > 0);
 
+  // Safeguard: if no received_qty values exist, receiving the entire container requires explicit operator confirmation.
+  if (!hasExplicitReceipts && !fullReceiptConfirmed) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Enter received quantities first, or confirm full receipt for this container.")}`);
+  }
+
   const availableByProduct = new Map<string, number>();
   for (const line of typedContainerLines) {
     if (!line.product_id) continue;
@@ -206,10 +218,12 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
       shipping_order_line_id,
       shipping_order_lines (
         id,
+        shipping_order_id,
         approved_qty,
         fulfilled_qty,
         warehouse_status,
-        queue_position_start
+        queue_position_start,
+        products (sku, canonical_name)
       )
     `)
     .eq("container_id", containerId)
@@ -231,6 +245,7 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   }
 
   const lineIdsToUpdate = new Set<string>();
+  const orderTimelineSkuMap = new Map<string, Set<string>>();
 
   for (const [productId, allocations] of groupedByProduct.entries()) {
     let available = availableByProduct.get(productId) ?? 0;
@@ -259,10 +274,22 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
 
       if (available >= requiredQty) {
         lineIdsToUpdate.add(line.id);
+        const orderId = line.shipping_order_id;
+        const sku = line.products?.sku ?? line.products?.canonical_name ?? "SKU";
+        const skuSet = orderTimelineSkuMap.get(orderId) ?? new Set<string>();
+        skuSet.add(sku);
+        orderTimelineSkuMap.set(orderId, skuSet);
         available -= requiredQty;
       }
     }
   }
+
+  const uniqueAllocLineIds = new Set(
+    typedAllocations
+      .map((allocation) => allocation.shipping_order_lines?.id)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const waitingLineCount = Array.from(uniqueAllocLineIds).filter((id) => !lineIdsToUpdate.has(id)).length;
 
   if (lineIdsToUpdate.size > 0) {
     const { error: updateLinesError } = await supabase
@@ -273,6 +300,20 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     if (updateLinesError) {
       redirect(`/containers/${containerId}?error=${encodeURIComponent(updateLinesError.message)}`);
     }
+  }
+
+  for (const [orderId, skuSet] of orderTimelineSkuMap.entries()) {
+    const skuSummary = Array.from(skuSet).join(", ");
+    await supabase.from("audit_log").insert({
+      entity_type: "shipping_order",
+      entity_id: orderId,
+      action: "CONTAINER_INVENTORY_MOVED_TO_WAREHOUSE",
+      details: {
+        container_id: containerId,
+        container_number: containerNumber || null,
+        message: `Container ${containerNumber || "(unknown)"} received - ${skuSummary} inventory now in warehouse`,
+      },
+    });
   }
 
   const { error: containerUpdateError } = await supabase
@@ -289,7 +330,9 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     entity_id: containerId,
     action: "CONTAINER_ACCEPTED_INTO_WAREHOUSE",
     details: {
+      container_number: containerNumber || null,
       line_count_marked_in_warehouse: lineIdsToUpdate.size,
+      line_count_waiting: waitingLineCount,
       used_explicit_received_qty: hasExplicitReceipts,
     },
   });
@@ -301,5 +344,5 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath("/my-sales");
 
-  redirect(`/containers/${containerId}?success=${encodeURIComponent(`Container accepted. ${lineIdsToUpdate.size} line(s) moved to In Warehouse.`)}`);
+  redirect(`/containers/${containerId}?success=${encodeURIComponent(`Container accepted. ${lineIdsToUpdate.size} line(s) moved to In Warehouse. ${waitingLineCount} line(s) remain waiting.`)}`);
 }

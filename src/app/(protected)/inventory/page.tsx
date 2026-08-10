@@ -131,7 +131,7 @@ export default async function InventoryOverviewPage({ searchParams }: { searchPa
               <Link
                 key={tab.id}
                 href={`/inventory?tab=${tab.id}`}
-                className={`rounded-full px-3 py-2 text-sm font-semibold transition ${isActive ? "bg-[#111827] text-white" : "bg-[#f3f4f6] text-[#374151]"}`}
+                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${isActive ? "border-[#d50917] bg-[#d50917] text-white shadow-sm" : "border-[#e5e7eb] bg-[#f9fafb] text-[#374151] hover:border-[#d1d5db] hover:bg-[#f3f4f6]"}`}
               >
                 {tab.label}
               </Link>

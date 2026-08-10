@@ -30,8 +30,20 @@ Exclude records where:
 ## Product Mapping Policy
 
 - No silent product creation.
-- Container line SKUs that do not map to canonical `products.sku` are reported as mapping issues.
+- Container line SKUs map using canonical `products.sku` plus `product_aliases.alias` with normalization (case-insensitive and punctuation-insensitive).
 - Unmapped SKUs are skipped from `container_lines` insert and must be reviewed/mapped separately.
+
+## Required Schema (Before Apply)
+
+Migration `supabase/migrations/202608100002_old_erp_container_import_columns.sql` must be applied before running `--apply`.
+
+Required columns:
+
+- `containers.source_system`
+- `containers.source_record_id`
+- `containers.source_key`
+- `container_lines.product_mapping_status`
+- `container_lines.source_line_ref`
 
 ## Idempotency
 
@@ -42,6 +54,23 @@ Each container gets:
 - `source_key = OLD_ERP_CONTAINER:<old id>`
 
 `source_key` is unique, so re-running the import does not duplicate containers.
+
+The importer does not fall back to `container_number` idempotency.
+
+## Container Number Resolution
+
+This one-time import resolves container numbers from source fields in this order:
+
+- `parsedContainerNumber`
+- `containerNumber` / `container_number` / `number` / `containerNo`
+- `originalFilename`
+- `notes`
+
+Only the expected active set is accepted:
+
+- `230, 232, 234, 235, 236, 238, 239, 240, 241, 244, 245, 246, 247, 249, 250, 251, 252, 253`
+
+If the eligible candidate set does not reconcile to exactly `18` containers and `714` total units with zero expected-vs-import differences, apply mode is blocked.
 
 ## Input Format
 
@@ -79,3 +108,5 @@ Apply mode upserts:
 - mapped container lines by `(container_id, product_id)`
 
 and writes an apply report to `tmp/import-reports/`.
+
+If a container has zero mapped lines, it is skipped entirely to prevent empty container shells.

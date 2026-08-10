@@ -47,6 +47,8 @@ const EXPECTED_ACTIVE_CONTAINER_IDS = [
   "253",
 ];
 
+const EXPECTED_ACTIVE_CONTAINER_SET = new Set(EXPECTED_ACTIVE_CONTAINER_IDS);
+
 const EXPECTED_ACTIVE_CONTAINER_COUNT = 18;
 const EXPECTED_ACTIVE_TOTAL_UNITS = 714;
 
@@ -141,6 +143,63 @@ function normalizeSku(value) {
   return sku.length > 0 ? sku : null;
 }
 
+function normalizeSkuKey(value) {
+  const sku = normalizeSku(value);
+  if (!sku) return null;
+  const normalized = sku.replace(/[^A-Z0-9]/g, "");
+  return normalized.length > 0 ? normalized : null;
+}
+
+function parseExpectedContainerCandidate(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  const matches = Array.from(text.matchAll(/(\d{2,4})/g));
+  for (const match of matches) {
+    const candidate = String(Number(match[1]));
+    if (EXPECTED_ACTIVE_CONTAINER_SET.has(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function resolveContainerNumber(record) {
+  const directKeys = [
+    "parsedContainerNumber",
+    "containerNumber",
+    "container_number",
+    "number",
+    "containerNo",
+    "container_no",
+  ];
+
+  for (const key of directKeys) {
+    const resolved = parseExpectedContainerCandidate(record?.[key]);
+    if (resolved) return resolved;
+  }
+
+  const filenameCandidate = parseExpectedContainerCandidate(record?.originalFilename);
+  if (filenameCandidate) return filenameCandidate;
+
+  const notesCandidate = parseExpectedContainerCandidate(record?.notes);
+  if (notesCandidate) return notesCandidate;
+
+  return null;
+}
+
+function buildSkuCandidates(values) {
+  const candidates = [];
+  for (const value of values) {
+    const raw = normalizeSku(value);
+    if (!raw) continue;
+    candidates.push(raw);
+    candidates.push(raw.replace(/[\s_]+/g, "-"));
+    candidates.push(raw.replace(/[^A-Z0-9]/g, ""));
+  }
+
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
 function normalizeContainerNumber(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -163,6 +222,7 @@ function parseLineItems(record) {
   return candidate
     .map((line) => {
       const sku = normalizeSku(pickFirst(line, ["sku", "partNumber", "part_number", "itemSku", "itemCode", "productCode"]));
+      const descriptionSku = normalizeSku(pickFirst(line, ["description", "name", "itemName", "productName"]));
       const qty = toNumber(pickFirst(line, ["orderedQty", "ordered_qty", "qty", "quantity", "onOrderQty"]));
       const receivedQty = toNumber(pickFirst(line, ["receivedQty", "received_qty", "qtyReceived", "received"]));
       const sourceLineRef = normalizeText(pickFirst(line, ["id", "lineId", "sourceLineId", "reference"]));
@@ -173,6 +233,7 @@ function parseLineItems(record) {
 
       return {
         sku,
+        skuCandidates: buildSkuCandidates([sku, descriptionSku]),
         orderedQty: qty,
         receivedQty: receivedQty && receivedQty > 0 ? receivedQty : 0,
         sourceLineRef,
@@ -234,6 +295,7 @@ function collectCandidates(rawRecords) {
     removedTrue: 0,
     receivedState: 0,
     nonOnOrderState: 0,
+    containerNumberUnresolved: 0,
     emptyOrInvalidContents: 0,
   };
 
@@ -273,7 +335,12 @@ function collectCandidates(rawRecords) {
 
     const lifecycle = deriveLifecycle(record, inventoryState);
 
-    const containerNumber = normalizeText(pickFirst(record, ["containerNumber", "container_number", "number", "containerNo"]));
+    const resolvedContainerNumber = resolveContainerNumber(record);
+    if (!resolvedContainerNumber) {
+      exclusionStats.containerNumberUnresolved += 1;
+      continue;
+    }
+
     const supplier = normalizeText(pickFirst(record, ["supplier", "vendor", "supplierName", "vendorName"]));
     const orderDate = toDateString(pickFirst(record, ["orderDate", "purchaseDate", "purchase_order_date", "order_date"]));
     const enteredDate = toDateString(pickFirst(record, ["enteredDate", "createdAt", "created_at", "dateEntered", "draftCreatedAt"]));
@@ -292,8 +359,8 @@ function collectCandidates(rawRecords) {
       sourceKey,
       sourceRecordId,
       sourceSystem: "OLD_ERP",
-      containerNumber: containerNumber ?? sourceRecordId,
-      normalizedContainerNumber: normalizeContainerNumber(containerNumber ?? sourceRecordId),
+      containerNumber: resolvedContainerNumber,
+      normalizedContainerNumber: normalizeContainerNumber(resolvedContainerNumber),
       supplier,
       orderDate,
       enteredDate,
@@ -328,11 +395,31 @@ async function loadProductMap(supabase) {
     fail(`Could not read products: ${error.message}`);
   }
 
+  const { data: aliasData, error: aliasError } = await supabase.from("product_aliases").select("product_id, alias");
+  if (aliasError) {
+    fail(`Could not read product aliases: ${aliasError.message}`);
+  }
+
   const map = new Map();
   for (const row of data ?? []) {
     const sku = normalizeSku(row.sku);
+    const skuKey = normalizeSkuKey(row.sku);
     if (sku) {
       map.set(sku, row.id);
+    }
+    if (skuKey) {
+      map.set(skuKey, row.id);
+    }
+  }
+
+  for (const row of aliasData ?? []) {
+    const alias = normalizeSku(row.alias);
+    const aliasKey = normalizeSkuKey(row.alias);
+    if (alias) {
+      map.set(alias, row.product_id);
+    }
+    if (aliasKey) {
+      map.set(aliasKey, row.product_id);
     }
   }
   return map;
@@ -343,6 +430,7 @@ function createPreview(candidates, productMap) {
   const mappingIssues = [];
   let totalLines = 0;
   let totalUnits = 0;
+  let totalUnmappedSkuLines = 0;
   const uniqueUnmappedSkus = new Set();
   const importUnitsByContainer = new Map();
 
@@ -358,9 +446,11 @@ function createPreview(candidates, productMap) {
         candidate.normalizedContainerNumber ?? candidate.containerNumber,
         (importUnitsByContainer.get(candidate.normalizedContainerNumber ?? candidate.containerNumber) ?? 0) + line.orderedQty,
       );
-      if (!productMap.has(line.sku)) {
+      const isMapped = line.skuCandidates.some((candidate) => productMap.has(candidate));
+      if (!isMapped) {
         unresolvedSkus.add(line.sku);
         uniqueUnmappedSkus.add(line.sku);
+        totalUnmappedSkuLines += 1;
       }
     }
 
@@ -398,7 +488,7 @@ function createPreview(candidates, productMap) {
       lineCount: totalLines,
       unitCount: totalUnits,
       containersWithMappingIssues: new Set(mappingIssues.map((entry) => entry.sourceKey)).size,
-      totalUnmappedSkuLines: mappingIssues.reduce((sum, entry) => sum + entry.skus.length, 0),
+      totalUnmappedSkuLines,
       totalUnmappedSkusUnique: uniqueUnmappedSkus.size,
     },
   };
@@ -472,34 +562,32 @@ async function getSourceKeyConflicts(supabase, sourceKeys) {
   return data ?? [];
 }
 
-async function detectSchemaSupport(supabase) {
-  const support = {
-    containersSourceMetadata: false,
-    containerLinesSourceMetadata: false,
-  };
-
+async function assertRequiredImportSchema(supabase) {
   const { error: containerMetaError } = await supabase
     .from("containers")
-    .select("id, source_key")
+    .select("id, source_system, source_record_id, source_key")
     .limit(1);
 
-  support.containersSourceMetadata = !containerMetaError;
+  if (containerMetaError) {
+    fail(`Required import columns are missing on containers. Apply migration 202608100002_old_erp_container_import_columns.sql first. (${containerMetaError.message})`);
+  }
 
   const { error: lineMetaError } = await supabase
     .from("container_lines")
     .select("id, product_mapping_status, source_line_ref")
     .limit(1);
 
-  support.containerLinesSourceMetadata = !lineMetaError;
-
-  return support;
+  if (lineMetaError) {
+    fail(`Required import columns are missing on container_lines. Apply migration 202608100002_old_erp_container_import_columns.sql first. (${lineMetaError.message})`);
+  }
 }
 
-async function applyImport(supabase, candidates, productMap, schemaSupport) {
+async function applyImport(supabase, candidates, productMap) {
   const results = {
     containersUpserted: 0,
     linesUpserted: 0,
     linesSkippedUnmapped: 0,
+    containersSkippedNoMappedLines: 0,
     containersWithIssues: 0,
     issueDetails: [],
   };
@@ -526,17 +614,51 @@ async function applyImport(supabase, candidates, productMap, schemaSupport) {
       remaining_balance: candidate.remainingBalance,
       lifecycle_status: candidate.lifecycleStatus,
       notes: baseNotes.length > 0 ? baseNotes.join("\n\n") : null,
+      source_system: candidate.sourceSystem,
+      source_record_id: candidate.sourceRecordId,
+      source_key: candidate.sourceKey,
     };
 
-    if (schemaSupport.containersSourceMetadata) {
-      payload.source_system = candidate.sourceSystem;
-      payload.source_record_id = candidate.sourceRecordId;
-      payload.source_key = candidate.sourceKey;
+    const mappedLines = [];
+    const unmappedLines = [];
+    for (const line of candidate.lines) {
+      const resolvedProductId = line.skuCandidates.find((candidateSku) => productMap.has(candidateSku));
+      const productId = resolvedProductId ? productMap.get(resolvedProductId) : null;
+
+      if (!productId) {
+        unmappedLines.push(line);
+        continue;
+      }
+
+      mappedLines.push({
+        ...line,
+        productId,
+      });
+    }
+
+    if (mappedLines.length === 0) {
+      results.containersSkippedNoMappedLines += 1;
+      results.containersWithIssues += 1;
+      results.linesSkippedUnmapped += unmappedLines.length;
+      for (const line of unmappedLines) {
+        results.issueDetails.push({
+          sourceKey: candidate.sourceKey,
+          containerNumber: candidate.containerNumber,
+          issue: "UNMAPPED_SKU",
+          sku: line.sku,
+        });
+      }
+      results.issueDetails.push({
+        sourceKey: candidate.sourceKey,
+        containerNumber: candidate.containerNumber,
+        issue: "CONTAINER_SKIPPED_NO_MAPPED_LINES",
+      });
+      continue;
     }
 
     const { data: upsertedContainer, error: upsertContainerError } = await supabase
       .from("containers")
-      .upsert(payload, { onConflict: schemaSupport.containersSourceMetadata ? "source_key" : "container_number" })
+      .upsert(payload, { onConflict: "source_key" })
       .select("id")
       .single();
 
@@ -546,33 +668,18 @@ async function applyImport(supabase, candidates, productMap, schemaSupport) {
 
     results.containersUpserted += 1;
 
-    let hasIssue = false;
-    for (const line of candidate.lines) {
-      const productId = productMap.get(line.sku);
-      if (!productId) {
-        hasIssue = true;
-        results.linesSkippedUnmapped += 1;
-        results.issueDetails.push({
-          sourceKey: candidate.sourceKey,
-          containerNumber: candidate.containerNumber,
-          issue: "UNMAPPED_SKU",
-          sku: line.sku,
-        });
-        continue;
-      }
+    let hasIssue = candidate.needsLifecycleReview;
+    for (const line of mappedLines) {
 
       const linePayload = {
         container_id: upsertedContainer.id,
-        product_id: productId,
+        product_id: line.productId,
         ordered_qty: line.orderedQty,
         on_order_qty: line.orderedQty,
         received_qty: line.receivedQty > 0 ? line.receivedQty : 0,
+        product_mapping_status: "MAPPED",
+        source_line_ref: line.sourceLineRef,
       };
-
-      if (schemaSupport.containerLinesSourceMetadata) {
-        linePayload.product_mapping_status = "MAPPED";
-        linePayload.source_line_ref = line.sourceLineRef;
-      }
 
       const { error: lineError } = await supabase
         .from("container_lines")
@@ -585,7 +692,20 @@ async function applyImport(supabase, candidates, productMap, schemaSupport) {
       results.linesUpserted += 1;
     }
 
-    if (candidate.needsLifecycleReview || hasIssue) {
+    if (unmappedLines.length > 0) {
+      hasIssue = true;
+      results.linesSkippedUnmapped += unmappedLines.length;
+      for (const line of unmappedLines) {
+        results.issueDetails.push({
+          sourceKey: candidate.sourceKey,
+          containerNumber: candidate.containerNumber,
+          issue: "UNMAPPED_SKU",
+          sku: line.sku,
+        });
+      }
+    }
+
+    if (hasIssue) {
       results.containersWithIssues += 1;
     }
   }
@@ -622,15 +742,13 @@ async function main() {
   });
 
   const productMap = await loadProductMap(supabase);
-  const schemaSupport = await detectSchemaSupport(supabase);
+  await assertRequiredImportSchema(supabase);
   const preview = createPreview(candidates, productMap);
   const comparison = createExpectedComparison(preview.importUnitsByContainer, preview.mappingIssues);
-  const sourceKeyConflicts = schemaSupport.containersSourceMetadata
-    ? await getSourceKeyConflicts(
-      supabase,
-      candidates.map((candidate) => candidate.sourceKey),
-    )
-    : [];
+  const sourceKeyConflicts = await getSourceKeyConflicts(
+    supabase,
+    candidates.map((candidate) => candidate.sourceKey),
+  );
   const totalExcluded = Object.values(candidateCollection.exclusionStats).reduce((sum, count) => sum + count, 0);
 
   console.log("\n=== OLD_ERP Container Import Preview ===\n");
@@ -641,13 +759,7 @@ async function main() {
   }
 
   console.log("Totals:", preview.totals);
-  console.log("Schema support:", schemaSupport);
-  if (!schemaSupport.containersSourceMetadata) {
-    console.warn("Warning: containers source metadata columns are missing. Fallback idempotency will use unique container_number.");
-  }
-  if (!schemaSupport.containerLinesSourceMetadata) {
-    console.warn("Warning: container_lines source metadata columns are missing. Source line metadata will not be persisted.");
-  }
+  console.log("Schema support:", { strictImportMetadataColumns: true });
 
   console.log("\nDetection/Exclusion Summary:");
   console.table([
@@ -660,6 +772,7 @@ async function main() {
       "Excluded: removed=true": candidateCollection.exclusionStats.removedTrue,
       "Excluded: inventory state RECEIVED": candidateCollection.exclusionStats.receivedState,
       "Excluded: inventory state not ON_ORDER": candidateCollection.exclusionStats.nonOnOrderState,
+      "Excluded: unresolved container #": candidateCollection.exclusionStats.containerNumberUnresolved,
       "Excluded: unusable/empty contents": candidateCollection.exclusionStats.emptyOrInvalidContents,
       "Total SKUs (line count)": preview.totals.lineCount,
       "Total unmapped SKU lines": preview.totals.totalUnmappedSkuLines,
@@ -675,15 +788,13 @@ async function main() {
     }
   }
 
-  if (schemaSupport.containersSourceMetadata && sourceKeyConflicts.length > 0) {
+  if (sourceKeyConflicts.length > 0) {
     console.log("\nExisting source-key conflicts (idempotent upsert targets):");
     console.table(sourceKeyConflicts.map((row) => ({
       "Container #": row.container_number,
       "Source Key": row.source_key,
       "Existing Container ID": row.id,
     })));
-  } else if (!schemaSupport.containersSourceMetadata) {
-    console.log("\nSource-key conflicts: not available (source_key column missing in target schema).");
   }
 
   console.log("\nExpected vs Import Comparison:");
@@ -704,7 +815,7 @@ async function main() {
       excluded: candidateCollection.exclusionStats,
       excludedTotal: totalExcluded,
     },
-    schemaSupport,
+    schemaSupport: { strictImportMetadataColumns: true },
     totals: preview.totals,
     previewRows: preview.previewRows,
     mappingIssues: preview.mappingIssues,
@@ -718,7 +829,16 @@ async function main() {
     return;
   }
 
-  const results = await applyImport(supabase, candidates, productMap, schemaSupport);
+  const checksumPass = comparison.checksum.expectedContainerCount === EXPECTED_ACTIVE_CONTAINER_COUNT
+    && comparison.checksum.importedExpectedContainers === EXPECTED_ACTIVE_CONTAINER_COUNT
+    && Number(comparison.checksum.importedTotalUnits) === EXPECTED_ACTIVE_TOTAL_UNITS
+    && comparison.checksum.nonZeroDifferences === 0;
+
+  if (!checksumPass) {
+    fail("Checksum guard failed. Import apply is blocked until the candidate set resolves to exactly 18 expected containers and 714 total units with zero differences.");
+  }
+
+  const results = await applyImport(supabase, candidates, productMap);
   const applyReportPath = writeReport(
     previewReportPath.replace("preview", "apply"),
     {

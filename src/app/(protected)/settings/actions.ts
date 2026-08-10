@@ -4,6 +4,12 @@ import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import {
+  clearAdminUnlock,
+  isAdminUnlockedForUser,
+  isValidAdminCode,
+  unlockAdminForUser,
+} from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   disconnectQuickbooksConnection,
@@ -14,8 +20,35 @@ function generateInternalAccessCode() {
   return `AUTO-${crypto.randomUUID()}`;
 }
 
-export async function createAccessUserAction(formData: FormData) {
+async function requireSettingsAdmin() {
+  const user = await requireUser();
+  const unlocked = await isAdminUnlockedForUser(user.id);
+  if (!unlocked) {
+    redirect("/settings?error=Admin+code+required");
+  }
+  return user;
+}
+
+export async function unlockSettingsAdminAction(formData: FormData) {
+  const user = await requireUser();
+  const code = String(formData.get("admin_code") ?? "").trim();
+
+  if (!isValidAdminCode(code)) {
+    redirect("/settings?error=Invalid+admin+code");
+  }
+
+  await unlockAdminForUser(user.id);
+  redirect("/settings?message=Admin+access+enabled");
+}
+
+export async function lockSettingsAdminAction() {
   await requireUser();
+  await clearAdminUnlock();
+  redirect("/settings?message=Admin+access+locked");
+}
+
+export async function createAccessUserAction(formData: FormData) {
+  await requireSettingsAdmin();
   const supabase = getSupabaseAdmin();
 
   const fullName = String(formData.get("full_name") ?? "").trim();
@@ -40,7 +73,7 @@ export async function createAccessUserAction(formData: FormData) {
 }
 
 export async function setAccessUserActiveAction(formData: FormData) {
-  await requireUser();
+  await requireSettingsAdmin();
   const supabase = getSupabaseAdmin();
 
   const userId = String(formData.get("user_id") ?? "").trim();
@@ -63,12 +96,12 @@ export async function setAccessUserActiveAction(formData: FormData) {
 }
 
 export async function connectQuickbooksAction() {
-  await requireUser();
+  await requireSettingsAdmin();
   redirect("/api/integrations/quickbooks/connect");
 }
 
 export async function syncQuickbooksAction() {
-  await requireUser();
+  await requireSettingsAdmin();
 
   try {
     const result = await syncQuickbooksInvoices();
@@ -83,7 +116,7 @@ export async function syncQuickbooksAction() {
 }
 
 export async function disconnectQuickbooksAction() {
-  await requireUser();
+  await requireSettingsAdmin();
 
   try {
     await disconnectQuickbooksConnection();

@@ -50,6 +50,7 @@ The app now includes an additive operations layer while preserving the original 
 - Orders remains the shipping acceptance and fulfillment workflow.
 - Containers remains inbound supply and ETA workflow.
 - Service remains case/install-focused workflow.
+- Settings is admin-gated: an admin code unlock (same validator used by Delete Case) is required before viewing login activity, managing access users, or running QuickBooks connect/sync/disconnect actions.
 
 Out of scope for Phase 1:
 

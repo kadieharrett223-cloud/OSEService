@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { isValidAdminCode } from "@/lib/admin-access";
 import {
   CASE_STATUSES,
   CASE_TYPES,
@@ -932,7 +933,7 @@ export async function deleteCaseAction(formData: FormData) {
     redirect("/cases?error=missing_case_reference");
   }
 
-  if (confirmationCode !== "9822") {
+  if (!isValidAdminCode(confirmationCode)) {
     redirect(`/cases/${caseId}?error=invalid_delete_confirmation`);
   }
 

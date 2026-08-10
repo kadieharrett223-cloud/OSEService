@@ -26,8 +26,8 @@ export function DeleteCaseButton({ caseId }: { caseId: string }) {
   function handleConfirmDelete() {
     const trimmedCode = confirmationCode.trim();
 
-    if (trimmedCode !== "9822") {
-      setErrorMessage("The security code was incorrect.");
+    if (!trimmedCode) {
+      setErrorMessage("Enter the admin code to continue.");
       return;
     }
 

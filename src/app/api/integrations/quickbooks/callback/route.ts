@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import {
   connectQuickbooksFromCallback,
   syncQuickbooksInvoices,
@@ -18,6 +19,11 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.redirect(new URL("/enter-code", request.url));
+  }
+
+  const unlocked = await isAdminUnlockedForUser(user.id);
+  if (!unlocked) {
+    return NextResponse.redirect(new URL("/settings?error=Admin+code+required", request.url));
   }
 
   const url = new URL(request.url);

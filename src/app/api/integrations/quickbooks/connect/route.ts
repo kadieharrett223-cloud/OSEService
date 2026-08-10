@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getQuickbooksConnectUrl } from "@/lib/quickbooks/integration";
 
 const STATE_COOKIE = "qbo_oauth_state";
@@ -10,6 +11,11 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.redirect(new URL("/enter-code", request.url));
+  }
+
+  const unlocked = await isAdminUnlockedForUser(user.id);
+  if (!unlocked) {
+    return NextResponse.redirect(new URL("/settings?error=Admin+code+required", request.url));
   }
 
   const state = crypto.randomBytes(24).toString("base64url");

@@ -1,11 +1,14 @@
 import { requireUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   connectQuickbooksAction,
   createAccessUserAction,
   disconnectQuickbooksAction,
+  lockSettingsAdminAction,
   setAccessUserActiveAction,
   syncQuickbooksAction,
+  unlockSettingsAdminAction,
 } from "@/app/(protected)/settings/actions";
 import {
   describeQuickbooksConfig,
@@ -17,7 +20,46 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
+  const adminUnlocked = await isAdminUnlockedForUser(user.id);
+
+  if (!adminUnlocked) {
+    const { error, message } = await searchParams;
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-3xl">Settings</h1>
+          <p className="text-sm text-[#5a5a5a]">
+            Enter admin code to unlock sensitive settings, user activity, QuickBooks connections, and item mapping tools.
+          </p>
+        </div>
+
+        {error ? (
+          <p className="rounded-md border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</p>
+        ) : null}
+
+        {message ? (
+          <p className="rounded-md border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</p>
+        ) : null}
+
+        <section className="card max-w-lg p-4">
+          <h2 className="text-xl">Admin Access Required</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">
+            This gate uses the same admin code as Delete Case.
+          </p>
+          <form action={unlockSettingsAdminAction} className="mt-3 space-y-3">
+            <div>
+              <label htmlFor="admin_code" className="label">Admin Code</label>
+              <input id="admin_code" name="admin_code" className="input" type="password" autoComplete="off" required />
+            </div>
+            <button type="submit" className="btn-primary">Unlock Settings</button>
+          </form>
+        </section>
+      </div>
+    );
+  }
+
   const supabase = getSupabaseAdmin();
   const { error, message } = await searchParams;
   const quickbooksConfig = describeQuickbooksConfig();
@@ -55,6 +97,9 @@ export default async function SettingsPage({
         <p className="text-sm text-[#5a5a5a]">
           Manage active users for the shared code and review login history by person.
         </p>
+        <form action={lockSettingsAdminAction} className="mt-3">
+          <button type="submit" className="btn-secondary">Lock Admin Access</button>
+        </form>
       </div>
 
       {error ? (

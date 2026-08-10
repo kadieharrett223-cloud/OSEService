@@ -656,7 +656,7 @@ export default async function CaseDetailsPage({
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-[#121826]">Delete this case</h2>
-                  <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and attachments. Secret code 9822 is required.</p>
+                  <p className="mt-1 text-sm text-[#5a5a5a]">This permanently removes the case and attachments. Admin code is required.</p>
                 </div>
                 <DeleteCaseButton caseId={id} />
               </div>

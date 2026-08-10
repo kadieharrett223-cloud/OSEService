@@ -19,6 +19,17 @@ type ContainerLineRow = {
   on_order_qty: number | null;
 };
 
+type ContainerRow = {
+  id: string;
+  lifecycle_status: string | null;
+};
+
+type WarehouseOrderLineRow = {
+  shipping_order_id: string | null;
+  warehouse_status: string | null;
+  fulfillment_status: string | null;
+};
+
 type InvoiceLineRow = {
   product_id: string | null;
   qbo_invoice_id: string | null;
@@ -40,7 +51,7 @@ function formatQuantity(value: number) {
 export default async function InventoryOverviewPage() {
   const supabase = await createClient();
 
-  const [{ data: products }, { data: inventoryTransactions }, { data: containerLines }, { data: invoiceLines }] = await Promise.all([
+  const [{ data: products }, { data: inventoryTransactions }, { data: containerLines }, { data: invoiceLines }, { data: containers }, { data: warehouseOrderLines }] = await Promise.all([
     supabase
       .from("products")
       .select("id, sku, canonical_name, status")
@@ -54,12 +65,20 @@ export default async function InventoryOverviewPage() {
     supabase
       .from("qbo_invoice_lines")
       .select("product_id, qbo_invoice_id, qbo_invoices (invoice_number, payment_status)"),
+    supabase
+      .from("containers")
+      .select("id, lifecycle_status"),
+    supabase
+      .from("shipping_order_lines")
+      .select("shipping_order_id, warehouse_status, fulfillment_status"),
   ]);
 
   const productRows = (products ?? []) as ProductRow[];
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const invoiceLineRows = (invoiceLines ?? []) as InvoiceLineRow[];
+  const containerRows = (containers ?? []) as ContainerRow[];
+  const warehouseRows = (warehouseOrderLines ?? []) as WarehouseOrderLineRow[];
 
   const ledgerByProduct = new Map<string, { onFloor: number; incomingAvailable: number; sold: number; onOrderLedger: number }>();
 
@@ -124,6 +143,26 @@ export default async function InventoryOverviewPage() {
     { onFloor: 0, incomingAvailable: 0, onOrder: 0, totalPhysical: 0 },
   );
 
+  const containersOnOrderCount = containerRows.filter((container) => {
+    const status = container.lifecycle_status ?? "";
+    return status === "ORDERED" || status === "PRODUCTION" || status === "INBOUND";
+  }).length;
+
+  const inventoryAlertCount = inventoryRows.filter((row) => row.totalPhysical <= 0 && row.onOrder <= 0).length;
+
+  const readyToShipOrderIds = new Set<string>();
+  for (const row of warehouseRows) {
+    if (!row.shipping_order_id) continue;
+    if (row.fulfillment_status === "FULFILLED") continue;
+    const status = row.warehouse_status ?? "";
+    if (status === "IN_WAREHOUSE" || status === "PICKED" || status === "READY_TO_SHIP") {
+      readyToShipOrderIds.add(row.shipping_order_id);
+    }
+  }
+  const readyToShipCount = readyToShipOrderIds.size;
+
+  const availableNow = totals.onFloor + totals.incomingAvailable;
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -144,20 +183,22 @@ export default async function InventoryOverviewPage() {
 
       <div className="grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-[#6b7280]">On Floor</p>
-          <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatQuantity(totals.onFloor)}</p>
+          <p className="text-sm font-medium text-[#6b7280]">Containers on Order</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{containersOnOrderCount}</p>
         </div>
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-[#6b7280]">Incoming Available</p>
-          <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatQuantity(totals.incomingAvailable)}</p>
+          <p className="text-sm font-medium text-[#6b7280]">Inventory Alert</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{inventoryAlertCount}</p>
+          <p className="mt-1 text-xs text-[#6b7280]">products with no stock and no on-order qty</p>
         </div>
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-[#6b7280]">On Order</p>
-          <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatQuantity(totals.onOrder)}</p>
+          <p className="text-sm font-medium text-[#6b7280]">Ready to Ship</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{readyToShipCount}</p>
+          <p className="mt-1 text-xs text-[#6b7280]">customer orders currently in warehouse flow</p>
         </div>
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-[#6b7280]">Total Physical</p>
-          <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatQuantity(totals.totalPhysical)}</p>
+          <p className="text-sm font-medium text-[#6b7280]">Available Now</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatQuantity(availableNow)}</p>
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { fulfillQueueLineAction } from "./actions";
 
 type QueueEntry = {
   id: string;
@@ -131,6 +132,14 @@ export default async function ProductQueuePage() {
                     <span className="rounded-full bg-[#eef2f7] px-2.5 py-1 text-xs font-medium text-[#334155]">
                       Queue: {line.queue_position_start ?? "—"}
                     </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <form action={fulfillQueueLineAction}>
+                      <input type="hidden" name="lineId" value={line.id} />
+                      <input type="hidden" name="quantity" value={Math.max(1, Math.min(Number(line.approved_qty ?? 0), Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)))} />
+                      <button type="submit" className="btn-primary">Fulfill</button>
+                    </form>
                   </div>
                 </div>
               );

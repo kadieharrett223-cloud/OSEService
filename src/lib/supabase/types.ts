@@ -285,6 +285,375 @@ export type Database = {
         };
         Relationships: [];
       };
+      product_aliases: {
+        Row: {
+          id: string;
+          product_id: string;
+          alias: string;
+          source_type: string;
+          source_ref: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          alias: string;
+          source_type?: string;
+          source_ref?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          product_id?: string;
+          alias?: string;
+          source_type?: string;
+          source_ref?: string | null;
+        };
+        Relationships: [];
+      };
+      qbo_invoices: {
+        Row: {
+          id: string;
+          customer_id: string | null;
+          qbo_invoice_id: string;
+          invoice_number: string | null;
+          invoice_date: string | null;
+          payment_status: string;
+          total_amount: number | null;
+          raw_payload: Json | null;
+          sync_status: string;
+          imported_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          customer_id?: string | null;
+          qbo_invoice_id: string;
+          invoice_number?: string | null;
+          invoice_date?: string | null;
+          payment_status?: string;
+          total_amount?: number | null;
+          raw_payload?: Json | null;
+          sync_status?: string;
+          imported_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          customer_id?: string | null;
+          qbo_invoice_id?: string;
+          invoice_number?: string | null;
+          invoice_date?: string | null;
+          payment_status?: string;
+          total_amount?: number | null;
+          raw_payload?: Json | null;
+          sync_status?: string;
+          imported_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      qbo_invoice_lines: {
+        Row: {
+          id: string;
+          qbo_invoice_id: string;
+          qbo_line_id: string;
+          qbo_item_id: string | null;
+          qbo_sku: string | null;
+          source_description: string | null;
+          product_id: string | null;
+          ordered_qty: number;
+          unit_price: number | null;
+          line_total: number | null;
+          mapping_status: string;
+          approval_status: string;
+          warehouse_status: string;
+          allocation_status: string;
+          fulfillment_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          qbo_invoice_id: string;
+          qbo_line_id: string;
+          qbo_item_id?: string | null;
+          qbo_sku?: string | null;
+          source_description?: string | null;
+          product_id?: string | null;
+          ordered_qty?: number;
+          unit_price?: number | null;
+          line_total?: number | null;
+          mapping_status?: string;
+          approval_status?: string;
+          warehouse_status?: string;
+          allocation_status?: string;
+          fulfillment_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          qbo_invoice_id?: string;
+          qbo_line_id?: string;
+          qbo_item_id?: string | null;
+          qbo_sku?: string | null;
+          source_description?: string | null;
+          product_id?: string | null;
+          ordered_qty?: number;
+          unit_price?: number | null;
+          line_total?: number | null;
+          mapping_status?: string;
+          approval_status?: string;
+          warehouse_status?: string;
+          allocation_status?: string;
+          fulfillment_status?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      shipping_orders: {
+        Row: {
+          id: string;
+          customer_id: string | null;
+          source_invoice_id: string | null;
+          order_number: string | null;
+          source_type: string;
+          review_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          customer_id?: string | null;
+          source_invoice_id?: string | null;
+          order_number?: string | null;
+          source_type?: string;
+          review_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          customer_id?: string | null;
+          source_invoice_id?: string | null;
+          order_number?: string | null;
+          source_type?: string;
+          review_status?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      shipping_order_lines: {
+        Row: {
+          id: string;
+          shipping_order_id: string;
+          qbo_invoice_line_id: string | null;
+          product_id: string;
+          ordered_qty: number;
+          approved_qty: number;
+          fulfilled_qty: number;
+          cancelled_qty: number;
+          approval_status: string;
+          warehouse_status: string;
+          allocation_status: string;
+          fulfillment_status: string;
+          priority: string;
+          queue_position_start: number | null;
+          queue_position_count: number | null;
+          approved_at: string | null;
+          source_event_key: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipping_order_id: string;
+          qbo_invoice_line_id?: string | null;
+          product_id: string;
+          ordered_qty?: number;
+          approved_qty?: number;
+          fulfilled_qty?: number;
+          cancelled_qty?: number;
+          approval_status?: string;
+          warehouse_status?: string;
+          allocation_status?: string;
+          fulfillment_status?: string;
+          priority?: string;
+          queue_position_start?: number | null;
+          queue_position_count?: number | null;
+          approved_at?: string | null;
+          source_event_key?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          shipping_order_id?: string;
+          qbo_invoice_line_id?: string | null;
+          product_id?: string;
+          ordered_qty?: number;
+          approved_qty?: number;
+          fulfilled_qty?: number;
+          cancelled_qty?: number;
+          approval_status?: string;
+          warehouse_status?: string;
+          allocation_status?: string;
+          fulfillment_status?: string;
+          priority?: string;
+          queue_position_start?: number | null;
+          queue_position_count?: number | null;
+          approved_at?: string | null;
+          source_event_key?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      fulfillments: {
+        Row: {
+          id: string;
+          shipping_order_line_id: string;
+          fulfilled_qty: number;
+          fulfilled_at: string;
+          shipment_number: string | null;
+          carrier: string | null;
+          tracking_number: string | null;
+          reason: string | null;
+          actor_id: string | null;
+          source_event_key: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipping_order_line_id: string;
+          fulfilled_qty?: number;
+          fulfilled_at?: string;
+          shipment_number?: string | null;
+          carrier?: string | null;
+          tracking_number?: string | null;
+          reason?: string | null;
+          actor_id?: string | null;
+          source_event_key?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          shipping_order_line_id?: string;
+          fulfilled_qty?: number;
+          fulfilled_at?: string;
+          shipment_number?: string | null;
+          carrier?: string | null;
+          tracking_number?: string | null;
+          reason?: string | null;
+          actor_id?: string | null;
+          source_event_key?: string | null;
+        };
+        Relationships: [];
+      };
+      inventory_transactions: {
+        Row: {
+          id: string;
+          product_id: string;
+          bucket: string;
+          delta: number;
+          before_qty: number;
+          after_qty: number;
+          reason: string;
+          source_type: string;
+          source_id: string | null;
+          source_event_key: string | null;
+          container_id: string | null;
+          shipping_order_line_id: string | null;
+          actor_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          bucket: string;
+          delta: number;
+          before_qty?: number;
+          after_qty?: number;
+          reason: string;
+          source_type: string;
+          source_id?: string | null;
+          source_event_key?: string | null;
+          container_id?: string | null;
+          shipping_order_line_id?: string | null;
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          product_id?: string;
+          bucket?: string;
+          delta?: number;
+          before_qty?: number;
+          after_qty?: number;
+          reason?: string;
+          source_type?: string;
+          source_id?: string | null;
+          source_event_key?: string | null;
+          container_id?: string | null;
+          shipping_order_line_id?: string | null;
+          actor_id?: string | null;
+        };
+        Relationships: [];
+      };
+      inventory_allocations: {
+        Row: {
+          id: string;
+          shipping_order_line_id: string;
+          product_id: string;
+          container_id: string | null;
+          quantity: number;
+          allocation_status: string;
+          source_type: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipping_order_line_id: string;
+          product_id: string;
+          container_id?: string | null;
+          quantity?: number;
+          allocation_status?: string;
+          source_type?: string;
+          created_at?: string;
+        };
+        Update: {
+          shipping_order_line_id?: string;
+          product_id?: string;
+          container_id?: string | null;
+          quantity?: number;
+          allocation_status?: string;
+          source_type?: string;
+        };
+        Relationships: [];
+      };
+      audit_log: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string | null;
+          action: string;
+          actor_id: string | null;
+          details: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          entity_type: string;
+          entity_id?: string | null;
+          action: string;
+          actor_id?: string | null;
+          details?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          entity_type?: string;
+          entity_id?: string | null;
+          action?: string;
+          actor_id?: string | null;
+          details?: Json | null;
+        };
+        Relationships: [];
+      };
       containers: {
         Row: {
           id: string;

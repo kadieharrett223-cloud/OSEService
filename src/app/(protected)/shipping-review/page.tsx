@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { approveReviewLineAction, holdReviewLineAction } from "./actions";
 
 type ReviewLine = {
   id: string;
@@ -106,6 +107,17 @@ export default async function ShippingReviewPage() {
                     <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass(line.warehouse_status)}`}>
                       Queue: {formatStatus(line.warehouse_status)}
                     </span>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <form action={approveReviewLineAction}>
+                      <input type="hidden" name="lineId" value={line.id} />
+                      <button type="submit" className="btn-primary">Approve</button>
+                    </form>
+                    <form action={holdReviewLineAction}>
+                      <input type="hidden" name="lineId" value={line.id} />
+                      <button type="submit" className="btn-secondary">Hold</button>
+                    </form>
                   </div>
                 </div>
               );

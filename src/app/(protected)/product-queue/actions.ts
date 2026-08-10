@@ -47,6 +47,7 @@ export async function fulfillQueueLineAction(formData: FormData) {
   });
 
   revalidatePath("/shipping-review");
+  revalidatePath("/order-queue");
   revalidatePath("/product-queue");
   revalidatePath("/inventory");
   revalidatePath("/my-sales");

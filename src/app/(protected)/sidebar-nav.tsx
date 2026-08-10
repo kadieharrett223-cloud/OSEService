@@ -20,33 +20,24 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
-    items: [
-      { href: "/dashboard", label: "Dashboard", matchPath: "/dashboard", icon: "DB" },
-    ],
-  },
-  {
     title: "Dashboard",
     items: [
+      { href: "/dashboard", label: "Dashboard", matchPath: "/dashboard", icon: "DB" },
       { href: "/my-sales", label: "My Sales", matchPath: "/my-sales", icon: "MS" },
-    ],
-  },
-  {
-    title: "Shipping",
-    items: [
-      { href: "/shipping-review", label: "Shipping Review", matchPath: "/shipping-review", icon: "SR" },
-      { href: "/product-queue", label: "Product Queue", matchPath: "/product-queue", icon: "PQ" },
-      { href: "/shipments", label: "Shipments", matchPath: "/shipments", icon: "SH" },
     ],
   },
   {
     title: "Inventory",
     items: [
-      { href: "/inventory", label: "Inventory Overview", matchPath: "/inventory", icon: "IV" },
+      { href: "/inventory", label: "Inventory", matchPath: "/inventory", icon: "IV" },
       { href: "/containers", label: "Containers", matchPath: "/containers", icon: "CT" },
-      { href: "/adjustments", label: "Adjustments", matchPath: "/adjustments", icon: "AD" },
-      { href: "/products", label: "Products / Catalog", matchPath: "/products", icon: "PC" },
-      { href: "/reconciliation", label: "Reconciliation", matchPath: "/reconciliation", icon: "RC" },
+      { href: "/order-queue", label: "Order Queue", matchPath: "/order-queue", icon: "OQ" },
+      { href: "/order-archive", label: "Order Archive", matchPath: "/order-archive", icon: "OA" },
     ],
+  },
+  {
+    title: "Shipping",
+    items: [{ href: "/shipping-review", label: "Shipping Review", matchPath: "/shipping-review", icon: "SR" }],
   },
   {
     title: "Service",

@@ -128,6 +128,7 @@ export async function approveReviewLineAction(formData: FormData) {
   }).eq("id", line.id);
 
   revalidatePath("/shipping-review");
+  revalidatePath("/order-queue");
   revalidatePath("/product-queue");
   revalidatePath("/inventory");
   revalidatePath("/my-sales");
@@ -146,6 +147,7 @@ export async function holdReviewLineAction(formData: FormData) {
   }).eq("id", lineId);
 
   revalidatePath("/shipping-review");
+  revalidatePath("/order-queue");
   revalidatePath("/product-queue");
   revalidatePath("/inventory");
 }

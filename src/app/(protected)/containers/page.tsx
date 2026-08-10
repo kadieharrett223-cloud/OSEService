@@ -92,6 +92,11 @@ export default async function ContainersPage({
 
   const errorMessage = containersError ? "Unable to load container data right now." : params.error ? params.error : null;
   const successMessage = params.success ? params.success : null;
+  const incomingContainers = (containers ?? []).filter((container) => {
+    const lifecycle = (container as { lifecycle_status?: string | null }).lifecycle_status;
+    return lifecycle && ["ORDERED", "PRODUCTION", "INBOUND"].includes(lifecycle);
+  });
+  const receivedContainers = (containers ?? []).filter((container) => (container as { lifecycle_status?: string | null }).lifecycle_status === "RECEIVED");
 
   return (
     <div className="space-y-6">
@@ -117,10 +122,25 @@ export default async function ContainersPage({
         <div className="rounded-lg border border-[#d7f7e2] bg-[#f1fdf5] p-3 text-sm text-[#0f6f35]">{successMessage}</div>
       ) : null}
 
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-[#6b7280]">Incoming / Active</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{incomingContainers.length}</p>
+        </div>
+        <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-[#6b7280]">Received</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{receivedContainers.length}</p>
+        </div>
+        <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
+          <p className="text-sm font-medium text-[#6b7280]">Container contents</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{(containers ?? []).reduce((sum, entry) => sum + ((entry as { container_lines?: Array<{ ordered_qty: number | null }> }).container_lines?.length ?? 0), 0)}</p>
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-[#111827]">Active Containers</h2>
-          <p className="text-sm text-[#6b7280]">Incoming quantities remain visible before the container is received.</p>
+          <p className="text-sm text-[#6b7280]">Incoming quantities remain visible before the container is received, and received containers stay available for review.</p>
         </div>
 
         {containers && containers.length > 0 ? (
@@ -163,6 +183,11 @@ export default async function ContainersPage({
                   const eta = getEtaDisplay(typedContainer);
                   const lineCount = typedContainer.container_lines?.length ?? 0;
                   const totalUnits = (typedContainer.container_lines ?? []).reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
+                  const productSummary = (typedContainer.container_lines ?? [])
+                    .map((line) => (line as { products?: { sku?: string | null } }).products?.sku)
+                    .filter((sku): sku is string => Boolean(sku))
+                    .slice(0, 3)
+                    .join(", ");
 
                   return (
                     <tr key={typedContainer.id} className="align-top">
@@ -198,6 +223,7 @@ export default async function ContainersPage({
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{lineCount} line{lineCount === 1 ? "" : "s"}</div>
                         <div className="text-xs text-[#6b7280]">{totalUnits} total units</div>
+                        <div className="mt-2 text-xs text-[#6b7280]">{productSummary || "No SKU lines yet"}</div>
                       </td>
                       <td className="px-3 py-3">
                         <Link href={`/containers/${typedContainer.id}`} className="btn-secondary inline-flex">Open / View Details</Link>
@@ -211,6 +237,46 @@ export default async function ContainersPage({
         ) : (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             No active containers are available yet. Use the form below to add the first container.
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#111827]">Received Containers</h2>
+        <p className="mt-1 text-sm text-[#5a5a5a]">These keep the historical inventory movement visible without forcing extra manual steps.</p>
+
+        {receivedContainers.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {receivedContainers.slice(0, 6).map((container) => {
+              const typedContainer = container as {
+                id: string;
+                container_number: string;
+                supplier: string | null;
+                lifecycle_status: string;
+                entered_date: string | null;
+                eta_confirmed_date: string | null;
+                eta_estimated_date: string | null;
+              };
+              const eta = getEtaDisplay(typedContainer);
+              return (
+                <div key={typedContainer.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-[#111827]">{typedContainer.container_number}</p>
+                      <p className="text-sm text-[#5a5a5a]">{typedContainer.supplier ?? "Supplier pending"}</p>
+                    </div>
+                    <div className="text-sm text-[#374151]">
+                      <p>Entered {formatDate(typedContainer.entered_date)}</p>
+                      <p className="mt-1">ETA {eta.label}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-5 text-sm text-[#6b7280]">
+            No received containers have been marked yet.
           </div>
         )}
       </div>

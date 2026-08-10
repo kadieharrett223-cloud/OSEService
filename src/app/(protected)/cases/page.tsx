@@ -47,6 +47,10 @@ function statusBadge(status: string) {
   return "bg-[#f3f4f6] text-[#374151]";
 }
 
+function isResolvedStatus(status: string) {
+  return status === "Resolved" || status === "Completed" || status === "Closed";
+}
+
 export default async function CasesPage({
   searchParams,
 }: {
@@ -58,6 +62,8 @@ export default async function CasesPage({
 
   const query = (params.q ?? "").trim().toLowerCase();
   const sort = params.sort ?? "updated_desc";
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
   let dbQuery = supabase
     .from("customer_service_cases")
@@ -85,10 +91,22 @@ export default async function CasesPage({
     dbQuery = dbQuery.eq("case_type", params.case_type as CaseType);
   }
 
-  const [{ data: rows }, { data: employees }] = await Promise.all([
+  const [{ data: rows }, { data: employees }, { data: summaryRows }, { count: recentlyUpdated }] = await Promise.all([
     dbQuery,
     supabase.from("access_users").select("id, full_name").eq("is_active", true).order("full_name"),
+    supabase.from("customer_service_cases").select("id, status, priority, updated_at"),
+    supabase
+      .from("customer_service_cases")
+      .select("id", { count: "exact", head: true })
+      .gte("updated_at", sevenDaysAgo.toISOString()),
   ]);
+
+  const serviceSummaryRows = (summaryRows ?? []) as Array<{ id: string; status: string; priority: string; updated_at: string }>;
+  const serviceOpenCases = serviceSummaryRows.filter((row) => !isResolvedStatus(row.status)).length;
+  const serviceHighPriority = serviceSummaryRows.filter((row) => row.priority === "High" && !isResolvedStatus(row.status)).length;
+  const serviceWaitingCustomer = serviceSummaryRows.filter((row) => row.status === "Waiting for Customer").length;
+  const servicePartsNeeded = serviceSummaryRows.filter((row) => row.status === "Parts Needed").length;
+  const servicePartsShipped = serviceSummaryRows.filter((row) => row.status === "Parts Shipped").length;
 
   const filteredRows = ((rows ?? []) as unknown as CaseListRow[]).filter((row) => {
     const shouldHideCompletedByDefault = !params.status && !params.priority && !params.employee && !params.case_type && !query;
@@ -151,6 +169,39 @@ export default async function CasesPage({
           </Link>
         </div>
       </div>
+
+      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Open Cases</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{serviceOpenCases}</p>
+          <Link href="/cases" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">View →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">High Priority</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{serviceHighPriority}</p>
+          <Link href="/cases?priority=High" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Review →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Waiting Customer</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{serviceWaitingCustomer}</p>
+          <Link href="/cases?status=Waiting%20for%20Customer" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Open →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Parts Needed</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{servicePartsNeeded}</p>
+          <Link href="/cases?status=Parts%20Needed" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Track →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Parts Shipped</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{servicePartsShipped}</p>
+          <Link href="/cases?status=Parts%20Shipped" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">View →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Updated (7 days)</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{recentlyUpdated ?? 0}</p>
+          <Link href="/cases" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Inspect →</Link>
+        </article>
+      </section>
 
       <form className="card grid gap-3 p-3 md:grid-cols-7">
         <div className="md:col-span-2">

@@ -40,6 +40,17 @@ Phase 1 implements only internal customer service case tracking:
 - Create-time attachment queue previews with filename, size, selected time, selected by, and remove control before submit
 - Create-time internal notes queue that is converted into case notes and case_activity timeline rows on save
 
+## Operational Overlay (Current)
+
+The app now includes an additive operations layer while preserving the original service system.
+
+- Main Dashboard is now company-wide: Inventory, Orders, Containers, Service widgets, plus cross-domain Recent Activity links.
+- Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
+- Inventory remains the product/stock workspace.
+- Orders remains the shipping acceptance and fulfillment workflow.
+- Containers remains inbound supply and ETA workflow.
+- Service remains case/install-focused workflow.
+
 Out of scope for Phase 1:
 
 - QuickBooks writeback or accounting edits

@@ -13,9 +13,15 @@ type InstallationJobRow = {
   updated_at: string;
 };
 
-export default async function InstallationPage() {
+function needsAttention(status: string) {
+  const normalized = status.toLowerCase();
+  return !(normalized.includes("complete") || normalized.includes("closed") || normalized.includes("done") || normalized.includes("installed"));
+}
+
+export default async function InstallationPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   await requireUser();
   const supabase = getSupabaseAdmin();
+  const params = await searchParams;
 
   let installationRows: InstallationJobRow[] = [];
 
@@ -32,16 +38,30 @@ export default async function InstallationPage() {
     installationRows = [];
   }
 
+  const filteredRows = params.status === "attention"
+    ? installationRows.filter((row) => needsAttention(row.status))
+    : installationRows;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl">Installation Jobs</h1>
           <p className="text-sm text-[#5a5a5a]">Track installer submissions, notes, and photos for every job in one place.</p>
+          {params.status === "attention" ? (
+            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#b20610]">Filtered: Needs Attention</p>
+          ) : null}
         </div>
-        <Link href="/installation/new" className="btn-primary">
-          New Installation
-        </Link>
+        <div className="flex gap-2">
+          {params.status === "attention" ? (
+            <Link href="/installation" className="btn-secondary">Clear Filter</Link>
+          ) : (
+            <Link href="/installation?status=attention" className="btn-secondary">Needs Attention</Link>
+          )}
+          <Link href="/installation/new" className="btn-primary">
+            New Installation
+          </Link>
+        </div>
       </div>
 
       <section className="card overflow-x-auto p-4">
@@ -57,8 +77,8 @@ export default async function InstallationPage() {
             </tr>
           </thead>
           <tbody>
-            {installationRows.length ? (
-              installationRows.map((row) => (
+            {filteredRows.length ? (
+              filteredRows.map((row) => (
                 <tr key={row.id} className="border-b border-[#f2f2f2] hover:bg-[#f8fafc]">
                   <td className="px-2 py-2 font-semibold text-[#b20610]">{row.invoice_number}</td>
                   <td className="px-2 py-2">

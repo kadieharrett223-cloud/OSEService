@@ -5,6 +5,31 @@ import path from "node:path";
 import process from "node:process";
 import { createClient } from "@supabase/supabase-js";
 
+const EXPECTED_ACTIVE_CONTAINER_UNITS = {
+  "230": 24,
+  "232": 32,
+  "233": 23,
+  "234": 28,
+  "235": 52,
+  "236": 18,
+  "238": 28,
+  "239": 5,
+  "240": 48,
+  "241": 11,
+  "244": 24,
+  "245": 55,
+  "246": 15,
+  "247": 31,
+  "249": 29,
+  "250": 33,
+  "251": 22,
+  "252": 23,
+  "253": 50,
+};
+
+const EXPECTED_ACTIVE_CONTAINER_COUNT = 18;
+const EXPECTED_ACTIVE_TOTAL_UNITS = 714;
+
 function parseArgs(argv) {
   const args = {
     input: "",
@@ -96,6 +121,13 @@ function normalizeSku(value) {
   return sku.length > 0 ? sku : null;
 }
 
+function normalizeContainerNumber(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const digits = raw.replace(/[^0-9]/g, "");
+  return digits || raw.toUpperCase();
+}
+
 function parseLineItems(record) {
   const candidate = pickFirst(record, [
     "lineItems",
@@ -177,23 +209,47 @@ function normalizePaymentStatus(record) {
 
 function collectCandidates(rawRecords) {
   const candidates = [];
+  const exclusionStats = {
+    missingSourceRecordId: 0,
+    removedTrue: 0,
+    receivedState: 0,
+    nonOnOrderState: 0,
+    emptyOrInvalidContents: 0,
+  };
+
+  let detectedWithSourceId = 0;
 
   for (const record of rawRecords) {
     const sourceRecordId = normalizeText(pickFirst(record, ["id", "_id", "containerDraftId", "draftId", "recordId"]));
     if (!sourceRecordId) {
+      exclusionStats.missingSourceRecordId += 1;
       continue;
     }
 
+    detectedWithSourceId += 1;
+
     const sourceKey = `OLD_ERP_CONTAINER:${sourceRecordId}`;
     const removed = toBool(pickFirst(record, ["removed", "isRemoved", "deleted"]));
-    if (removed) continue;
+    if (removed) {
+      exclusionStats.removedTrue += 1;
+      continue;
+    }
 
     const inventoryState = String(pickFirst(record, ["inventoryState", "inventory_state", "inventoryStatus", "status"]) ?? "").trim().toUpperCase();
-    if (inventoryState === "RECEIVED") continue;
-    if (inventoryState !== "ON_ORDER") continue;
+    if (inventoryState === "RECEIVED") {
+      exclusionStats.receivedState += 1;
+      continue;
+    }
+    if (inventoryState !== "ON_ORDER") {
+      exclusionStats.nonOnOrderState += 1;
+      continue;
+    }
 
     const lines = parseLineItems(record);
-    if (lines.length === 0) continue;
+    if (lines.length === 0) {
+      exclusionStats.emptyOrInvalidContents += 1;
+      continue;
+    }
 
     const lifecycle = deriveLifecycle(record, inventoryState);
 
@@ -217,6 +273,7 @@ function collectCandidates(rawRecords) {
       sourceRecordId,
       sourceSystem: "OLD_ERP",
       containerNumber: containerNumber ?? sourceRecordId,
+      normalizedContainerNumber: normalizeContainerNumber(containerNumber ?? sourceRecordId),
       supplier,
       orderDate,
       enteredDate,
@@ -237,7 +294,12 @@ function collectCandidates(rawRecords) {
     });
   }
 
-  return candidates;
+  return {
+    sourceRecordCount: rawRecords.length,
+    detectedWithSourceId,
+    candidates,
+    exclusionStats,
+  };
 }
 
 async function loadProductMap(supabase) {
@@ -261,6 +323,8 @@ function createPreview(candidates, productMap) {
   const mappingIssues = [];
   let totalLines = 0;
   let totalUnits = 0;
+  const uniqueUnmappedSkus = new Set();
+  const importUnitsByContainer = new Map();
 
   for (const candidate of candidates) {
     const unresolvedSkus = new Set();
@@ -270,8 +334,13 @@ function createPreview(candidates, productMap) {
       totalLines += 1;
       units += line.orderedQty;
       totalUnits += line.orderedQty;
+      importUnitsByContainer.set(
+        candidate.normalizedContainerNumber ?? candidate.containerNumber,
+        (importUnitsByContainer.get(candidate.normalizedContainerNumber ?? candidate.containerNumber) ?? 0) + line.orderedQty,
+      );
       if (!productMap.has(line.sku)) {
         unresolvedSkus.add(line.sku);
+        uniqueUnmappedSkus.add(line.sku);
       }
     }
 
@@ -303,13 +372,78 @@ function createPreview(candidates, productMap) {
   return {
     previewRows,
     mappingIssues,
+    importUnitsByContainer,
     totals: {
       containerCount: candidates.length,
       lineCount: totalLines,
       unitCount: totalUnits,
       containersWithMappingIssues: new Set(mappingIssues.map((entry) => entry.sourceKey)).size,
+      totalUnmappedSkuLines: mappingIssues.reduce((sum, entry) => sum + entry.skus.length, 0),
+      totalUnmappedSkusUnique: uniqueUnmappedSkus.size,
     },
   };
+}
+
+function createExpectedComparison(importUnitsByContainer, mappingIssues) {
+  const mappingIssueSet = new Set(mappingIssues.map((entry) => normalizeContainerNumber(entry.containerNumber) ?? entry.containerNumber));
+  const rows = [];
+
+  for (const [container, expectedQty] of Object.entries(EXPECTED_ACTIVE_CONTAINER_UNITS)) {
+    const importQty = Number(importUnitsByContainer.get(container) ?? 0);
+    rows.push({
+      Container: container,
+      "Expected Qty": expectedQty,
+      "Import Qty": importQty,
+      Difference: importQty - expectedQty,
+      "Mapping Issues": mappingIssueSet.has(container) ? "Yes" : "No",
+    });
+  }
+
+  for (const [container, importQty] of importUnitsByContainer.entries()) {
+    if (Object.prototype.hasOwnProperty.call(EXPECTED_ACTIVE_CONTAINER_UNITS, container)) continue;
+    rows.push({
+      Container: container,
+      "Expected Qty": 0,
+      "Import Qty": importQty,
+      Difference: importQty,
+      "Mapping Issues": mappingIssueSet.has(container) ? "Yes" : "No",
+    });
+  }
+
+  rows.sort((a, b) => String(a.Container).localeCompare(String(b.Container), undefined, { numeric: true }));
+
+  const expectedContainerCount = Object.keys(EXPECTED_ACTIVE_CONTAINER_UNITS).length;
+  const expectedTotalUnits = Object.values(EXPECTED_ACTIVE_CONTAINER_UNITS).reduce((sum, qty) => sum + qty, 0);
+  const importedExpectedContainers = rows.filter((row) => row["Expected Qty"] > 0 && row["Import Qty"] > 0).length;
+  const nonZeroDifferences = rows.filter((row) => row.Difference !== 0).length;
+
+  return {
+    rows,
+    checksum: {
+      expectedContainerCount,
+      expectedTargetCount: EXPECTED_ACTIVE_CONTAINER_COUNT,
+      expectedTotalUnits,
+      expectedTargetUnits: EXPECTED_ACTIVE_TOTAL_UNITS,
+      importedExpectedContainers,
+      importedTotalUnits: Array.from(importUnitsByContainer.values()).reduce((sum, qty) => sum + Number(qty), 0),
+      nonZeroDifferences,
+    },
+  };
+}
+
+async function getSourceKeyConflicts(supabase, sourceKeys) {
+  if (sourceKeys.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("containers")
+    .select("id, container_number, source_key")
+    .in("source_key", sourceKeys);
+
+  if (error) {
+    fail(`Could not check source-key conflicts: ${error.message}`);
+  }
+
+  return data ?? [];
 }
 
 async function applyImport(supabase, candidates, productMap) {
@@ -425,7 +559,8 @@ async function main() {
   }
 
   const rawRecords = readJsonFile(args.input);
-  const candidates = collectCandidates(rawRecords);
+  const candidateCollection = collectCandidates(rawRecords);
+  const candidates = candidateCollection.candidates;
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false },
@@ -433,6 +568,12 @@ async function main() {
 
   const productMap = await loadProductMap(supabase);
   const preview = createPreview(candidates, productMap);
+  const comparison = createExpectedComparison(preview.importUnitsByContainer, preview.mappingIssues);
+  const sourceKeyConflicts = await getSourceKeyConflicts(
+    supabase,
+    candidates.map((candidate) => candidate.sourceKey),
+  );
+  const totalExcluded = Object.values(candidateCollection.exclusionStats).reduce((sum, count) => sum + count, 0);
 
   console.log("\n=== OLD_ERP Container Import Preview ===\n");
   if (preview.previewRows.length === 0) {
@@ -443,6 +584,25 @@ async function main() {
 
   console.log("Totals:", preview.totals);
 
+  console.log("\nDetection/Exclusion Summary:");
+  console.table([
+    {
+      "Total source records": candidateCollection.sourceRecordCount,
+      "Detected with source ID": candidateCollection.detectedWithSourceId,
+      "Eligible containers": preview.totals.containerCount,
+      "Excluded containers": totalExcluded,
+      "Excluded: missing source id": candidateCollection.exclusionStats.missingSourceRecordId,
+      "Excluded: removed=true": candidateCollection.exclusionStats.removedTrue,
+      "Excluded: inventory state RECEIVED": candidateCollection.exclusionStats.receivedState,
+      "Excluded: inventory state not ON_ORDER": candidateCollection.exclusionStats.nonOnOrderState,
+      "Excluded: unusable/empty contents": candidateCollection.exclusionStats.emptyOrInvalidContents,
+      "Total SKUs (line count)": preview.totals.lineCount,
+      "Total unmapped SKU lines": preview.totals.totalUnmappedSkuLines,
+      "Total unmapped SKUs (unique)": preview.totals.totalUnmappedSkusUnique,
+      "Source-key conflicts": sourceKeyConflicts.length,
+    },
+  ]);
+
   if (preview.mappingIssues.length > 0) {
     console.log("\nMapping issues (SKUs not in canonical products):");
     for (const issue of preview.mappingIssues) {
@@ -450,14 +610,41 @@ async function main() {
     }
   }
 
+  if (sourceKeyConflicts.length > 0) {
+    console.log("\nExisting source-key conflicts (idempotent upsert targets):");
+    console.table(sourceKeyConflicts.map((row) => ({
+      "Container #": row.container_number,
+      "Source Key": row.source_key,
+      "Existing Container ID": row.id,
+    })));
+  }
+
+  console.log("\nExpected vs Import Comparison:");
+  console.table(comparison.rows);
+  console.log("Checksum:", comparison.checksum);
+  if (comparison.checksum.expectedContainerCount !== comparison.checksum.expectedTargetCount) {
+    console.warn(`Warning: expected container list contains ${comparison.checksum.expectedContainerCount} entries while target count is ${comparison.checksum.expectedTargetCount}.`);
+  }
+  if (comparison.checksum.expectedTotalUnits !== comparison.checksum.expectedTargetUnits) {
+    console.warn(`Warning: expected container list totals ${comparison.checksum.expectedTotalUnits} units while target units are ${comparison.checksum.expectedTargetUnits}.`);
+  }
+
   const reportBase = args.reportOut || `./tmp/import-reports/container-import-preview-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
   const previewReportPath = writeReport(reportBase, {
     generatedAt: new Date().toISOString(),
     mode: args.apply ? "apply" : "preview",
     input: path.resolve(args.input),
+    detection: {
+      sourceRecordCount: candidateCollection.sourceRecordCount,
+      detectedWithSourceId: candidateCollection.detectedWithSourceId,
+      excluded: candidateCollection.exclusionStats,
+      excludedTotal: totalExcluded,
+    },
     totals: preview.totals,
     previewRows: preview.previewRows,
     mappingIssues: preview.mappingIssues,
+    sourceKeyConflicts,
+    expectedComparison: comparison,
   });
   console.log(`\nPreview report: ${previewReportPath}`);
 

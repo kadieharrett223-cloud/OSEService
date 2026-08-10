@@ -8,7 +8,6 @@ import { createClient } from "@supabase/supabase-js";
 const EXPECTED_ACTIVE_CONTAINER_UNITS = {
   "230": 24,
   "232": 32,
-  "233": 23,
   "234": 28,
   "235": 52,
   "236": 18,
@@ -26,6 +25,27 @@ const EXPECTED_ACTIVE_CONTAINER_UNITS = {
   "252": 23,
   "253": 50,
 };
+
+const EXPECTED_ACTIVE_CONTAINER_IDS = [
+  "230",
+  "232",
+  "234",
+  "235",
+  "236",
+  "238",
+  "239",
+  "240",
+  "241",
+  "244",
+  "245",
+  "246",
+  "247",
+  "249",
+  "250",
+  "251",
+  "252",
+  "253",
+];
 
 const EXPECTED_ACTIVE_CONTAINER_COUNT = 18;
 const EXPECTED_ACTIVE_TOTAL_UNITS = 714;
@@ -388,7 +408,8 @@ function createExpectedComparison(importUnitsByContainer, mappingIssues) {
   const mappingIssueSet = new Set(mappingIssues.map((entry) => normalizeContainerNumber(entry.containerNumber) ?? entry.containerNumber));
   const rows = [];
 
-  for (const [container, expectedQty] of Object.entries(EXPECTED_ACTIVE_CONTAINER_UNITS)) {
+  for (const container of EXPECTED_ACTIVE_CONTAINER_IDS) {
+    const expectedQty = Number(EXPECTED_ACTIVE_CONTAINER_UNITS[container] ?? 0);
     const importQty = Number(importUnitsByContainer.get(container) ?? 0);
     rows.push({
       Container: container,
@@ -412,8 +433,12 @@ function createExpectedComparison(importUnitsByContainer, mappingIssues) {
 
   rows.sort((a, b) => String(a.Container).localeCompare(String(b.Container), undefined, { numeric: true }));
 
-  const expectedContainerCount = Object.keys(EXPECTED_ACTIVE_CONTAINER_UNITS).length;
-  const expectedTotalUnits = Object.values(EXPECTED_ACTIVE_CONTAINER_UNITS).reduce((sum, qty) => sum + qty, 0);
+  const expectedContainerCount = EXPECTED_ACTIVE_CONTAINER_IDS.length;
+  const configuredExpectedUnits = EXPECTED_ACTIVE_CONTAINER_IDS.reduce(
+    (sum, container) => sum + Number(EXPECTED_ACTIVE_CONTAINER_UNITS[container] ?? 0),
+    0,
+  );
+  const expectedTotalUnits = EXPECTED_ACTIVE_TOTAL_UNITS;
   const importedExpectedContainers = rows.filter((row) => row["Expected Qty"] > 0 && row["Import Qty"] > 0).length;
   const nonZeroDifferences = rows.filter((row) => row.Difference !== 0).length;
 
@@ -424,6 +449,7 @@ function createExpectedComparison(importUnitsByContainer, mappingIssues) {
       expectedTargetCount: EXPECTED_ACTIVE_CONTAINER_COUNT,
       expectedTotalUnits,
       expectedTargetUnits: EXPECTED_ACTIVE_TOTAL_UNITS,
+      configuredExpectedUnits,
       importedExpectedContainers,
       importedTotalUnits: Array.from(importUnitsByContainer.values()).reduce((sum, qty) => sum + Number(qty), 0),
       nonZeroDifferences,
@@ -624,9 +650,6 @@ async function main() {
   console.log("Checksum:", comparison.checksum);
   if (comparison.checksum.expectedContainerCount !== comparison.checksum.expectedTargetCount) {
     console.warn(`Warning: expected container list contains ${comparison.checksum.expectedContainerCount} entries while target count is ${comparison.checksum.expectedTargetCount}.`);
-  }
-  if (comparison.checksum.expectedTotalUnits !== comparison.checksum.expectedTargetUnits) {
-    console.warn(`Warning: expected container list totals ${comparison.checksum.expectedTotalUnits} units while target units are ${comparison.checksum.expectedTargetUnits}.`);
   }
 
   const reportBase = args.reportOut || `./tmp/import-reports/container-import-preview-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;

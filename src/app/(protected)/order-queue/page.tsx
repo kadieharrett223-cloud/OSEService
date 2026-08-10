@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import { fulfillQueueLineAction } from "@/app/(protected)/product-queue/actions";
 
 type QueueEntry = {
@@ -49,6 +50,13 @@ function formatCurrency(value: number | string | null | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(numeric);
 }
 
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Pending";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Pending";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default async function OrderQueuePage() {
   const supabase = await createClient();
   const { data: queueRows, error } = await supabase
@@ -83,11 +91,11 @@ export default async function OrderQueuePage() {
   const { data: allocationRows } = lineIds.length
     ? await supabase
         .from("inventory_allocations")
-        .select("shipping_order_line_id, quantity, source_type, containers (container_number)")
+        .select("shipping_order_line_id, quantity, source_type, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
         .in("shipping_order_line_id", lineIds)
     : { data: [] };
 
-  const allocationsByLine = (allocationRows ?? []).reduce<Record<string, Array<{ quantity: number; source_type: string; container_number: string | null }>>>((acc, allocation) => {
+  const allocationsByLine = (allocationRows ?? []).reduce<Record<string, Array<{ quantity: number; source_type: string; container_number: string | null; lifecycle_status: string | null; eta: string | null }>>>((acc, allocation) => {
     const lineId = String((allocation as { shipping_order_line_id?: string | null }).shipping_order_line_id ?? "");
     if (!lineId) {
       return acc;
@@ -99,6 +107,10 @@ export default async function OrderQueuePage() {
       quantity: Number((allocation as { quantity?: number | null }).quantity ?? 0),
       source_type: String((allocation as { source_type?: string | null }).source_type ?? "FLOOR"),
       container_number: ((allocation as { containers?: { container_number?: string | null } | null }).containers?.container_number) ?? null,
+      lifecycle_status: ((allocation as { containers?: { lifecycle_status?: string | null } | null }).containers?.lifecycle_status) ?? null,
+      eta: ((allocation as { containers?: { eta_confirmed_date?: string | null; eta_estimated_date?: string | null } | null }).containers?.eta_confirmed_date)
+        ?? ((allocation as { containers?: { eta_confirmed_date?: string | null; eta_estimated_date?: string | null } | null }).containers?.eta_estimated_date)
+        ?? null,
     });
     return acc;
   }, {});
@@ -183,11 +195,29 @@ export default async function OrderQueuePage() {
 
                   {allocations.length > 0 ? (
                     <div className="mt-3 rounded-lg border border-[#d7f7e2] bg-[#f1fdf5] p-3 text-sm text-[#0f6f35]">
-                      Allocated {allocations.map((allocation) => `${allocation.quantity} from ${allocation.container_number ?? allocation.source_type}`).join("; ")}
+                      Allocated {allocations.map((allocation) => {
+                        if (allocation.source_type === "FLOOR") {
+                          return `${allocation.quantity} from On Floor`;
+                        }
+
+                        if (allocation.source_type === "CONTAINER") {
+                          const number = allocation.container_number ?? "Container";
+                          const status = formatStatus(allocation.lifecycle_status);
+                          const eta = formatDate(allocation.eta);
+                          return `${allocation.quantity} from ${number} (${status} · ETA ${eta})`;
+                        }
+
+                        return `${allocation.quantity} from Unassigned`;
+                      }).join("; ")}
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="mt-3 rounded-lg border border-[#f1e7bf] bg-[#fffbeb] p-3 text-sm text-[#92400e]">
+                      Unassigned: no inventory source selected.
+                    </div>
+                  )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
+                    <Link href={`/orders/${line.shipping_orders?.id ?? ""}`} className="btn-secondary">Open Invoice</Link>
                     <form action={fulfillQueueLineAction}>
                       <input type="hidden" name="lineId" value={line.id} />
                       <input type="hidden" name="quantity" value={Math.max(1, Math.min(Number(line.approved_qty ?? 0), Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))))} />

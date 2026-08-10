@@ -123,6 +123,96 @@ export async function addOrderNoteAction(formData: FormData) {
   redirect(`/orders/${orderId}`);
 }
 
+export async function updateOrderLineAssignmentAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  const source = (getString(formData, "assignment_source") ?? "UNASSIGNED").toUpperCase();
+  const containerId = getString(formData, "container_id");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !lineId) {
+    redirect(`/orders/${orderId ?? ""}`);
+  }
+
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, approved_qty, fulfilled_qty")
+    .eq("id", lineId)
+    .maybeSingle();
+
+  const lineRow = line as {
+    id: string;
+    product_id: string;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+  } | null;
+
+  if (lineError || !lineRow) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+  }
+
+  const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
+
+  const { error: clearError } = await adminClient
+    .from("inventory_allocations")
+    .delete()
+    .eq("shipping_order_line_id", lineRow.id);
+
+  if (clearError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
+  }
+
+  if (remainingQty > 0 && source !== "UNASSIGNED") {
+    if (source === "CONTAINER") {
+      if (!containerId) {
+        redirect(`/orders/${orderId}?error=Container+selection+required`);
+      }
+
+      const { error: insertError } = await adminClient.from("inventory_allocations").insert({
+        shipping_order_line_id: lineRow.id,
+        product_id: lineRow.product_id,
+        quantity: remainingQty,
+        allocation_status: "ALLOCATED",
+        source_type: "CONTAINER",
+        container_id: containerId,
+      });
+
+      if (insertError) {
+        redirect(`/orders/${orderId}?error=${encodeURIComponent(insertError.message)}`);
+      }
+    }
+
+    if (source === "FLOOR") {
+      const { error: insertError } = await adminClient.from("inventory_allocations").insert({
+        shipping_order_line_id: lineRow.id,
+        product_id: lineRow.product_id,
+        quantity: remainingQty,
+        allocation_status: "ALLOCATED",
+        source_type: "FLOOR",
+        container_id: null,
+      });
+
+      if (insertError) {
+        redirect(`/orders/${orderId}?error=${encodeURIComponent(insertError.message)}`);
+      }
+    }
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_LINE_ASSIGNMENT_UPDATED", {
+    line_id: lineId,
+    source,
+    container_id: source === "CONTAINER" ? (containerId ?? null) : null,
+    quantity: remainingQty,
+  });
+
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Assignment+updated`);
+}
+
 export async function uploadOrderAttachmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "order_id");

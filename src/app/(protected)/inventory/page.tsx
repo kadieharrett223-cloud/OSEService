@@ -64,6 +64,70 @@ type InventoryRecord = {
   orderCount: number;
 };
 
+type OperationalLine = {
+  id: string;
+  shipping_order_id: string | null;
+  product_id: string | null;
+  ordered_qty: number | null;
+  approved_qty: number | null;
+  fulfilled_qty: number | null;
+  approval_status: string | null;
+  warehouse_status: string | null;
+  fulfillment_status: string | null;
+  priority: string | null;
+  queue_position_start: number | null;
+  products?: {
+    sku: string | null;
+    canonical_name: string | null;
+  } | null;
+  shipping_orders?: {
+    id: string;
+    review_status: string | null;
+    qbo_invoices?: {
+      invoice_number: string | null;
+      customers?: {
+        company_name: string | null;
+        first_name: string | null;
+        last_name: string | null;
+      } | null;
+    } | null;
+  } | null;
+  inventory_allocations?: Array<{
+    quantity: number | null;
+    source_type: string | null;
+    container_id: string | null;
+    containers?: {
+      id: string;
+      container_number: string | null;
+      lifecycle_status: string | null;
+      eta_confirmed_date: string | null;
+      eta_estimated_date: string | null;
+    } | null;
+  }>;
+};
+
+type ReadyOrderGroup = {
+  orderId: string;
+  invoiceNumber: string;
+  customerName: string;
+  reviewStatus: string;
+  linesReady: number;
+  totalOpenLines: number;
+  isReadyToShip: boolean;
+  lines: Array<{
+    id: string;
+    productLabel: string;
+    qtyRequired: number;
+    qtyRemaining: number;
+    sourceLabel: string;
+    sourceState: "ready" | "not-ready" | "unassigned";
+    warehouseStatus: string;
+    priority: string;
+    queuePosition: string;
+    isLineReady: boolean;
+  }>;
+};
+
 function formatNumber(value: number) {
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
   if (Number.isInteger(rounded)) {
@@ -77,6 +141,18 @@ function formatDate(value: string | null | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Pending";
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatShortDate(value: string | null | undefined) {
+  if (!value) return "Pending";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Pending";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatStatus(value: string | null | undefined) {
+  if (!value) return "Pending";
+  return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function getEtaDate(container: ContainerRow) {
@@ -121,6 +197,115 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
   return map;
 }
 
+function buildSourceLabel(line: OperationalLine) {
+  const allocations = line.inventory_allocations ?? [];
+  if (allocations.length === 0) {
+    return { label: "Unassigned", state: "unassigned" as const, readyQty: 0 };
+  }
+
+  let readyQty = 0;
+  const parts = allocations.map((allocation) => {
+    const qty = Number(allocation.quantity ?? 0);
+
+    if (allocation.source_type === "FLOOR") {
+      readyQty += qty;
+      return `${formatNumber(qty)} from On Floor`;
+    }
+
+    if (allocation.source_type === "CONTAINER") {
+      const containerNumber = allocation.containers?.container_number ?? "Container";
+      const status = formatStatus(allocation.containers?.lifecycle_status);
+      const eta = formatShortDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
+      const isReadyContainer = allocation.containers?.lifecycle_status === "RECEIVED";
+      if (isReadyContainer) {
+        readyQty += qty;
+      }
+      return `${containerNumber} · ${status} · ETA ${eta}`;
+    }
+
+    return `${formatNumber(qty)} from Unassigned`;
+  });
+
+  const state = readyQty > 0 ? "ready" : "not-ready";
+  return { label: parts.join("; "), state: state as "ready" | "not-ready", readyQty };
+}
+
+function isWarehouseReady(status: string | null) {
+  return status === "ON_FLOOR" || status === "IN_WAREHOUSE" || status === "READY_TO_SHIP" || status === "PICKED";
+}
+
+function resolveOrderGroups(lines: OperationalLine[]): ReadyOrderGroup[] {
+  const byOrder = new Map<string, ReadyOrderGroup>();
+
+  for (const line of lines) {
+    const orderId = line.shipping_orders?.id ?? line.shipping_order_id ?? "";
+    if (!orderId) continue;
+
+    const invoiceNumber = line.shipping_orders?.qbo_invoices?.invoice_number ?? line.shipping_orders?.id ?? "—";
+    const customerName = line.shipping_orders?.qbo_invoices?.customers?.company_name
+      ?? [line.shipping_orders?.qbo_invoices?.customers?.first_name, line.shipping_orders?.qbo_invoices?.customers?.last_name].filter(Boolean).join(" ")
+      ?? "Customer pending";
+
+    if (!byOrder.has(orderId)) {
+      byOrder.set(orderId, {
+        orderId,
+        invoiceNumber,
+        customerName,
+        reviewStatus: line.shipping_orders?.review_status ?? "PENDING_REVIEW",
+        linesReady: 0,
+        totalOpenLines: 0,
+        isReadyToShip: false,
+        lines: [],
+      });
+    }
+
+    const group = byOrder.get(orderId);
+    if (!group) continue;
+
+    const qtyRequired = Number(line.approved_qty ?? line.ordered_qty ?? 0);
+    const qtyRemaining = Math.max(0, qtyRequired - Number(line.fulfilled_qty ?? 0));
+    if (qtyRemaining <= 0) continue;
+
+    const source = buildSourceLabel(line);
+    const warehouseReady = isWarehouseReady(line.warehouse_status);
+    const lineReady = warehouseReady && source.readyQty >= qtyRemaining;
+
+    group.totalOpenLines += 1;
+    if (lineReady) {
+      group.linesReady += 1;
+    }
+
+    group.lines.push({
+      id: line.id,
+      productLabel: line.products?.sku ?? line.products?.canonical_name ?? "Unmapped product",
+      qtyRequired,
+      qtyRemaining,
+      sourceLabel: source.label,
+      sourceState: source.state,
+      warehouseStatus: formatStatus(line.warehouse_status),
+      priority: formatStatus(line.priority),
+      queuePosition: line.queue_position_start != null ? String(line.queue_position_start) : "—",
+      isLineReady: lineReady,
+    });
+  }
+
+  const groups = Array.from(byOrder.values())
+    .filter((group) => group.totalOpenLines > 0)
+    .map((group) => ({
+      ...group,
+      isReadyToShip: group.totalOpenLines > 0 && group.linesReady === group.totalOpenLines,
+      lines: group.lines.sort((a, b) => a.productLabel.localeCompare(b.productLabel)),
+    }))
+    .sort((a, b) => {
+      if (a.isReadyToShip !== b.isReadyToShip) {
+        return a.isReadyToShip ? -1 : 1;
+      }
+      return a.invoiceNumber.localeCompare(b.invoiceNumber);
+    });
+
+  return groups;
+}
+
 export default async function InventoryOverviewPage({
   searchParams,
 }: {
@@ -139,6 +324,7 @@ export default async function InventoryOverviewPage({
     { data: containerLines },
     { data: shippingOrderLines },
     { data: shippingOrders },
+    { data: operationalLineRows },
   ] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name, status").order("canonical_name", { ascending: true }),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
@@ -155,6 +341,40 @@ export default async function InventoryOverviewPage({
       .from("shipping_orders")
       .select("id, review_status, qbo_invoices(invoice_number)")
       .limit(220),
+    supabase
+      .from("shipping_order_lines")
+      .select(`
+        id,
+        shipping_order_id,
+        product_id,
+        ordered_qty,
+        approved_qty,
+        fulfilled_qty,
+        approval_status,
+        warehouse_status,
+        fulfillment_status,
+        priority,
+        queue_position_start,
+        products (sku, canonical_name),
+        shipping_orders (
+          id,
+          review_status,
+          qbo_invoices (
+            invoice_number,
+            customers (company_name, first_name, last_name)
+          )
+        ),
+        inventory_allocations (
+          quantity,
+          source_type,
+          container_id,
+          containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
+        )
+      `)
+      .in("approval_status", ["APPROVED", "PARTIAL", "PENDING_REVIEW", "HOLD"])
+      .neq("fulfillment_status", "FULFILLED")
+      .order("queue_position_start", { ascending: true, nullsFirst: false })
+      .limit(400),
   ]);
 
   const productRows = (products ?? []) as ProductRow[];
@@ -163,6 +383,7 @@ export default async function InventoryOverviewPage({
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const shippingLineRows = (shippingOrderLines ?? []) as ShippingOrderLineRow[];
   const shippingOrderRows = (shippingOrders ?? []) as ShippingOrderRow[];
+  const operationalLines = (operationalLineRows ?? []) as OperationalLine[];
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -244,6 +465,10 @@ export default async function InventoryOverviewPage({
     return true;
   });
 
+  const readyGroups = resolveOrderGroups(operationalLines);
+  const readyOrders = readyGroups.filter((group) => group.isReadyToShip);
+  const waitingOrders = readyGroups.filter((group) => !group.isReadyToShip);
+
   const availableInventory = inventoryRows.reduce((sum, row) => sum + row.availableNow, 0);
   const soldOpenDemand = inventoryRows.reduce((sum, row) => sum + row.soldOpenDemand, 0);
   const incomingInventory = inventoryRows.reduce((sum, row) => sum + row.incoming, 0);
@@ -264,9 +489,9 @@ export default async function InventoryOverviewPage({
     },
     {
       id: "orders-waiting",
-      title: `${formatNumber(shippingLineRows.filter((row) => row.approval_status === "PENDING_REVIEW").length)} orders waiting for inventory`,
-      href: "/orders?tab=new",
-      action: "View Orders",
+      title: `${formatNumber(waitingOrders.length)} invoices waiting on line readiness`,
+      href: "/orders?tab=accepted",
+      action: "View Customer Queue",
     },
     {
       id: "next-container",
@@ -285,8 +510,8 @@ export default async function InventoryOverviewPage({
   ];
 
   const quickActions = [
-    { label: "Add Container", href: "/containers#add-container" },
-    { label: "View New Orders", href: "/orders?tab=new" },
+    { label: "Open Customer Queue", href: "/order-queue" },
+    { label: "Open Accepted Orders", href: "/orders?tab=accepted" },
     { label: "Low Stock Report", href: "/inventory?lowStock=1" },
     { label: "Inventory Adjustments", href: "/adjustments" },
     { label: "Print Inventory Summary", href: "/inventory" },
@@ -331,11 +556,11 @@ export default async function InventoryOverviewPage({
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Inventory Overview</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Inventory Operations</p>
             <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Inventory</h1>
           </div>
           <div className="flex gap-2">
-            <Link href="/products" className="btn-secondary">Manage Products</Link>
+            <Link href="/order-queue" className="btn-secondary">Customer Queue</Link>
             <Link href="/orders" className="btn-secondary">Open Orders</Link>
           </div>
         </div>
@@ -344,6 +569,11 @@ export default async function InventoryOverviewPage({
       <div className="grid gap-4 xl:grid-cols-[1fr_300px]">
         <div className="min-w-0 space-y-4">
           <div className="grid gap-3 md:grid-cols-5">
+            <article className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Ready Invoices</p>
+              <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatNumber(readyOrders.length)}</p>
+              <p className="mt-1 text-xs text-[#16a34a]">Fully ready to ship</p>
+            </article>
             <article className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">On Floor</p>
               <p className="mt-2 text-3xl font-semibold text-[#111827]">{formatNumber(inventoryRows.reduce((sum, row) => sum + row.onFloor, 0))}</p>
@@ -364,12 +594,85 @@ export default async function InventoryOverviewPage({
               <p className="mt-2 text-3xl font-semibold text-[#7c3aed]">{formatNumber(incomingInventory)}</p>
               <p className="mt-1 text-xs text-[#64748b]">On {formatNumber(activeContainers.length)} containers</p>
             </article>
-            <article className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Low / Out of Stock</p>
-              <p className="mt-2 text-3xl font-semibold text-[#dc2626]">{formatNumber(lowStockCount)}</p>
-              <Link href="/inventory?lowStock=1" className="mt-1 inline-flex text-xs font-semibold text-[#dc2626] hover:underline">View details</Link>
-            </article>
           </div>
+
+          <section className="min-w-0 rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-[#111827]">Ready to Ship</h2>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Order/invoice-level readiness based on line-level assignment and warehouse readiness.</p>
+              </div>
+              <div className="flex gap-2">
+                <Link href="/orders?tab=accepted" className="btn-secondary">Accepted / Waiting</Link>
+                <Link href="/order-queue" className="btn-secondary">Customer Queue</Link>
+              </div>
+            </div>
+
+            <div className="mt-4 max-w-full overflow-x-auto">
+              <table className="w-full min-w-[1220px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.07em] text-[#64748b]">
+                    <th className="px-2 py-2">Invoice</th>
+                    <th className="px-2 py-2">Customer</th>
+                    <th className="px-2 py-2">Products</th>
+                    <th className="px-2 py-2">Qty</th>
+                    <th className="px-2 py-2">Inventory Source / Container</th>
+                    <th className="px-2 py-2">Warehouse Status</th>
+                    <th className="px-2 py-2">Priority</th>
+                    <th className="px-2 py-2 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {readyGroups.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-2 py-8 text-center text-[#6b7280]">No open invoice lines in queue.</td>
+                    </tr>
+                  ) : (
+                    readyGroups.map((group) => (
+                      group.lines.map((line, lineIndex) => (
+                        <tr key={`${group.orderId}-${line.id}`} className="border-b border-[#f1f5f9] align-top hover:bg-[#f8fafc]">
+                          {lineIndex === 0 ? (
+                            <>
+                              <td rowSpan={group.lines.length} className="px-2 py-2">
+                                <Link href={`/orders/${group.orderId}`} className="font-semibold text-[#1d4ed8] hover:underline">Invoice {group.invoiceNumber}</Link>
+                                <div className="mt-1 text-xs text-[#64748b]">
+                                  {group.linesReady} of {group.totalOpenLines} lines ready
+                                </div>
+                                <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${group.isReadyToShip ? "bg-[#dcfce7] text-[#166534]" : "bg-[#fef3c7] text-[#92400e]"}`}>
+                                  {group.isReadyToShip ? "Ready to Ship" : "Waiting / Partial"}
+                                </div>
+                              </td>
+                              <td rowSpan={group.lines.length} className="px-2 py-2">{group.customerName}</td>
+                            </>
+                          ) : null}
+
+                          <td className="px-2 py-2 font-medium text-[#111827]">{line.productLabel}</td>
+                          <td className="px-2 py-2">
+                            <div>Req {formatNumber(line.qtyRequired)}</div>
+                            <div className="text-xs text-[#64748b]">Remain {formatNumber(line.qtyRemaining)}</div>
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className={`${line.sourceState === "unassigned" ? "text-[#b91c1c]" : "text-[#0f172a]"}`}>{line.sourceLabel}</div>
+                            <div className={`mt-1 text-xs ${line.isLineReady ? "text-[#166534]" : "text-[#b45309]"}`}>
+                              {line.isLineReady ? "Line ready" : "Not ready from current source"}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2">{line.warehouseStatus}</td>
+                          <td className="px-2 py-2">
+                            <div>{line.priority}</div>
+                            <div className="text-xs text-[#64748b]">Queue {line.queuePosition}</div>
+                          </td>
+                          <td className="px-2 py-2 text-right">
+                            <Link href={`/orders/${group.orderId}`} className="text-xs font-semibold text-[#2563eb] hover:underline">Open / Reassign</Link>
+                          </td>
+                        </tr>
+                      ))
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           <section className="min-w-0 rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
             <form className="flex flex-wrap items-center gap-2">
@@ -393,20 +696,19 @@ export default async function InventoryOverviewPage({
                 <thead>
                   <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.07em] text-[#64748b]">
                     <th className="px-2 py-2">SKU</th>
-                    <th className="px-2 py-2">Product</th>
                     <th className="px-2 py-2">On Floor</th>
-                    <th className="px-2 py-2">Sold / Demand</th>
+                    <th className="px-2 py-2">Sold / Open Demand</th>
                     <th className="px-2 py-2">Available</th>
                     <th className="px-2 py-2">Incoming</th>
-                    <th className="px-2 py-2">Incoming Containers (ETA)</th>
+                    <th className="px-2 py-2">Containers / ETA</th>
                     <th className="px-2 py-2">Status</th>
-                    <th className="px-2 py-2 text-right">Actions</th>
+                    <th className="px-2 py-2 text-right">Show Orders</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRows.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-2 py-8 text-center text-[#6b7280]">No products match your filters.</td>
+                      <td colSpan={8} className="px-2 py-8 text-center text-[#6b7280]">No products match your filters.</td>
                     </tr>
                   ) : (
                     filteredRows.map((row) => {
@@ -415,7 +717,6 @@ export default async function InventoryOverviewPage({
                       return (
                         <tr key={row.id} className="border-b border-[#f1f5f9] hover:bg-[#f8fafc]">
                           <td className="px-2 py-2 font-semibold text-[#1d4ed8]">{row.sku}</td>
-                          <td className="px-2 py-2">{row.name}</td>
                           <td className="px-2 py-2">{formatNumber(row.onFloor)}</td>
                           <td className="px-2 py-2">{formatNumber(row.soldOpenDemand)}</td>
                           <td className={`px-2 py-2 font-semibold ${row.availableNow <= 0 ? "text-[#dc2626]" : "text-[#111827]"}`}>{formatNumber(row.availableNow)}</td>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { addOrderNoteAction, deleteOrderAttachmentAction, updateOrderLineStatusAction, uploadOrderAttachmentAction } from "../actions";
+import { addOrderNoteAction, deleteOrderAttachmentAction, updateOrderLineAssignmentAction, updateOrderLineStatusAction, uploadOrderAttachmentAction } from "../actions";
 
 type OrderDetailRow = {
   id: string;
@@ -26,8 +26,27 @@ type OrderDetailRow = {
     priority: string | null;
     queue_position_start: number | null;
     products?: { sku: string | null; canonical_name: string | null } | null;
-    inventory_allocations?: Array<{ quantity: number | null; source_type: string | null; containers?: { container_number: string | null } | null }>;
+    inventory_allocations?: Array<{
+      quantity: number | null;
+      source_type: string | null;
+      container_id: string | null;
+      containers?: {
+        id: string;
+        container_number: string | null;
+        lifecycle_status: string | null;
+        eta_confirmed_date: string | null;
+        eta_estimated_date: string | null;
+      } | null;
+    }>;
   }>;
+};
+
+type ContainerOption = {
+  id: string;
+  container_number: string | null;
+  lifecycle_status: string | null;
+  eta_confirmed_date: string | null;
+  eta_estimated_date: string | null;
 };
 
 type OrderActivityEntry = {
@@ -58,11 +77,46 @@ function parseSalesperson(rawPayload: unknown) {
   return typeof salesrep?.name === "string" ? salesrep.name : null;
 }
 
-export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Pending";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Pending";
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatAssignmentSource(line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]) {
+  const allocations = line.inventory_allocations ?? [];
+  if (allocations.length === 0) return "Unassigned";
+
+  return allocations.map((allocation) => {
+    const qty = Number(allocation.quantity ?? 0);
+    if (allocation.source_type === "FLOOR") {
+      return `${qty} from On Floor`;
+    }
+
+    if (allocation.source_type === "CONTAINER") {
+      const number = allocation.containers?.container_number ?? "Container";
+      const status = formatStatus(allocation.containers?.lifecycle_status);
+      const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
+      return `${qty} from ${number} (${status} · ETA ${eta})`;
+    }
+
+    return `${qty} from Unassigned`;
+  }).join("; ");
+}
+
+export default async function OrderDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string; message?: string }>;
+}) {
   const supabase = await createClient();
   const { id } = await params;
+  const { error, message } = await searchParams;
 
-  const [{ data: order }, { data: activityRows }, { data: attachmentRows }] = await Promise.all([
+  const [{ data: order }, { data: activityRows }, { data: attachmentRows }, { data: containerRows }] = await Promise.all([
     supabase
       .from("shipping_orders")
       .select(`
@@ -83,7 +137,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           priority,
           queue_position_start,
           products (sku, canonical_name),
-          inventory_allocations (quantity, source_type, containers (container_number))
+          inventory_allocations (
+            quantity,
+            source_type,
+            container_id,
+            containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
+          )
         )
       `)
       .eq("id", id)
@@ -99,6 +158,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       .select("id, file_name, file_path, file_size, mime_type, created_at")
       .eq("shipping_order_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("containers")
+      .select("id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date")
+      .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
+      .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
   ]);
 
   const orderRecord = order as OrderDetailRow | null;
@@ -107,6 +171,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
   }
+
+  const containerOptions = (containerRows ?? []) as ContainerOption[];
 
   const salesperson = parseSalesperson(orderRecord.qbo_invoices?.raw_payload);
   const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED") ? "Fulfilled" : orderRecord.shipping_order_lines?.some((line) => line.warehouse_status === "IN_WAREHOUSE") ? "In Warehouse" : orderRecord.review_status ?? "Pending";
@@ -124,6 +190,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{error}</div>
+      ) : null}
+
+      {message ? (
+        <div className="rounded-lg border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</div>
+      ) : null}
+
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -168,6 +242,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
                   <p className="mt-1 text-[#5a5a5a]">Ordered {line.ordered_qty ?? 0} • Approved {line.approved_qty ?? 0} • Remaining {remainingQty}</p>
                   <p className="mt-1 text-[#5a5a5a]">Warehouse {formatStatus(line.warehouse_status)} • Fulfillment {formatStatus(line.fulfillment_status)}</p>
+                  <p className="mt-1 text-[#5a5a5a]">Priority {line.priority ?? "NORMAL"} • Queue {line.queue_position_start ?? "—"}</p>
+                  <p className="mt-1 text-[#1f2937]"><span className="font-semibold">Inventory Source:</span> {formatAssignmentSource(line)}</p>
                 </div>
               );
             })}
@@ -216,6 +292,29 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     <button className="btn-secondary">Hold</button>
                   </form>
                 </div>
+              </div>
+
+              <div className="mt-3 rounded-lg border border-[#dbe5f0] bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">Inventory Assignment</p>
+                <p className="mt-1 text-sm text-[#334155]">{formatAssignmentSource(line)}</p>
+                <form action={updateOrderLineAssignmentAction} className="mt-3 grid gap-2 md:grid-cols-[180px_minmax(240px,1fr)_auto]">
+                  <input type="hidden" name="orderId" value={orderRecord.id} />
+                  <input type="hidden" name="lineId" value={line.id} />
+                  <select name="assignment_source" className="select" defaultValue={line.inventory_allocations?.[0]?.source_type ?? "UNASSIGNED"}>
+                    <option value="UNASSIGNED">Unassigned</option>
+                    <option value="FLOOR">On Floor</option>
+                    <option value="CONTAINER">Container</option>
+                  </select>
+                  <select name="container_id" className="select" defaultValue={line.inventory_allocations?.[0]?.container_id ?? ""}>
+                    <option value="">Select container (for Container source)</option>
+                    {containerOptions.map((container) => (
+                      <option key={container.id} value={container.id}>
+                        {(container.container_number ?? "Container")} · {formatStatus(container.lifecycle_status)} · ETA {formatDate(container.eta_confirmed_date ?? container.eta_estimated_date)}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn-secondary" type="submit">Update Assignment</button>
+                </form>
               </div>
             </div>
           ))}

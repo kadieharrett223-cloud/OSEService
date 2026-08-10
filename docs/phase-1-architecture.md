@@ -52,6 +52,7 @@ The app now includes an additive operations layer while preserving the original 
 - Containers remains inbound supply and ETA workflow.
 - Container detail now includes a customer-impact acceptance step: before marking a container received, operators see the affected customer/invoice lines, a confirmation summary, and can run one action to mark only applicable allocated lines as `IN_WAREHOUSE` based on available received quantity for that container.
 - Receipt safeguard: when `received_qty` exists it is always used; if no received quantities are entered, operators must explicitly confirm a full-container receipt before the system uses full container quantities to determine eligible order lines.
+- One-time OLD_ERP opening-data import is supported for active `ON_ORDER` containers only. Import writes container/container-line baseline records with source metadata (`source_system`, `source_record_id`, `source_key`) and does not execute receiving, inventory ledger movements, assignment changes, or customer shipping transitions.
 - My Sales is a read-only salesperson status view over the same shipping data (queue, assignment, ETA, tracking) without shipping controls.
 - Service remains case/install-focused workflow.
 - Settings is admin-gated: an admin code unlock (same validator used by Delete Case) is required before viewing login activity, managing access users, or running QuickBooks connect/sync/disconnect actions.

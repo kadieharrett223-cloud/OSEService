@@ -689,6 +689,9 @@ export type Database = {
           eta_confirmed_date: string | null;
           port_date: string | null;
           notes: string | null;
+          source_system: string | null;
+          source_record_id: string | null;
+          source_key: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -711,6 +714,9 @@ export type Database = {
           eta_confirmed_date?: string | null;
           port_date?: string | null;
           notes?: string | null;
+          source_system?: string | null;
+          source_record_id?: string | null;
+          source_key?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -732,6 +738,9 @@ export type Database = {
           eta_confirmed_date?: string | null;
           port_date?: string | null;
           notes?: string | null;
+          source_system?: string | null;
+          source_record_id?: string | null;
+          source_key?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -744,6 +753,8 @@ export type Database = {
           ordered_qty: number;
           received_qty: number;
           on_order_qty: number;
+          product_mapping_status: string;
+          source_line_ref: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -754,6 +765,8 @@ export type Database = {
           ordered_qty?: number;
           received_qty?: number;
           on_order_qty?: number;
+          product_mapping_status?: string;
+          source_line_ref?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -763,6 +776,8 @@ export type Database = {
           ordered_qty?: number;
           received_qty?: number;
           on_order_qty?: number;
+          product_mapping_status?: string;
+          source_line_ref?: string | null;
           updated_at?: string;
         };
         Relationships: [];

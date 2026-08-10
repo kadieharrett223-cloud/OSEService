@@ -12,15 +12,56 @@ type NavItem = {
   icon: string;
 };
 
-const navGroups: NavItem[][] = [
-  [
-    { href: "/dashboard", label: "Dashboard", matchPath: "/dashboard", icon: "DB" },
-    { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
-    { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
-    { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },
-    { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },
-  ],
-  [{ href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" }],
+type NavGroup = {
+  title?: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
+  {
+    items: [
+      { href: "/dashboard", label: "Dashboard", matchPath: "/dashboard", icon: "DB" },
+    ],
+  },
+  {
+    title: "CRM / Sales",
+    items: [
+      { href: "/customers", label: "Customers", matchPath: "/customers", icon: "CU" },
+      { href: "/quotes", label: "Quotes", matchPath: "/quotes", icon: "QT" },
+      { href: "/sales-orders", label: "Sales Orders", matchPath: "/sales-orders", icon: "SO" },
+    ],
+  },
+  {
+    title: "Shipping",
+    items: [
+      { href: "/shipping-review", label: "Shipping Review", matchPath: "/shipping-review", icon: "SR" },
+      { href: "/product-queue", label: "Product Queue", matchPath: "/product-queue", icon: "PQ" },
+      { href: "/shipments", label: "Shipments", matchPath: "/shipments", icon: "SH" },
+    ],
+  },
+  {
+    title: "Inventory",
+    items: [
+      { href: "/inventory", label: "Inventory Overview", matchPath: "/inventory", icon: "IV" },
+      { href: "/containers", label: "Containers", matchPath: "/containers", icon: "CT" },
+      { href: "/adjustments", label: "Adjustments", matchPath: "/adjustments", icon: "AD" },
+      { href: "/products", label: "Products / Catalog", matchPath: "/products", icon: "PC" },
+      { href: "/reconciliation", label: "Reconciliation", matchPath: "/reconciliation", icon: "RC" },
+    ],
+  },
+  {
+    title: "Service",
+    items: [
+      { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
+      { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
+      { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },
+      { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },
+    ],
+  },
+  {
+    title: "Settings",
+    items: [{ href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" }],
+  },
 ];
 
 function isItemActive(item: NavItem, pathname: string, searchParams: URLSearchParams) {
@@ -45,7 +86,8 @@ function SidebarNavContent() {
     <div className="space-y-3">
       {navGroups.map((group, groupIndex) => (
         <div key={`group-${groupIndex}`} className="space-y-0.5">
-          {group.map((item) => {
+          {group.title ? <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7d8aa6]">{group.title}</p> : null}
+          {group.items.map((item) => {
             const active = isItemActive(item, pathname, searchParams);
 
             return (

@@ -257,6 +257,132 @@ export type Database = {
         };
         Relationships: [];
       };
+      products: {
+        Row: {
+          id: string;
+          sku: string;
+          canonical_name: string;
+          description: string | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          sku: string;
+          canonical_name: string;
+          description?: string | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          sku?: string;
+          canonical_name?: string;
+          description?: string | null;
+          status?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      containers: {
+        Row: {
+          id: string;
+          container_number: string;
+          supplier: string | null;
+          order_date: string | null;
+          entered_date: string | null;
+          deposit_amount: number | null;
+          deposit_date: string | null;
+          final_payment_amount: number | null;
+          final_payment_date: string | null;
+          remaining_balance: number | null;
+          payment_status: string;
+          production_status: string;
+          lifecycle_status: string;
+          tracking_number: string | null;
+          eta_estimated_date: string | null;
+          eta_confirmed_date: string | null;
+          port_date: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          container_number: string;
+          supplier?: string | null;
+          order_date?: string | null;
+          entered_date?: string | null;
+          deposit_amount?: number | null;
+          deposit_date?: string | null;
+          final_payment_amount?: number | null;
+          final_payment_date?: string | null;
+          remaining_balance?: number | null;
+          payment_status?: string;
+          production_status?: string;
+          lifecycle_status?: string;
+          tracking_number?: string | null;
+          eta_estimated_date?: string | null;
+          eta_confirmed_date?: string | null;
+          port_date?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          container_number?: string;
+          supplier?: string | null;
+          order_date?: string | null;
+          entered_date?: string | null;
+          deposit_amount?: number | null;
+          deposit_date?: string | null;
+          final_payment_amount?: number | null;
+          final_payment_date?: string | null;
+          remaining_balance?: number | null;
+          payment_status?: string;
+          production_status?: string;
+          lifecycle_status?: string;
+          tracking_number?: string | null;
+          eta_estimated_date?: string | null;
+          eta_confirmed_date?: string | null;
+          port_date?: string | null;
+          notes?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      container_lines: {
+        Row: {
+          id: string;
+          container_id: string;
+          product_id: string;
+          ordered_qty: number;
+          received_qty: number;
+          on_order_qty: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          container_id: string;
+          product_id: string;
+          ordered_qty?: number;
+          received_qty?: number;
+          on_order_qty?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          container_id?: string;
+          product_id?: string;
+          ordered_qty?: number;
+          received_qty?: number;
+          on_order_qty?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       case_notes: {
         Row: {
           id: string;

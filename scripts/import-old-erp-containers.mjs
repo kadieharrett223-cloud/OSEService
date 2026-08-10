@@ -7,17 +7,17 @@ import { createClient } from "@supabase/supabase-js";
 
 const EXPECTED_ACTIVE_CONTAINER_UNITS = {
   "230": 24,
-  "232": 32,
+  "232": 23,
   "234": 28,
-  "235": 52,
+  "235": 5,
   "236": 18,
   "238": 28,
   "239": 5,
   "240": 48,
-  "241": 11,
+  "241": 115,
   "244": 24,
   "245": 55,
-  "246": 15,
+  "246": 153,
   "247": 31,
   "249": 29,
   "250": 33,
@@ -209,6 +209,7 @@ function normalizeContainerNumber(value) {
 
 function parseLineItems(record) {
   const candidate = pickFirst(record, [
+    "onOrderAppliedItems",
     "lineItems",
     "items",
     "containerLines",

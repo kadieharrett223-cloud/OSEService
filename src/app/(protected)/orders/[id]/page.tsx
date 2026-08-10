@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { addOrderNoteAction, updateOrderLineStatusAction } from "../actions";
 
 type OrderDetailRow = {
   id: string;
@@ -29,6 +30,13 @@ type OrderDetailRow = {
   }>;
 };
 
+type OrderActivityEntry = {
+  id: string;
+  action: string | null;
+  details: Record<string, unknown> | null;
+  created_at: string;
+};
+
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
@@ -45,33 +53,42 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const supabase = await createClient();
   const { id } = await params;
 
-  const { data: order } = await supabase
-    .from("shipping_orders")
-    .select(`
-      id,
-      order_number,
-      review_status,
-      created_at,
-      customers (company_name, full_name, email, phone),
-      qbo_invoices (id, invoice_number, payment_status, invoice_date, raw_payload),
-      shipping_order_lines (
+  const [{ data: order }, { data: activityRows }] = await Promise.all([
+    supabase
+      .from("shipping_orders")
+      .select(`
         id,
-        ordered_qty,
-        approved_qty,
-        fulfilled_qty,
-        approval_status,
-        warehouse_status,
-        fulfillment_status,
-        priority,
-        queue_position_start,
-        products (sku, canonical_name),
-        inventory_allocations (quantity, source_type, containers (container_number))
-      )
-    `)
-    .eq("id", id)
-    .maybeSingle();
+        order_number,
+        review_status,
+        created_at,
+        customers (company_name, full_name, email, phone),
+        qbo_invoices (id, invoice_number, payment_status, invoice_date, raw_payload),
+        shipping_order_lines (
+          id,
+          ordered_qty,
+          approved_qty,
+          fulfilled_qty,
+          approval_status,
+          warehouse_status,
+          fulfillment_status,
+          priority,
+          queue_position_start,
+          products (sku, canonical_name),
+          inventory_allocations (quantity, source_type, containers (container_number))
+        )
+      `)
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("audit_log")
+      .select("id, action, details, created_at")
+      .eq("entity_type", "shipping_order")
+      .eq("entity_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const orderRecord = order as OrderDetailRow | null;
+  const activities = (activityRows ?? []) as OrderActivityEntry[];
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
   }
@@ -133,12 +150,78 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-[#111827]">Workflow actions</h2>
+            <p className="mt-1 text-sm text-[#5a5a5a]">Use these actions to move an order line through review, warehouse, and fulfillment.</p>
+          </div>
+        </div>
+        <div className="mt-4 space-y-3">
+          {(orderRecord.shipping_order_lines ?? []).map((line) => (
+            <div key={line.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
+                  <p className="mt-1 text-sm text-[#5a5a5a]">Approval {formatStatus(line.approval_status)} • Warehouse {formatStatus(line.warehouse_status)}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <form action={updateOrderLineStatusAction}>
+                    <input type="hidden" name="lineId" value={line.id} />
+                    <input type="hidden" name="orderId" value={orderRecord.id} />
+                    <input type="hidden" name="action" value="approve" />
+                    <button className="btn-primary">Approve</button>
+                  </form>
+                  <form action={updateOrderLineStatusAction}>
+                    <input type="hidden" name="lineId" value={line.id} />
+                    <input type="hidden" name="orderId" value={orderRecord.id} />
+                    <input type="hidden" name="action" value="queue" />
+                    <button className="btn-secondary">Queue</button>
+                  </form>
+                  <form action={updateOrderLineStatusAction}>
+                    <input type="hidden" name="lineId" value={line.id} />
+                    <input type="hidden" name="orderId" value={orderRecord.id} />
+                    <input type="hidden" name="action" value="fulfill" />
+                    <button className="btn-secondary">Fulfill</button>
+                  </form>
+                  <form action={updateOrderLineStatusAction}>
+                    <input type="hidden" name="lineId" value={line.id} />
+                    <input type="hidden" name="orderId" value={orderRecord.id} />
+                    <input type="hidden" name="action" value="hold" />
+                    <button className="btn-secondary">Hold</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#111827]">Add note</h2>
+        <form action={addOrderNoteAction} className="mt-3 space-y-3">
+          <input type="hidden" name="orderId" value={orderRecord.id} />
+          <textarea name="message" rows={3} className="w-full rounded-xl border border-[#d1d5db] p-3 text-sm" placeholder="Add an operational note for this order" />
+          <button className="btn-primary">Save note</button>
+        </form>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <h2 className="text-xl font-semibold text-[#111827]">Timeline</h2>
-        <p className="mt-1 text-sm text-[#5a5a5a]">This operational timeline is intentionally simple for the first pass and can be extended as workflow events are captured.</p>
+        <p className="mt-1 text-sm text-[#5a5a5a]">Operational history is captured here as order events are recorded.</p>
         <div className="mt-4 space-y-2">
-          <div className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm text-[#374151]">Payment received from QuickBooks • System • {new Date(orderRecord.created_at).toLocaleString()}</div>
-          <div className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm text-[#374151]">Order entered shipping review • System • {new Date(orderRecord.created_at).toLocaleString()}</div>
-          <div className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm text-[#374151]">Order marked as {formatStatus(orderRecord.review_status)} • System • {new Date(orderRecord.created_at).toLocaleString()}</div>
+          {activities.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-4 text-sm text-[#6b7280]">No activity has been recorded yet.</div>
+          ) : null}
+          {activities.map((activity) => {
+            const activityLabel = (activity.action ?? "ORDER_EVENT").replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+            return (
+              <div key={activity.id} className="rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm text-[#374151]">
+                <div className="font-semibold text-[#111827]">{activityLabel}</div>
+                <div className="mt-1 text-[#5a5a5a]">{activity.details ? JSON.stringify(activity.details) : "No details"}</div>
+                <div className="mt-1 text-xs text-[#6b7280]">{new Date(activity.created_at).toLocaleString()}</div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

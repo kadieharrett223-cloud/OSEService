@@ -270,7 +270,7 @@ export default async function InventoryPage({
     <div className="space-y-5">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Inventory</p>
-        <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Can I Sell This?</h1>
+        <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Lift Availability</h1>
         <p className="mt-2 text-sm text-[#5a5a5a]">Search product availability, incoming containers/ETA, and approved customer queue by SKU.</p>
       </div>
 

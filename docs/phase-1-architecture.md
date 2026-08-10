@@ -46,7 +46,7 @@ The app now includes an additive operations layer while preserving the original 
 
 - Main Dashboard is now company-wide: Inventory, Orders, Containers, Service widgets, plus cross-domain Recent Activity links.
 - Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
-- Inventory remains the product/stock workspace.
+- Inventory remains the product/stock workspace and now uses an operations board layout: top inventory KPIs, filterable SKU table, right-rail alerts/actions, incoming container summary, and low-stock SKU panel.
 - Orders remains the shipping acceptance and fulfillment workflow.
 - Containers remains inbound supply and ETA workflow.
 - Service remains case/install-focused workflow.

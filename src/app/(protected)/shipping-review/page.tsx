@@ -1,8 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { approveReviewLineAction, holdReviewLineAction } from "./actions";
+import Link from "next/link";
 
 type ReviewLine = {
   id: string;
+  product_id: string | null;
   qbo_sku: string | null;
   source_description: string | null;
   ordered_qty: number | null;
@@ -10,6 +12,10 @@ type ReviewLine = {
   warehouse_status: string | null;
   fulfillment_status: string | null;
   qbo_invoice_id: string | null;
+  products?: {
+    canonical_name: string | null;
+    sku: string | null;
+  } | null;
   qbo_invoices?: {
     id: string;
     invoice_number: string | null;
@@ -29,12 +35,16 @@ function statusBadgeClass(value: string | null | undefined) {
   return "bg-[#eef2f7] text-[#334155]";
 }
 
-export default async function ShippingReviewPage() {
+export default async function ShippingReviewPage({ searchParams }: { searchParams: Promise<{ productId?: string }> }) {
   const supabase = await createClient();
-  const { data: reviewRows, error } = await supabase
+  const params = await searchParams;
+  const productId = params.productId;
+
+  let query = supabase
     .from("qbo_invoice_lines")
     .select(`
       id,
+      product_id,
       qbo_sku,
       source_description,
       ordered_qty,
@@ -42,12 +52,19 @@ export default async function ShippingReviewPage() {
       warehouse_status,
       fulfillment_status,
       qbo_invoice_id,
+      products (canonical_name, sku),
       qbo_invoices (id, invoice_number, payment_status)
     `)
-    .order("created_at", { ascending: false })
-    .limit(40);
+    .order("created_at", { ascending: false });
+
+  if (productId) {
+    query = query.eq("product_id", productId);
+  }
+
+  const { data: reviewRows, error } = await query.limit(40);
 
   const reviewLines = (reviewRows ?? []) as ReviewLine[];
+  const filteredProductName = reviewLines[0]?.products?.canonical_name ?? reviewLines[0]?.products?.sku ?? null;
 
   return (
     <div className="space-y-6">
@@ -56,6 +73,16 @@ export default async function ShippingReviewPage() {
         <p className="mt-2 text-sm text-[#5a5a5a]">
           Paid QuickBooks invoices enter this queue first. Shipping can review, approve, hold, or remove lines before they become sold or open demand.
         </p>
+        {productId ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <span className="rounded-full bg-[#eef2f7] px-3 py-1 text-[#334155]">
+              Filtered by product: {filteredProductName ?? productId}
+            </span>
+            <Link href="/shipping-review" className="font-semibold text-[#d50917] hover:underline">
+              Clear filter
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

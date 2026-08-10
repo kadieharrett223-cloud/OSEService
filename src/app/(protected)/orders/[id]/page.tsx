@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { addOrderNoteAction, updateOrderLineStatusAction } from "../actions";
+import { addOrderNoteAction, deleteOrderAttachmentAction, updateOrderLineStatusAction, uploadOrderAttachmentAction } from "../actions";
 
 type OrderDetailRow = {
   id: string;
@@ -37,6 +37,15 @@ type OrderActivityEntry = {
   created_at: string;
 };
 
+type OrderAttachmentEntry = {
+  id: string;
+  file_name: string | null;
+  file_path: string | null;
+  file_size: number | null;
+  mime_type: string | null;
+  created_at: string;
+};
+
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
@@ -53,7 +62,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const supabase = await createClient();
   const { id } = await params;
 
-  const [{ data: order }, { data: activityRows }] = await Promise.all([
+  const [{ data: order }, { data: activityRows }, { data: attachmentRows }] = await Promise.all([
     supabase
       .from("shipping_orders")
       .select(`
@@ -85,16 +94,33 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       .eq("entity_type", "shipping_order")
       .eq("entity_id", id)
       .order("created_at", { ascending: false }),
+    supabase
+      .from("order_attachments")
+      .select("id, file_name, file_path, file_size, mime_type, created_at")
+      .eq("shipping_order_id", id)
+      .order("created_at", { ascending: false }),
   ]);
 
   const orderRecord = order as OrderDetailRow | null;
   const activities = (activityRows ?? []) as OrderActivityEntry[];
+  const attachments = (attachmentRows ?? []) as OrderAttachmentEntry[];
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
   }
 
   const salesperson = parseSalesperson(orderRecord.qbo_invoices?.raw_payload);
   const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED") ? "Fulfilled" : orderRecord.shipping_order_lines?.some((line) => line.warehouse_status === "IN_WAREHOUSE") ? "In Warehouse" : orderRecord.review_status ?? "Pending";
+
+  const attachmentLinks = await Promise.all(
+    attachments.map(async (attachment) => {
+      if (!attachment.file_path) return null;
+      const { data } = await supabase.storage.from("case-attachments").createSignedUrl(attachment.file_path, 60 * 60);
+      return {
+        ...attachment,
+        signedUrl: data?.signedUrl ?? null,
+      };
+    }),
+  );
 
   return (
     <div className="space-y-6">
@@ -190,6 +216,39 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     <button className="btn-secondary">Hold</button>
                   </form>
                 </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-[#111827]">Attachments</h2>
+        <form action={uploadOrderAttachmentAction} className="mt-3 space-y-3">
+          <input type="hidden" name="order_id" value={orderRecord.id} />
+          <input type="file" name="attachments" multiple className="block w-full text-sm text-[#374151]" />
+          <button className="btn-primary">Upload files</button>
+        </form>
+
+        <div className="mt-4 space-y-2">
+          {attachmentLinks.filter((item): item is NonNullable<typeof item> => Boolean(item)).length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-4 text-sm text-[#6b7280]">No attachments yet.</div>
+          ) : null}
+          {attachmentLinks.filter((item): item is NonNullable<typeof item> => Boolean(item)).map((attachment) => (
+            <div key={attachment.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm">
+              <div>
+                <p className="font-semibold text-[#111827]">{attachment.file_name}</p>
+                <p className="mt-1 text-[#5a5a5a]">{attachment.mime_type ?? "Attachment"} • {attachment.file_size ? `${Math.round(attachment.file_size / 1024)} KB` : "—"}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {attachment.signedUrl ? (
+                  <a href={attachment.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary inline-flex">Open</a>
+                ) : null}
+                <form action={deleteOrderAttachmentAction}>
+                  <input type="hidden" name="order_id" value={orderRecord.id} />
+                  <input type="hidden" name="attachment_id" value={attachment.id} />
+                  <button className="btn-secondary">Delete</button>
+                </form>
               </div>
             </div>
           ))}

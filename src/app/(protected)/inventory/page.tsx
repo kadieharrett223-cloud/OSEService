@@ -108,29 +108,32 @@ export default async function InventoryOverviewPage({ searchParams }: { searchPa
 
   return (
     <div className="space-y-6">
-      <div className="rounded-[28px] border border-[#e5e7eb] bg-gradient-to-r from-[#111827] via-[#1f2937] to-[#374151] p-5 text-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-[#fbbf24]">Operations Hub</p>
-            <h1 className="mt-2 text-2xl font-semibold">Inventory, Orders, and Containers</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[#e5e7eb]">
-              Move between the core operational views from one prominent top bar.
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Inventory</p>
+            <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Operations Overview</h1>
+            <p className="mt-2 max-w-2xl text-sm text-[#5a5a5a]">
+              Move between inventory, orders, and containers from one compact workspace view.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {tabs.map((tab) => {
-              const isActive = tab.id === activeTab;
-              return (
-                <Link
-                  key={tab.id}
-                  href={`/inventory?tab=${tab.id}`}
-                  className={`rounded-full border px-3.5 py-2 text-sm font-semibold transition ${isActive ? "border-[#fbbf24] bg-[#fbbf24] text-[#111827] shadow-sm" : "border-white/20 bg-white/10 text-white hover:bg-white/20"}`}
-                >
-                  {tab.label}
-                </Link>
-              );
-            })}
-          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTab;
+            return (
+              <Link
+                key={tab.id}
+                href={`/inventory?tab=${tab.id}`}
+                className={`rounded-full border px-3 py-2 text-sm font-semibold transition ${isActive ? "border-[#d50917] bg-[#d50917] text-white shadow-sm" : "border-[#e5e7eb] bg-[#f9fafb] text-[#374151] hover:border-[#d1d5db] hover:bg-[#f3f4f6]"}`}
+              >
+                {tab.label}
+              </Link>
+            );
+          })}
         </div>
       </div>
 

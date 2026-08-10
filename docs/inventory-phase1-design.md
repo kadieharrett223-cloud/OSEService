@@ -267,6 +267,20 @@ It currently provides:
 
 This remains additive and does not alter the existing Service Tracker routes or flow.
 
+### My Sales implementation update
+
+A first-pass My Sales visibility dashboard is now available at [src/app/(protected)/my-sales/page.tsx](src/app/(protected)/my-sales/page.tsx).
+
+It currently provides:
+
+- a read-only dashboard for sales-facing visibility into paid orders that have reached the shipping workflow;
+- search by customer name or invoice number;
+- stage filters for awaiting review, approved/waiting, ready, partial, and shipped orders;
+- expandable invoice details that show line-level product status, inventory context, and queue/container context;
+- role-based visibility through the existing navigation and role helper in [src/lib/roles.ts](src/lib/roles.ts).
+
+This keeps Shipping as the operational owner of approvals, queues, and fulfillment while allowing sales users to see the current state of their customers' orders without editing operational records.
+
 Keep the current service paths and labels:
 
 - Dashboard

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import { canViewMySales } from "@/lib/roles";
 
 type NavItem = {
   href: string;
@@ -24,11 +25,9 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    title: "CRM / Sales",
+    title: "Dashboard",
     items: [
-      { href: "/customers", label: "Customers", matchPath: "/customers", icon: "CU" },
-      { href: "/quotes", label: "Quotes", matchPath: "/quotes", icon: "QT" },
-      { href: "/sales-orders", label: "Sales Orders", matchPath: "/sales-orders", icon: "SO" },
+      { href: "/my-sales", label: "My Sales", matchPath: "/my-sales", icon: "MS" },
     ],
   },
   {
@@ -78,13 +77,18 @@ function isItemActive(item: NavItem, pathname: string, searchParams: URLSearchPa
   return actualValue === expectedValue;
 }
 
-function SidebarNavContent() {
+function SidebarNavContent({ role = "staff" }: { role?: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  const visibleGroups = navGroups.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => item.href !== "/my-sales" || canViewMySales(role)),
+  }));
+
   return (
     <div className="space-y-3">
-      {navGroups.map((group, groupIndex) => (
+      {visibleGroups.map((group, groupIndex) => (
         <div key={`group-${groupIndex}`} className="space-y-0.5">
           {group.title ? <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7d8aa6]">{group.title}</p> : null}
           {group.items.map((item) => {
@@ -117,10 +121,10 @@ function SidebarNavContent() {
   );
 }
 
-export function SidebarNav() {
+export function SidebarNav({ role = "staff" }: { role?: string }) {
   return (
     <Suspense fallback={null}>
-      <SidebarNavContent />
+      <SidebarNavContent role={role} />
     </Suspense>
   );
 }

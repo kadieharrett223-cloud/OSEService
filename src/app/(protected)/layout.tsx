@@ -3,6 +3,7 @@ import { APP_SHORT_NAME } from "@/lib/constants";
 import { signOutAction } from "@/app/(protected)/actions";
 import { SidebarNav } from "@/app/(protected)/sidebar-nav";
 import { TopbarTools } from "@/app/(protected)/topbar-tools";
+import { inferRoleFromName } from "@/lib/roles";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { getQuickbooksConnectionStatus } from "@/lib/quickbooks/integration";
@@ -14,6 +15,7 @@ export default async function ProtectedLayout({
 }) {
   const user = await requireUser();
   const userName = user.fullName ?? "Unknown User";
+  const userRole = inferRoleFromName(user.fullName);
   const supabase = getSupabaseAdmin();
   let quickbooksStatus = { connection: null, error: null } as Awaited<ReturnType<typeof getQuickbooksConnectionStatus>>;
   let quickbooksSnapshotCount = 0;
@@ -50,7 +52,7 @@ export default async function ProtectedLayout({
             <p className="mt-1 text-xl leading-none text-white">{APP_SHORT_NAME}</p>
           </div>
           <p className="px-2 pb-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#9aa7bc]">Workflow Menu</p>
-          <SidebarNav />
+          <SidebarNav role={userRole} />
         </aside>
 
         <div className="flex min-w-0 flex-col">

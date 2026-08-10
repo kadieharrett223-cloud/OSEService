@@ -472,7 +472,30 @@ async function getSourceKeyConflicts(supabase, sourceKeys) {
   return data ?? [];
 }
 
-async function applyImport(supabase, candidates, productMap) {
+async function detectSchemaSupport(supabase) {
+  const support = {
+    containersSourceMetadata: false,
+    containerLinesSourceMetadata: false,
+  };
+
+  const { error: containerMetaError } = await supabase
+    .from("containers")
+    .select("id, source_key")
+    .limit(1);
+
+  support.containersSourceMetadata = !containerMetaError;
+
+  const { error: lineMetaError } = await supabase
+    .from("container_lines")
+    .select("id, product_mapping_status, source_line_ref")
+    .limit(1);
+
+  support.containerLinesSourceMetadata = !lineMetaError;
+
+  return support;
+}
+
+async function applyImport(supabase, candidates, productMap, schemaSupport) {
   const results = {
     containersUpserted: 0,
     linesUpserted: 0,
@@ -503,14 +526,17 @@ async function applyImport(supabase, candidates, productMap) {
       remaining_balance: candidate.remainingBalance,
       lifecycle_status: candidate.lifecycleStatus,
       notes: baseNotes.length > 0 ? baseNotes.join("\n\n") : null,
-      source_system: candidate.sourceSystem,
-      source_record_id: candidate.sourceRecordId,
-      source_key: candidate.sourceKey,
     };
+
+    if (schemaSupport.containersSourceMetadata) {
+      payload.source_system = candidate.sourceSystem;
+      payload.source_record_id = candidate.sourceRecordId;
+      payload.source_key = candidate.sourceKey;
+    }
 
     const { data: upsertedContainer, error: upsertContainerError } = await supabase
       .from("containers")
-      .upsert(payload, { onConflict: "source_key" })
+      .upsert(payload, { onConflict: schemaSupport.containersSourceMetadata ? "source_key" : "container_number" })
       .select("id")
       .single();
 
@@ -541,9 +567,12 @@ async function applyImport(supabase, candidates, productMap) {
         ordered_qty: line.orderedQty,
         on_order_qty: line.orderedQty,
         received_qty: line.receivedQty > 0 ? line.receivedQty : 0,
-        product_mapping_status: "MAPPED",
-        source_line_ref: line.sourceLineRef,
       };
+
+      if (schemaSupport.containerLinesSourceMetadata) {
+        linePayload.product_mapping_status = "MAPPED";
+        linePayload.source_line_ref = line.sourceLineRef;
+      }
 
       const { error: lineError } = await supabase
         .from("container_lines")
@@ -593,12 +622,15 @@ async function main() {
   });
 
   const productMap = await loadProductMap(supabase);
+  const schemaSupport = await detectSchemaSupport(supabase);
   const preview = createPreview(candidates, productMap);
   const comparison = createExpectedComparison(preview.importUnitsByContainer, preview.mappingIssues);
-  const sourceKeyConflicts = await getSourceKeyConflicts(
-    supabase,
-    candidates.map((candidate) => candidate.sourceKey),
-  );
+  const sourceKeyConflicts = schemaSupport.containersSourceMetadata
+    ? await getSourceKeyConflicts(
+      supabase,
+      candidates.map((candidate) => candidate.sourceKey),
+    )
+    : [];
   const totalExcluded = Object.values(candidateCollection.exclusionStats).reduce((sum, count) => sum + count, 0);
 
   console.log("\n=== OLD_ERP Container Import Preview ===\n");
@@ -609,6 +641,13 @@ async function main() {
   }
 
   console.log("Totals:", preview.totals);
+  console.log("Schema support:", schemaSupport);
+  if (!schemaSupport.containersSourceMetadata) {
+    console.warn("Warning: containers source metadata columns are missing. Fallback idempotency will use unique container_number.");
+  }
+  if (!schemaSupport.containerLinesSourceMetadata) {
+    console.warn("Warning: container_lines source metadata columns are missing. Source line metadata will not be persisted.");
+  }
 
   console.log("\nDetection/Exclusion Summary:");
   console.table([
@@ -636,13 +675,15 @@ async function main() {
     }
   }
 
-  if (sourceKeyConflicts.length > 0) {
+  if (schemaSupport.containersSourceMetadata && sourceKeyConflicts.length > 0) {
     console.log("\nExisting source-key conflicts (idempotent upsert targets):");
     console.table(sourceKeyConflicts.map((row) => ({
       "Container #": row.container_number,
       "Source Key": row.source_key,
       "Existing Container ID": row.id,
     })));
+  } else if (!schemaSupport.containersSourceMetadata) {
+    console.log("\nSource-key conflicts: not available (source_key column missing in target schema).");
   }
 
   console.log("\nExpected vs Import Comparison:");
@@ -663,6 +704,7 @@ async function main() {
       excluded: candidateCollection.exclusionStats,
       excludedTotal: totalExcluded,
     },
+    schemaSupport,
     totals: preview.totals,
     previewRows: preview.previewRows,
     mappingIssues: preview.mappingIssues,
@@ -676,7 +718,7 @@ async function main() {
     return;
   }
 
-  const results = await applyImport(supabase, candidates, productMap);
+  const results = await applyImport(supabase, candidates, productMap, schemaSupport);
   const applyReportPath = writeReport(
     previewReportPath.replace("preview", "apply"),
     {

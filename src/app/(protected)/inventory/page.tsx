@@ -78,11 +78,6 @@ type InventoryViewRow = {
   }>;
 };
 
-type LegacyUnmappedLineRow = {
-  legacy_item_code: string | null;
-  legacy_matched_item_code: string | null;
-};
-
 function formatNumber(value: number) {
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
   if (Number.isInteger(rounded)) return new Intl.NumberFormat("en-US").format(rounded);
@@ -178,7 +173,6 @@ export default async function InventoryPage({
     { data: transactions },
     { data: containerLines },
     { data: queueLines },
-    { data: unmappedLegacyLines },
   ] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true }),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
@@ -211,27 +205,15 @@ export default async function InventoryPage({
       .in("approval_status", ["APPROVED", "PARTIAL"])
       .neq("fulfillment_status", "FULFILLED")
       .order("queue_position_start", { ascending: true, nullsFirst: false }),
-    supabase
-      .from("shipping_order_lines")
-      .select("legacy_item_code, legacy_matched_item_code")
-      .eq("source_system", "OLD_ERP")
-      .is("product_id", null)
-      .limit(1000),
   ]);
 
   const productRows = (products ?? []) as ProductRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-  const legacyUnmappedRows = (unmappedLegacyLines ?? []) as LegacyUnmappedLineRow[];
 
   const backlogUnmappedFromReport = readLatestBacklogUnmappedSkus();
-  const backlogUnmappedFromDb = legacyUnmappedRows
-    .flatMap((row) => [row.legacy_matched_item_code, row.legacy_item_code])
-    .map((value) => normalizeSku(value))
-    .filter((value) => value.length > 0);
-
-  const backlogUnmappedSkus = Array.from(new Set([...backlogUnmappedFromReport, ...backlogUnmappedFromDb])).sort((a, b) => a.localeCompare(b));
+  const backlogUnmappedSkus = Array.from(new Set(backlogUnmappedFromReport)).sort((a, b) => a.localeCompare(b));
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -373,7 +355,7 @@ export default async function InventoryPage({
         <div className="mt-3">
           <p className="text-sm font-semibold text-[#334155]">Unmapped backlog SKUs</p>
           {backlogUnmappedSkus.length === 0 ? (
-            <p className="mt-1 text-sm text-[#64748b]">None detected from DB/report context.</p>
+            <p className="mt-1 text-sm text-[#64748b]">None detected from latest backlog preview report.</p>
           ) : (
             <div className="mt-2 flex flex-wrap gap-2">
               {backlogUnmappedSkus.map((sku) => (

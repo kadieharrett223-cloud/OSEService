@@ -283,7 +283,7 @@ export default async function ContainerDetailPage({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-3xl font-semibold text-[#111827]">{container.container_number}</h1>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Review the product lines, logistics, and payment details for this container.</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Review the product lines and logistics details for this container.</p>
           </div>
           <Link href="/containers" className="btn-secondary">Back to Containers</Link>
         </div>
@@ -445,19 +445,11 @@ export default async function ContainerDetailPage({
           </div>
 
           <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-[#111827]">Payment & Logistics</h2>
+            <h2 className="text-xl font-semibold text-[#111827]">Logistics</h2>
             <dl className="mt-4 space-y-3 text-sm text-[#374151]">
               <div className="flex justify-between gap-4">
                 <dt className="font-medium text-[#6b7280]">Payment Status</dt>
                 <dd>{container.payment_status ?? "—"}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="font-medium text-[#6b7280]">Deposit</dt>
-                <dd>{formatCurrency(container.deposit_amount)}{container.deposit_date ? ` • ${formatDate(container.deposit_date)}` : ""}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="font-medium text-[#6b7280]">Final Payment</dt>
-                <dd>{formatCurrency(container.final_payment_amount)}{container.final_payment_date ? ` • ${formatDate(container.final_payment_date)}` : ""}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="font-medium text-[#6b7280]">Remaining Balance</dt>

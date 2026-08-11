@@ -10,13 +10,6 @@ function formatDate(value: string | null | undefined) {
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function formatCurrency(value: number | string | null | undefined) {
-  if (value === null || value === undefined || value === "") return "—";
-  const numeric = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(numeric)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(numeric);
-}
-
 function getEtaDisplay(container: {
   entered_date: string | null;
   eta_confirmed_date: string | null;
@@ -74,10 +67,6 @@ export default async function ContainersPage({
       tracking_number,
       eta_confirmed_date,
       eta_estimated_date,
-      deposit_amount,
-      deposit_date,
-      final_payment_amount,
-      final_payment_date,
       remaining_balance,
       notes,
       container_lines (
@@ -153,8 +142,6 @@ export default async function ContainersPage({
                   <th className="px-3 py-3 font-semibold">Supplier</th>
                   <th className="px-3 py-3 font-semibold">Status</th>
                   <th className="px-3 py-3 font-semibold">Order / Entered</th>
-                  <th className="px-3 py-3 font-semibold">Deposit</th>
-                  <th className="px-3 py-3 font-semibold">Final Payment</th>
                   <th className="px-3 py-3 font-semibold">Tracking / ETA</th>
                   <th className="px-3 py-3 font-semibold">Products / Units</th>
                   <th className="px-3 py-3 font-semibold">Action</th>
@@ -173,10 +160,6 @@ export default async function ContainersPage({
                     tracking_number: string | null;
                     eta_confirmed_date: string | null;
                     eta_estimated_date: string | null;
-                    deposit_amount: number | null;
-                    deposit_date: string | null;
-                    final_payment_amount: number | null;
-                    final_payment_date: string | null;
                     remaining_balance: number | null;
                     notes: string | null;
                     container_lines?: Array<{ ordered_qty: number | null }>;
@@ -202,14 +185,6 @@ export default async function ContainersPage({
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{formatDate(typedContainer.order_date)}</div>
                         <div className="text-xs text-[#6b7280]">{formatDate(typedContainer.entered_date)}</div>
-                      </td>
-                      <td className="px-3 py-3 text-[#374151]">
-                        <div>{formatCurrency(typedContainer.deposit_amount)}</div>
-                        <div className="text-xs text-[#6b7280]">{formatDate(typedContainer.deposit_date)}</div>
-                      </td>
-                      <td className="px-3 py-3 text-[#374151]">
-                        <div>{formatCurrency(typedContainer.final_payment_amount)}</div>
-                        <div className="text-xs text-[#6b7280]">{formatDate(typedContainer.final_payment_date)}</div>
                       </td>
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{typedContainer.tracking_number ?? "—"}</div>

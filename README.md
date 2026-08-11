@@ -22,6 +22,7 @@ Simple internal web app for customer service case tracking.
 - Attachment uploads (private storage)
 - Activity timeline with persistent history
 - Inventory page SKU mapping panel for creating product aliases against current catalog products
+- Inventory page bulk catalog seed form for pasting SKU CSV rows and creating missing products/aliases
 
 ## Project Structure
 

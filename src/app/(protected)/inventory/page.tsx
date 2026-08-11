@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import fs from "node:fs";
 import path from "node:path";
-import { createProductAliasAction } from "@/app/(protected)/inventory/actions";
+import { createProductAliasAction, seedProductCatalogAction } from "@/app/(protected)/inventory/actions";
 
 type ProductRow = {
   id: string;
@@ -402,6 +402,31 @@ export default async function InventoryPage({
           <div className="flex items-end">
             <button type="submit" className="btn-primary w-full md:w-auto">Save Alias</button>
           </div>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Catalog Seed</p>
+          <h2 className="mt-1 text-xl font-semibold text-[#0f172a]">Bulk Add Products From CSV</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">
+            Paste rows in the same format as the backlog worklist to create missing products and aliases inside the app.
+          </p>
+        </div>
+
+        <form action={seedProductCatalogAction} className="mt-3 space-y-3">
+          <label htmlFor="catalog_csv" className="text-sm font-semibold text-[#334155]">CSV rows</label>
+          <textarea
+            id="catalog_csv"
+            name="catalog_csv"
+            className="input min-h-[180px] w-full font-mono text-xs leading-5"
+            placeholder="sku,total_qty,line_count,containers,description_sample,canonical_product_sku,notes"
+            required
+          />
+          <p className="text-xs text-[#64748b]">
+            Required column: <span className="font-semibold">sku</span>. Optional columns: <span className="font-semibold">canonical_product_sku</span>, <span className="font-semibold">canonical_name</span>, <span className="font-semibold">description_sample</span>, <span className="font-semibold">notes</span>.
+          </p>
+          <button type="submit" className="btn-primary">Seed Catalog</button>
         </form>
       </section>
 

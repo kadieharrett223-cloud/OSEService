@@ -563,6 +563,45 @@ async function getSourceKeyConflicts(supabase, sourceKeys) {
   return data ?? [];
 }
 
+async function upsertContainerBySourceKey(supabase, payload) {
+  const { data: existing, error: existingError } = await supabase
+    .from("containers")
+    .select("id")
+    .eq("source_key", payload.source_key)
+    .maybeSingle();
+
+  if (existingError) {
+    fail(`Could not query existing container for ${payload.source_key}: ${existingError.message}`);
+  }
+
+  if (existing?.id) {
+    const { data: updated, error: updateError } = await supabase
+      .from("containers")
+      .update(payload)
+      .eq("id", existing.id)
+      .select("id")
+      .single();
+
+    if (updateError || !updated?.id) {
+      fail(`Container update failed for ${payload.source_key}: ${updateError?.message ?? "unknown error"}`);
+    }
+
+    return updated;
+  }
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("containers")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  if (insertError || !inserted?.id) {
+    fail(`Container insert failed for ${payload.source_key}: ${insertError?.message ?? "unknown error"}`);
+  }
+
+  return inserted;
+}
+
 async function assertRequiredImportSchema(supabase) {
   const { error: containerMetaError } = await supabase
     .from("containers")
@@ -657,15 +696,7 @@ async function applyImport(supabase, candidates, productMap) {
       continue;
     }
 
-    const { data: upsertedContainer, error: upsertContainerError } = await supabase
-      .from("containers")
-      .upsert(payload, { onConflict: "source_key" })
-      .select("id")
-      .single();
-
-    if (upsertContainerError || !upsertedContainer?.id) {
-      fail(`Container upsert failed for ${candidate.sourceKey}: ${upsertContainerError?.message ?? "unknown error"}`);
-    }
+    const upsertedContainer = await upsertContainerBySourceKey(supabase, payload);
 
     results.containersUpserted += 1;
 

@@ -21,6 +21,7 @@ Simple internal web app for customer service case tracking.
 - Replacement part tracking
 - Attachment uploads (private storage)
 - Activity timeline with persistent history
+- Inventory page SKU mapping panel for creating product aliases against current catalog products
 
 ## Project Structure
 

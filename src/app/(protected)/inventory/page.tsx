@@ -1,5 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import fs from "node:fs";
+import path from "node:path";
+import { createProductAliasAction } from "@/app/(protected)/inventory/actions";
 
 type ProductRow = {
   id: string;
@@ -75,6 +78,11 @@ type InventoryViewRow = {
   }>;
 };
 
+type LegacyUnmappedLineRow = {
+  legacy_item_code: string | null;
+  legacy_matched_item_code: string | null;
+};
+
 function formatNumber(value: number) {
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
   if (Number.isInteger(rounded)) return new Intl.NumberFormat("en-US").format(rounded);
@@ -91,6 +99,37 @@ function formatShortDate(value: string | null | undefined) {
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeSku(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function readLatestBacklogUnmappedSkus() {
+  const reportPath = path.join(process.cwd(), "tmp", "import-reports", "backlog-import-preview-latest.json");
+  if (!fs.existsSync(reportPath)) {
+    return [] as string[];
+  }
+
+  try {
+    const raw = fs.readFileSync(reportPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      preview?: {
+        unmappedSkus?: unknown;
+      };
+    };
+
+    const list = parsed.preview?.unmappedSkus;
+    if (!Array.isArray(list)) {
+      return [] as string[];
+    }
+
+    return list
+      .map((value) => normalizeSku(typeof value === "string" ? value : null))
+      .filter((value) => value.length > 0);
+  } catch {
+    return [] as string[];
+  }
 }
 
 function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: (row: T) => number) {
@@ -126,17 +165,20 @@ function getAssignmentLabel(line: QueueLine) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; mapError?: string; mapMessage?: string }>;
 }) {
   const supabase = await createClient();
   const params = await searchParams;
   const q = String(params.q ?? "").trim().toLowerCase();
+  const mapError = String(params.mapError ?? "").trim();
+  const mapMessage = String(params.mapMessage ?? "").trim();
 
   const [
     { data: products },
     { data: transactions },
     { data: containerLines },
     { data: queueLines },
+    { data: unmappedLegacyLines },
   ] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true }),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
@@ -169,12 +211,27 @@ export default async function InventoryPage({
       .in("approval_status", ["APPROVED", "PARTIAL"])
       .neq("fulfillment_status", "FULFILLED")
       .order("queue_position_start", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("shipping_order_lines")
+      .select("legacy_item_code, legacy_matched_item_code")
+      .eq("source_system", "OLD_ERP")
+      .is("product_id", null)
+      .limit(1000),
   ]);
 
   const productRows = (products ?? []) as ProductRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
+  const legacyUnmappedRows = (unmappedLegacyLines ?? []) as LegacyUnmappedLineRow[];
+
+  const backlogUnmappedFromReport = readLatestBacklogUnmappedSkus();
+  const backlogUnmappedFromDb = legacyUnmappedRows
+    .flatMap((row) => [row.legacy_matched_item_code, row.legacy_item_code])
+    .map((value) => normalizeSku(value))
+    .filter((value) => value.length > 0);
+
+  const backlogUnmappedSkus = Array.from(new Set([...backlogUnmappedFromReport, ...backlogUnmappedFromDb])).sort((a, b) => a.localeCompare(b));
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -287,6 +344,81 @@ export default async function InventoryPage({
             />
             <button className="btn-secondary" type="submit">Search</button>
             <Link className="btn-ghost" href="/inventory">Clear</Link>
+          </div>
+        </form>
+      </section>
+
+      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">SKU Mapping</p>
+            <h2 className="mt-1 text-xl font-semibold text-[#0f172a]">Map Unmapped SKUs</h2>
+            <p className="mt-1 text-sm text-[#5a5a5a]">
+              Add product aliases from this page. All current products are available below as canonical targets.
+            </p>
+          </div>
+          <p className="rounded-md border border-[#dbeafe] bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">
+            Current products: {productRows.length}
+          </p>
+        </div>
+
+        {mapError ? (
+          <p className="mt-3 rounded-md border border-[#fecaca] bg-[#fff1f2] p-2 text-sm text-[#991b1b]">{mapError}</p>
+        ) : null}
+
+        {mapMessage ? (
+          <p className="mt-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] p-2 text-sm text-[#166534]">{mapMessage}</p>
+        ) : null}
+
+        <div className="mt-3">
+          <p className="text-sm font-semibold text-[#334155]">Unmapped backlog SKUs</p>
+          {backlogUnmappedSkus.length === 0 ? (
+            <p className="mt-1 text-sm text-[#64748b]">None detected from DB/report context.</p>
+          ) : (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {backlogUnmappedSkus.map((sku) => (
+                <span key={sku} className="rounded-md border border-[#fed7aa] bg-[#fff7ed] px-2 py-1 text-xs font-semibold text-[#9a3412]">
+                  {sku}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <form action={createProductAliasAction} className="mt-4 grid gap-3 md:grid-cols-[minmax(220px,1fr)_minmax(260px,1.5fr)_auto]">
+          <div>
+            <label htmlFor="alias_sku" className="text-sm font-semibold text-[#334155]">Alias SKU (unmapped)</label>
+            <input
+              id="alias_sku"
+              name="alias_sku"
+              list="inventory-unmapped-skus"
+              className="input mt-1"
+              placeholder="e.g. 4PHR-9"
+              required
+            />
+            <datalist id="inventory-unmapped-skus">
+              {backlogUnmappedSkus.map((sku) => (
+                <option key={sku} value={sku} />
+              ))}
+            </datalist>
+          </div>
+
+          <div>
+            <label htmlFor="product_id" className="text-sm font-semibold text-[#334155]">Canonical Product (all current products)</label>
+            <select id="product_id" name="product_id" className="input mt-1" required defaultValue="">
+              <option value="" disabled>Select product...</option>
+              {productRows.map((product) => {
+                const sku = product.sku ?? "(missing sku)";
+                const name = product.canonical_name ?? "Unnamed Product";
+                return (
+                  <option key={product.id} value={product.id}>{sku} - {name}</option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className="flex items-end">
+            <button type="submit" className="btn-primary w-full md:w-auto">Save Alias</button>
           </div>
         </form>
       </section>

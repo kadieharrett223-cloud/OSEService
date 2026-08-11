@@ -155,52 +155,7 @@ export default async function ContainersPage({
         <div className="rounded-lg border border-[#d7f7e2] bg-[#f1fdf5] p-3 text-sm text-[#0f6f35]">{successMessage}</div>
       ) : null}
 
-      <div className="rounded-2xl border border-[#f6d8a8] bg-[#fffaf2] p-6 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold text-[#8a4b07]">Items Needing Mapping</h2>
-          <span className="rounded-full bg-[#fff1db] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#8a4b07]">
-            {itemsNeedingMapping.length} item{itemsNeedingMapping.length === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        {itemsNeedingMapping.length > 0 ? (
-          <div className="mt-4 overflow-x-auto">
-            <table className="min-w-full divide-y divide-[#f1d7ad] text-sm">
-              <thead className="bg-[#fff6e8] text-left text-[#8a4b07]">
-                <tr>
-                  <th className="px-3 py-3 font-semibold">Container #</th>
-                  <th className="px-3 py-3 font-semibold">SKU</th>
-                  <th className="px-3 py-3 font-semibold">Qty</th>
-                  <th className="px-3 py-3 font-semibold">Mapping Status</th>
-                  <th className="px-3 py-3 font-semibold">Source Ref</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#f5dfba] bg-white">
-                {itemsNeedingMapping.slice(0, 20).map((item) => (
-                  <tr key={`${item.containerNumber}-${item.lineId}`}>
-                    <td className="px-3 py-3 font-medium text-[#111827]">{item.containerNumber}</td>
-                    <td className="px-3 py-3 text-[#374151]">{item.sku}</td>
-                    <td className="px-3 py-3 text-[#374151]">{item.qty}</td>
-                    <td className="px-3 py-3">
-                      <span className="rounded-full bg-[#fff6e8] px-2.5 py-1 text-xs font-semibold text-[#8a4b07]">
-                        {item.mappingStatus}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-[#374151]">{item.sourceLineRef}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {itemsNeedingMapping.length > 20 ? (
-              <p className="mt-2 text-xs text-[#8a4b07]">Showing first 20 items.</p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-[#8a4b07]">No items are currently waiting for product mapping.</p>
-        )}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-[#6b7280]">Incoming / Active</p>
           <p className="mt-2 text-3xl font-semibold text-[#111827]">{incomingContainers.length}</p>
@@ -212,6 +167,10 @@ export default async function ContainersPage({
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-[#6b7280]">Container contents</p>
           <p className="mt-2 text-3xl font-semibold text-[#111827]">{(containers ?? []).reduce((sum, entry) => sum + ((entry as { container_lines?: Array<{ ordered_qty: number | null }> }).container_lines?.length ?? 0), 0)}</p>
+        </div>
+        <div className="rounded-2xl border border-[#f6d8a8] bg-[#fffaf2] p-5 shadow-sm">
+          <p className="text-sm font-medium text-[#8a4b07]">Items Needing Mapping</p>
+          <p className="mt-2 text-3xl font-semibold text-[#8a4b07]">{itemsNeedingMapping.length}</p>
         </div>
       </div>
 

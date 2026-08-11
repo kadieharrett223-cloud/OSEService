@@ -4,10 +4,33 @@ import { useState } from "react";
 
 type AddContainerModalProps = {
   createAction: (formData: FormData) => void | Promise<void>;
+  productSkus: string[];
 };
 
-export function AddContainerModal({ createAction }: AddContainerModalProps) {
+type ProductRow = {
+  id: string;
+  sku: string;
+  qty: string;
+};
+
+export function AddContainerModal({ createAction, productSkus }: AddContainerModalProps) {
   const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<ProductRow[]>([{ id: "row-1", sku: "", qty: "" }]);
+
+  function addRow() {
+    setRows((current) => [...current, { id: `row-${current.length + 1}-${Date.now()}`, sku: "", qty: "" }]);
+  }
+
+  function removeRow(id: string) {
+    setRows((current) => {
+      if (current.length === 1) return [{ ...current[0], sku: "", qty: "" }];
+      return current.filter((row) => row.id !== id);
+    });
+  }
+
+  function updateRow(id: string, key: "sku" | "qty", value: string) {
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, [key]: value } : row)));
+  }
 
   return (
     <>
@@ -87,9 +110,56 @@ export function AddContainerModal({ createAction }: AddContainerModalProps) {
               </div>
 
               <div>
-                <label className="label" htmlFor="products">Products / Quantities</label>
-                <textarea id="products" name="products" rows={6} className="textarea" placeholder="SKU|Qty&#10;ABC-100|10&#10;XYZ-200|4" />
-                <p className="mt-1 text-xs text-[#64748b]">Enter one product per line as SKU|Qty.</p>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="label" htmlFor="product-row-0">Products / Quantities</label>
+                  <button
+                    type="button"
+                    className="rounded-md border border-[#d1d5db] px-2.5 py-1 text-xs font-semibold text-[#374151] hover:bg-[#f3f4f6]"
+                    onClick={addRow}
+                  >
+                    Add Row
+                  </button>
+                </div>
+
+                <datalist id="container-sku-options">
+                  {productSkus.map((sku) => (
+                    <option key={sku} value={sku} />
+                  ))}
+                </datalist>
+
+                <div className="space-y-2">
+                  {rows.map((row, index) => (
+                    <div key={row.id} className="grid grid-cols-[1fr_130px_88px] gap-2">
+                      <input
+                        id={`product-row-${index}`}
+                        name="product_sku"
+                        list="container-sku-options"
+                        className="input"
+                        placeholder="Start typing SKU..."
+                        value={row.sku}
+                        onChange={(event) => updateRow(row.id, "sku", event.target.value.toUpperCase())}
+                      />
+                      <input
+                        name="product_qty"
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="input"
+                        placeholder="Qty"
+                        value={row.qty}
+                        onChange={(event) => updateRow(row.id, "qty", event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-md border border-[#d1d5db] px-2 py-1 text-xs font-semibold text-[#374151] hover:bg-[#f3f4f6]"
+                        onClick={() => removeRow(row.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-1 text-xs text-[#64748b]">Type SKU to see suggestions, then enter quantity.</p>
               </div>
 
               <div>

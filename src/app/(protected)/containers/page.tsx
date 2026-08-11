@@ -55,31 +55,41 @@ export default async function ContainersPage({
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
 
-  const { data: containers, error: containersError } = await supabase
-    .from("containers")
-    .select(`
-      id,
-      container_number,
-      supplier,
-      order_date,
-      entered_date,
-      payment_status,
-      lifecycle_status,
-      tracking_number,
-      eta_confirmed_date,
-      eta_estimated_date,
-      remaining_balance,
-      notes,
-      container_lines (
+  const [{ data: containers, error: containersError }, { data: products }] = await Promise.all([
+    supabase
+      .from("containers")
+      .select(`
         id,
-        ordered_qty,
-        received_qty,
-        product_id,
-        products (sku, canonical_name)
-      )
-    `)
-    .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
-    .order("entered_date", { ascending: false });
+        container_number,
+        supplier,
+        order_date,
+        entered_date,
+        payment_status,
+        lifecycle_status,
+        tracking_number,
+        eta_confirmed_date,
+        eta_estimated_date,
+        remaining_balance,
+        notes,
+        container_lines (
+          id,
+          ordered_qty,
+          received_qty,
+          product_id,
+          products (sku, canonical_name)
+        )
+      `)
+      .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
+      .order("entered_date", { ascending: false }),
+    supabase
+      .from("products")
+      .select("sku")
+      .order("sku", { ascending: true }),
+  ]);
+
+  const skuOptions = (products ?? [])
+    .map((row) => String((row as { sku?: string | null }).sku ?? "").trim().toUpperCase())
+    .filter(Boolean);
 
   const errorMessage = containersError ? "Unable to load container data right now." : params.error ? params.error : null;
   const successMessage = params.success ? params.success : null;
@@ -99,7 +109,7 @@ export default async function ContainersPage({
               Review incoming inventory, logistics, and product detail for each container without changing the service workflow.
             </p>
           </div>
-          <AddContainerModal createAction={createContainerAction} />
+          <AddContainerModal createAction={createContainerAction} productSkus={skuOptions} />
         </div>
       </div>
 

@@ -34,6 +34,26 @@ function parseProductLines(raw: string) {
     .filter((item): item is { sku: string; qty: number } => Boolean(item));
 }
 
+function parseProductRows(formData: FormData) {
+  const skus = formData.getAll("product_sku").map((value) => String(value ?? "").trim());
+  const qtyValues = formData.getAll("product_qty").map((value) => String(value ?? "").trim());
+  const max = Math.max(skus.length, qtyValues.length);
+  const rows: Array<{ sku: string; qty: number }> = [];
+
+  for (let index = 0; index < max; index += 1) {
+    const sku = skus[index] ?? "";
+    const qtyRaw = qtyValues[index] ?? "";
+    if (!sku) continue;
+
+    const qty = Number(qtyRaw || "0");
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    rows.push({ sku, qty });
+  }
+
+  return rows;
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -89,7 +109,8 @@ export async function createContainerAction(formData: FormData) {
     redirect("/containers?error=Could+not+create+container");
   }
 
-  const parsedLines = parseProductLines(productsInput);
+  const parsedRows = parseProductRows(formData);
+  const parsedLines = parsedRows.length > 0 ? parsedRows : parseProductLines(productsInput);
   if (parsedLines.length > 0) {
     for (const line of parsedLines) {
       let productId: string | null = null;

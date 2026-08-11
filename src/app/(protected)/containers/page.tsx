@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireUser } from "@/lib/auth";
 import { createContainerAction } from "./actions";
 
 function formatDate(value: string | null | undefined) {
@@ -57,7 +57,8 @@ export default async function ContainersPage({
 }: {
   searchParams: Promise<{ error?: string; success?: string }>;
 }) {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const params = await searchParams;
 
   const { data: containers, error: containersError } = await supabase

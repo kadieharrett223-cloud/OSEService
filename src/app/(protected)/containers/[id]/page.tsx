@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { ReceiveContainerConfirmForm } from "./receive-container-confirm-form";
 
 type ContainerDetailRow = {
@@ -97,7 +98,8 @@ export default async function ContainerDetailPage({
 }) {
   const { id } = await params;
   const query = await searchParams;
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
 
   const [{ data: containerData, error }, { data: allocationData }] = await Promise.all([
     supabase

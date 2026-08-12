@@ -37,7 +37,6 @@ const navGroups: NavGroup[] = [
     title: "Orders & Shipping",
     items: [
       { href: "/orders", label: "Orders", matchPath: "/orders", icon: "OR" },
-      { href: "/freight-claims", label: "Freight Claims", matchPath: "/freight-claims", icon: "FC" },
       { href: "/schedule", label: "Schedule", matchPath: "/schedule", icon: "SC" },
     ],
   },
@@ -46,6 +45,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/cases?view=service", label: "Service Dashboard", matchPath: "/cases", matchQuery: "view=service", icon: "SD" },
       { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
+      { href: "/freight-claims", label: "Freight Claims", matchPath: "/freight-claims", icon: "FC" },
       { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
       { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },
       { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },

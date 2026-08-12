@@ -160,9 +160,6 @@ export default async function FreightClaimsPage({
           <p className="text-sm text-[#5a5a5a]">Track freight damage claims in the same workflow used for service cases.</p>
         </div>
         <div className="flex gap-2">
-          <Link href="/cases/new?case_type=Freight%20Damage" className="btn-primary">
-            Create Freight Claim
-          </Link>
           <Link href="/cases" className="btn-secondary">
             Cases
           </Link>

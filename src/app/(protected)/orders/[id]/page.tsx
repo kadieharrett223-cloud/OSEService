@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addOrderNoteAction,
   deleteOrderAttachmentAction,
@@ -154,7 +155,8 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const { id } = await params;
   const { error, message } = await searchParams;
 

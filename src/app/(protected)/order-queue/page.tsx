@@ -1,6 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { fulfillQueueLineAction } from "@/app/(protected)/product-queue/actions";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type QueueEntry = {
   id: string;
@@ -58,7 +59,8 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default async function OrderQueuePage() {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const { data: queueRows, error } = await supabase
     .from("shipping_order_lines")
     .select(`

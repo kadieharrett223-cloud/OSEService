@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
 import fs from "node:fs";
 import path from "node:path";
 import { createProductAliasAction, seedProductCatalogAction } from "@/app/(protected)/inventory/actions";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ProductRow = {
   id: string;
@@ -162,7 +163,8 @@ export default async function InventoryPage({
 }: {
   searchParams: Promise<{ q?: string; mapError?: string; mapMessage?: string }>;
 }) {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const q = String(params.q ?? "").trim().toLowerCase();
   const mapError = String(params.mapError ?? "").trim();

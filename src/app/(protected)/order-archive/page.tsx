@@ -1,4 +1,5 @@
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ArchiveEntry = {
   id: string;
@@ -36,7 +37,8 @@ export default async function OrderArchivePage({
 }: {
   searchParams: Promise<{ search?: string }>;
 }) {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const searchText = String(params.search ?? "").trim().toLowerCase();
 

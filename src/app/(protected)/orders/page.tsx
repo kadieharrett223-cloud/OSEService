@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type OrderSummary = {
   id: string;
@@ -53,7 +54,8 @@ function parseSalesperson(rawPayload: unknown) {
 }
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const supabase = await createClient();
+  await requireUser();
+  const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const activeTab = params.tab ?? "review";
 

@@ -161,24 +161,24 @@ export async function updateOrderLineStatusAction(formData: FormData) {
       payload.approval_status = "APPROVED";
       payload.warehouse_status = "ON_FLOOR";
       auditAction = "ORDER_LINE_APPROVED";
-      auditDetails = { action, approval_status: "APPROVED" };
+      auditDetails = { action, line_id: lineId, approval_status: "APPROVED" };
       break;
     case "queue":
       payload.warehouse_status = "IN_WAREHOUSE";
       auditAction = "ORDER_LINE_QUEUED";
-      auditDetails = { action, warehouse_status: "IN_WAREHOUSE" };
+      auditDetails = { action, line_id: lineId, warehouse_status: "IN_WAREHOUSE" };
       break;
     case "fulfill":
       payload.fulfillment_status = "FULFILLED";
       payload.warehouse_status = "FULFILLED";
       auditAction = "ORDER_LINE_FULFILLED";
-      auditDetails = { action, fulfillment_status: "FULFILLED" };
+      auditDetails = { action, line_id: lineId, fulfillment_status: "FULFILLED" };
       break;
     case "hold":
       payload.approval_status = "HOLD";
       payload.warehouse_status = "HOLD";
       auditAction = "ORDER_LINE_HOLD";
-      auditDetails = { action, approval_status: "HOLD" };
+      auditDetails = { action, line_id: lineId, approval_status: "HOLD" };
       break;
     default:
       break;

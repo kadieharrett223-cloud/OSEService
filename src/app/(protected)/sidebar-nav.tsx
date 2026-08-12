@@ -46,9 +46,7 @@ const navGroups: NavGroup[] = [
       { href: "/cases?view=service", label: "Service Dashboard", matchPath: "/cases", matchQuery: "view=service", icon: "SD" },
       { href: "/cases", label: "Cases", matchPath: "/cases", icon: "CS" },
       { href: "/freight-claims", label: "Freight Claims", matchPath: "/freight-claims", icon: "FC" },
-      { href: "/cases/new", label: "Create Case", matchPath: "/cases/new", icon: "CC" },
       { href: "/installation", label: "Installation", matchPath: "/installation", icon: "IN" },
-      { href: "/cases/completed", label: "Archived / Completed", matchPath: "/cases/completed", icon: "AR" },
     ],
   },
   {

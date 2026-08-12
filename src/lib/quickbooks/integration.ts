@@ -558,6 +558,29 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
     })
     .filter((row): row is NonNullable<typeof row> => row !== null);
 
+  const qboInvoiceRows = invoices
+    .map((invoice) => {
+      const invoiceId = String(invoice.Id ?? "").trim();
+      if (!invoiceId) return null;
+
+      const customerRef = invoice.CustomerRef as Record<string, unknown> | undefined;
+      const customerId = typeof customerRef?.value === "string" ? customerRef.value : null;
+      const total = Number(invoice.TotalAmt ?? 0);
+
+      return {
+        qbo_invoice_id: invoiceId,
+        quickbooks_customer_id: customerId,
+        invoice_number: String(invoice.DocNumber ?? invoiceId),
+        invoice_date: typeof invoice.TxnDate === "string" ? invoice.TxnDate : null,
+        total_amount: Number.isFinite(total) ? total : null,
+        payment_status: getPaymentStatus(invoice) ?? "Pending",
+        raw_payload: invoice as unknown as Json,
+        sync_status: "Imported",
+        imported_at: new Date().toISOString(),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
   const customerRows = Array.from(customerMap.values());
 
   if (customerRows.length > 0) {
@@ -582,6 +605,173 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 
       if (invoiceError) {
         throw new Error(invoiceError.message);
+      }
+    }
+  }
+
+  const customerIds = Array.from(new Set(
+    qboInvoiceRows
+      .map((row) => row.quickbooks_customer_id)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  ));
+
+  const customerIdMap = new Map<string, string>();
+  if (customerIds.length > 0) {
+    for (let i = 0; i < customerIds.length; i += 500) {
+      const chunk = customerIds.slice(i, i + 500);
+      const { data: customerMatches, error: customerMatchError } = await supabase
+        .from("customers")
+        .select("id, quickbooks_customer_id")
+        .in("quickbooks_customer_id", chunk);
+
+      if (customerMatchError) {
+        throw new Error(customerMatchError.message);
+      }
+
+      for (const customer of customerMatches ?? []) {
+        if (customer.quickbooks_customer_id) {
+          customerIdMap.set(customer.quickbooks_customer_id, customer.id);
+        }
+      }
+    }
+  }
+
+  const qboInvoicesForUpsert = qboInvoiceRows.map((row) => ({
+    qbo_invoice_id: row.qbo_invoice_id,
+    customer_id: row.quickbooks_customer_id ? customerIdMap.get(row.quickbooks_customer_id) ?? null : null,
+    invoice_number: row.invoice_number,
+    invoice_date: row.invoice_date,
+    payment_status: row.payment_status,
+    total_amount: row.total_amount,
+    raw_payload: row.raw_payload,
+    sync_status: row.sync_status,
+    imported_at: row.imported_at,
+  }));
+
+  if (qboInvoicesForUpsert.length > 0) {
+    for (let i = 0; i < qboInvoicesForUpsert.length; i += 500) {
+      const chunk = qboInvoicesForUpsert.slice(i, i + 500);
+      const { error: qboInvoiceError } = await supabase
+        .from("qbo_invoices")
+        .upsert(chunk, { onConflict: "qbo_invoice_id" });
+
+      if (qboInvoiceError) {
+        throw new Error(qboInvoiceError.message);
+      }
+    }
+  }
+
+  const qboInvoiceIdTexts = qboInvoiceRows.map((row) => row.qbo_invoice_id);
+  const qboInvoiceUuidMap = new Map<string, string>();
+
+  if (qboInvoiceIdTexts.length > 0) {
+    for (let i = 0; i < qboInvoiceIdTexts.length; i += 500) {
+      const chunk = qboInvoiceIdTexts.slice(i, i + 500);
+      const { data: qboInvoices, error: qboInvoiceSelectError } = await supabase
+        .from("qbo_invoices")
+        .select("id, qbo_invoice_id")
+        .in("qbo_invoice_id", chunk);
+
+      if (qboInvoiceSelectError) {
+        throw new Error(qboInvoiceSelectError.message);
+      }
+
+      for (const row of qboInvoices ?? []) {
+        qboInvoiceUuidMap.set(row.qbo_invoice_id, row.id);
+      }
+    }
+  }
+
+  const existingLineMap = new Map<string, {
+    product_id: string | null;
+    mapping_status: string;
+    approval_status: string;
+    warehouse_status: string;
+    allocation_status: string;
+    fulfillment_status: string;
+  }>();
+
+  const qboInvoiceUuids = Array.from(qboInvoiceUuidMap.values());
+  if (qboInvoiceUuids.length > 0) {
+    for (let i = 0; i < qboInvoiceUuids.length; i += 500) {
+      const chunk = qboInvoiceUuids.slice(i, i + 500);
+      const { data: existingLines, error: existingLinesError } = await supabase
+        .from("qbo_invoice_lines")
+        .select("qbo_invoice_id, qbo_line_id, product_id, mapping_status, approval_status, warehouse_status, allocation_status, fulfillment_status")
+        .in("qbo_invoice_id", chunk);
+
+      if (existingLinesError) {
+        throw new Error(existingLinesError.message);
+      }
+
+      for (const line of existingLines ?? []) {
+        existingLineMap.set(`${line.qbo_invoice_id}:${line.qbo_line_id}`, {
+          product_id: line.product_id ?? null,
+          mapping_status: line.mapping_status,
+          approval_status: line.approval_status,
+          warehouse_status: line.warehouse_status,
+          allocation_status: line.allocation_status,
+          fulfillment_status: line.fulfillment_status,
+        });
+      }
+    }
+  }
+
+  const qboLineRows = invoices.flatMap((invoice) => {
+    const invoiceId = String(invoice.Id ?? "").trim();
+    const qboInvoiceId = qboInvoiceUuidMap.get(invoiceId);
+    if (!invoiceId || !qboInvoiceId) return [];
+
+    const lines = Array.isArray(invoice.Line) ? invoice.Line : [];
+    return lines
+      .map((line) => {
+        if (!line || typeof line !== "object") return null;
+
+        const typedLine = line as Record<string, unknown>;
+        const lineId = String(typedLine.Id ?? "").trim();
+        if (!lineId) return null;
+
+        const salesItemDetail = typedLine.SalesItemLineDetail as Record<string, unknown> | undefined;
+        const itemRef = salesItemDetail?.ItemRef as Record<string, unknown> | undefined;
+        const itemName = typeof itemRef?.name === "string" ? itemRef.name.trim() : null;
+        const itemId = typeof itemRef?.value === "string" ? itemRef.value.trim() : null;
+        const description = typeof typedLine.Description === "string"
+          ? typedLine.Description.trim()
+          : itemName;
+        const qty = Number(salesItemDetail?.Qty ?? typedLine.Qty ?? 0);
+        const unitPrice = Number(salesItemDetail?.UnitPrice ?? 0);
+        const lineTotal = Number(typedLine.Amount ?? 0);
+        const existing = existingLineMap.get(`${qboInvoiceId}:${lineId}`);
+
+        return {
+          qbo_invoice_id: qboInvoiceId,
+          qbo_line_id: lineId,
+          qbo_item_id: itemId,
+          qbo_sku: itemName,
+          source_description: description,
+          product_id: existing?.product_id ?? null,
+          ordered_qty: Number.isFinite(qty) ? qty : 0,
+          unit_price: Number.isFinite(unitPrice) ? unitPrice : null,
+          line_total: Number.isFinite(lineTotal) ? lineTotal : null,
+          mapping_status: existing?.mapping_status ?? "PENDING_REVIEW",
+          approval_status: existing?.approval_status ?? "PENDING_REVIEW",
+          warehouse_status: existing?.warehouse_status ?? "PENDING_REVIEW",
+          allocation_status: existing?.allocation_status ?? "UNALLOCATED",
+          fulfillment_status: existing?.fulfillment_status ?? "PENDING",
+        };
+      })
+      .filter((row): row is NonNullable<typeof row> => row !== null);
+  });
+
+  if (qboLineRows.length > 0) {
+    for (let i = 0; i < qboLineRows.length; i += 500) {
+      const chunk = qboLineRows.slice(i, i + 500);
+      const { error: qboLineError } = await supabase
+        .from("qbo_invoice_lines")
+        .upsert(chunk, { onConflict: "qbo_invoice_id,qbo_line_id" });
+
+      if (qboLineError) {
+        throw new Error(qboLineError.message);
       }
     }
   }

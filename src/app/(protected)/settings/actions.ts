@@ -108,6 +108,9 @@ export async function syncQuickbooksAction() {
     revalidatePath("/");
     revalidatePath("/settings");
     revalidatePath("/cases/new");
+    revalidatePath("/shipping-review");
+    revalidatePath("/orders");
+    revalidatePath("/orders/[id]", "page");
     redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers.`)}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

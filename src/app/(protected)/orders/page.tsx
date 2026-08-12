@@ -157,7 +157,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               Shipping operations for review, assignment, warehouse execution, shipment, and final fulfillment.
             </p>
           </div>
-          <Link href="/schedule" className="btn-secondary inline-flex">Open Schedule</Link>
+          <div className="flex gap-2">
+            <Link href="/orders/import" className="btn-primary inline-flex">Bulk Upload Orders</Link>
+            <Link href="/schedule" className="btn-secondary inline-flex">Open Schedule</Link>
+          </div>
         </div>
       </div>
 

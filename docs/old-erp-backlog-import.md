@@ -41,12 +41,25 @@ This prevents backlog imports from double-committing inventory. Open demand stil
 ## Files And Routes
 
 - Import script: `scripts/import-old-erp-backlog.mjs`
+- Bulk upload UI: `src/app/(protected)/orders/import/page.tsx`
+- Bulk upload action: `src/app/(protected)/orders/import/actions.ts`
 - Order confirmation UI: `src/app/(protected)/orders/[id]/page.tsx`
 - Assignment action: `src/app/(protected)/orders/actions.ts`
 - Queue visibility: `src/app/(protected)/order-queue/page.tsx`
 - Inventory visibility: `src/app/(protected)/inventory/page.tsx`
 - Schema: `supabase/migrations/202608110001_old_erp_backlog_import_columns.sql`
 - Schema follow-up: `supabase/migrations/202608120001_old_erp_backlog_assignment_suggestions.sql`
+
+## Bulk Upload Workflow
+
+Protected staff can now run the backlog import from `/orders/import`.
+
+- Upload a `.json` file or paste raw JSON matching the OLD_ERP queue export shape.
+- `Preview Import` stages the payload under the local ignored `imports/backlog/` folder and runs the existing script in preview mode.
+- `Apply Import` stages the payload and runs the same script with `--apply`.
+- Reports are written to `tmp/import-reports/` and shown back in the UI.
+
+This route is intended for local/sandbox operational use where the workspace can write staged files and report files.
 
 ## Risk
 

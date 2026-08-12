@@ -58,6 +58,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const activeTab = params.tab ?? "review";
+  const searchText = String((params as { q?: string }).q ?? "").trim().toLowerCase();
 
   const { data: orders, error } = await supabase
     .from("shipping_orders")
@@ -110,7 +111,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     }
   }
 
-  const orderSummaries = allOrders.filter((order) => matchesTab(order, activeTab));
+  const orderSummaries = allOrders.filter((order) => {
+    if (!matchesTab(order, activeTab)) return false;
+    if (!searchText) return true;
+
+    const searchable = [
+      order.order_number,
+      order.legacy_customer_name,
+      order.customers?.company_name,
+      order.customers?.full_name,
+      order.qbo_invoices?.invoice_number,
+      ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return searchable.includes(searchText);
+  });
 
   const tabCounts = {
     review: allOrders.filter((order) => matchesTab(order, "review")).length,
@@ -144,13 +162,24 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <form method="GET" className="mb-4 flex flex-wrap gap-2">
+          <input type="hidden" name="tab" value={activeTab} />
+          <input
+            name="q"
+            defaultValue={searchText}
+            placeholder="Filter by item number, invoice, or customer"
+            className="input min-w-[280px] flex-1"
+          />
+          <button type="submit" className="btn-secondary">Filter</button>
+          <Link href={`/orders?tab=${activeTab}`} className="btn-ghost">Clear</Link>
+        </form>
         <div className="flex flex-wrap gap-2">
           {tabs.map((tab) => {
             const isActive = tab.id === activeTab;
             return (
               <Link
                 key={tab.id}
-                href={`/orders?tab=${tab.id}`}
+                href={searchText ? `/orders?tab=${tab.id}&q=${encodeURIComponent(searchText)}` : `/orders?tab=${tab.id}`}
                 className={`rounded-full px-3 py-2 text-sm font-semibold ${isActive ? "bg-[#111827] text-white" : "bg-[#f3f4f6] text-[#374151]"}`}
               >
                 {tab.label} ({tabCounts[tab.id as keyof typeof tabCounts] ?? 0})
@@ -163,7 +192,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         {orderSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
-            <p>No orders match this status yet.</p>
+            <p>{searchText ? "No orders match that filter in this status." : "No orders match this status yet."}</p>
             {activeTab === "review" && tabCounts.accepted > 0 ? (
               <p className="mt-2">
                 {tabCounts.accepted} approved open order{tabCounts.accepted === 1 ? "" : "s"} are available under{" "}

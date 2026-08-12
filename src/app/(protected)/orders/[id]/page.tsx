@@ -473,11 +473,11 @@ export default async function OrderDetailPage({
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <input type="hidden" name="lineId" value={line.id} />
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">Mark Shipped</p>
-                <p className="mt-1 text-xs text-[#64748b]">Tracking number and shipment date are required. Carrier is optional if not applicable. Upload shipping docs in Attachments.</p>
+                <p className="mt-1 text-xs text-[#64748b]">Ship this item only. Use Qty for partial shipments and leave the remaining quantity open for backorder. Tracking number and shipment date are required. Carrier is optional.</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-4">
                   <div>
                     <label className="text-xs font-medium text-[#334155]">Qty</label>
-                    <input name="ship_qty" type="number" min="1" step="1" defaultValue={Math.max(1, Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)))} className="input mt-1" />
+                    <input name="ship_qty" type="number" min="1" max={Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))} step="1" defaultValue={Math.max(1, Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)))} className="input mt-1" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-[#334155]">Tracking</label>

@@ -51,6 +51,55 @@ async function writeOrderActivity(
   });
 }
 
+async function syncOrderSummaryState(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+  trackingNumber: string | null,
+  carrier: string | null,
+) {
+  const { data: lines, error: linesError } = await supabase
+    .from("shipping_order_lines")
+    .select("approval_status, warehouse_status, fulfillment_status, approved_qty, fulfilled_qty")
+    .eq("shipping_order_id", orderId);
+
+  if (linesError) {
+    throw new Error(linesError.message);
+  }
+
+  const orderLines = (lines ?? []) as Array<{
+    approval_status: string | null;
+    warehouse_status: string | null;
+    fulfillment_status: string | null;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+  }>;
+
+  const hasLines = orderLines.length > 0;
+  const allFulfilled = hasLines && orderLines.every((line) => (line.fulfillment_status ?? "PENDING") === "FULFILLED");
+  const anyShipped = orderLines.some((line) => {
+    const fulfilledQty = Number(line.fulfilled_qty ?? 0);
+    return fulfilledQty > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED";
+  });
+  const anyHold = orderLines.some((line) => line.approval_status === "HOLD" || line.warehouse_status === "HOLD");
+
+  const reviewStatus = allFulfilled ? "FULFILLED" : anyHold ? "HOLD" : "APPROVED";
+  const fulfillmentStatus = allFulfilled ? "FULFILLED" : anyShipped ? "PARTIALLY_FULFILLED" : "PENDING";
+
+  const { error: orderUpdateError } = await supabase
+    .from("shipping_orders")
+    .update({
+      review_status: reviewStatus,
+      fulfillment_status: fulfillmentStatus,
+      tracking_number: trackingNumber,
+      carrier,
+    })
+    .eq("id", orderId);
+
+  if (orderUpdateError) {
+    throw new Error(orderUpdateError.message);
+  }
+}
+
 export async function updateOrderLineStatusAction(formData: FormData) {
   const lineId = formData.get("lineId")?.toString();
   const orderId = formData.get("orderId")?.toString();
@@ -360,17 +409,11 @@ export async function markOrderLineShippedAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentInsertError.message)}`);
   }
 
-  const { error: orderUpdateError } = await adminClient
-    .from("shipping_orders")
-    .update({
-      tracking_number: trackingNumber,
-      carrier: carrier || null,
-      review_status: isComplete ? "FULFILLED" : "APPROVED",
-    })
-    .eq("id", orderId);
-
-  if (orderUpdateError) {
-    redirect(`/orders/${orderId}?error=${encodeURIComponent(orderUpdateError.message)}`);
+  try {
+    await syncOrderSummaryState(adminClient, orderId, trackingNumber, carrier || null);
+  } catch (orderUpdateError) {
+    const message = orderUpdateError instanceof Error ? orderUpdateError.message : "Unable to update order summary state";
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(message)}`);
   }
 
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_SHIPPED", {

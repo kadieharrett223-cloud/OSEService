@@ -74,8 +74,14 @@ type ContainerOption = {
 type OrderActivityEntry = {
   id: string;
   action: string | null;
+  actor_id?: string | null;
   details: Record<string, unknown> | null;
   created_at: string;
+};
+
+type AccessUserRow = {
+  id: string;
+  full_name: string | null;
 };
 
 type OrderAttachmentEntry = {
@@ -390,6 +396,24 @@ function deriveOverallOrderStatus(lines: NonNullable<OrderDetailRow["shipping_or
   return "Approved";
 }
 
+function deriveItemStatus(item: InvoiceItem) {
+  if (item.isNonInventory) return "N/A";
+  const line = item.shippingLine;
+  if (!line) return "Needs Mapping";
+  if ((line.fulfillment_status ?? "") === "FULFILLED") return "Shipped";
+  if (["READY_TO_SHIP", "IN_WAREHOUSE", "PICKED", "ON_FLOOR"].includes(line.warehouse_status ?? "")) return "Ready to Ship";
+  if ((line.approval_status ?? "") === "HOLD" || (line.warehouse_status ?? "") === "HOLD") return "Hold";
+  return "Waiting";
+}
+
+function itemStatusClass(label: string) {
+  const normalized = label.toUpperCase();
+  if (normalized.includes("READY") || normalized.includes("SHIP") || normalized === "PAID") return "bg-[#e7f7ed] text-[#1b7a43]";
+  if (normalized.includes("WAIT") || normalized.includes("PENDING")) return "bg-[#fff7e6] text-[#b45309]";
+  if (normalized.includes("HOLD")) return "bg-[#fee2e2] text-[#b91c1c]";
+  return "bg-[#eef2f7] text-[#334155]";
+}
+
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   tableName: string,
@@ -483,7 +507,7 @@ export default async function OrderDetailPage({
       .maybeSingle(),
     supabase
       .from("audit_log")
-      .select("id, action, details, created_at")
+      .select("id, action, actor_id, details, created_at")
       .eq("entity_type", "shipping_order")
       .eq("entity_id", id)
       .order("created_at", { ascending: false }),
@@ -544,8 +568,13 @@ export default async function OrderDetailPage({
   }
 
   const quickbooksLineItems = parseInvoiceLineItems(quickbooksSnapshot?.raw_payload);
-  const quickbooksDescriptions = getQuickbooksLineDescriptions(quickbooksSnapshot?.raw_payload);
   const parsedInvoiceItems = parseQuickbooksInvoiceItems(quickbooksSnapshot?.raw_payload);
+
+  const actorIds = Array.from(new Set(activities.map((activity) => activity.actor_id).filter(Boolean))) as string[];
+  const { data: actorRows } = actorIds.length
+    ? await supabase.from("access_users").select("id, full_name").in("id", actorIds)
+    : { data: [] };
+  const actorNameById = new Map((actorRows ?? []).map((row) => [row.id, row.full_name ?? "Unknown user"])) as Map<string, string>;
 
   const containerOptions = (containerRows ?? []) as ContainerOption[];
   const containersById = new Map(containerOptions.map((container) => [container.id, container]));
@@ -598,6 +627,7 @@ export default async function OrderDetailPage({
 
   const orderSourceLabel = orderRecord.source_invoice_id ? "QuickBooks" : "OLD_ERP";
   const importTimestamp = activities.find((activity) => activity.action === "ORDER_IMPORTED")?.created_at ?? orderRecord.created_at;
+  const orderNotes = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED");
 
   const allProductRows = parsedInvoiceItems.length > 0
     ? Array.from(new Set(parsedInvoiceItems.map((item) => item.sku).filter(Boolean)))
@@ -803,56 +833,27 @@ export default async function OrderDetailPage({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
-            <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Order Detail</h1>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Operational workflow for shipping review, warehouse, assignment, shipment, and history.</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"} — Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</h1>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(orderRecord.review_status)}`}>{orderRecord.review_status ?? "APPROVED"}</span>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+            </div>
+            <p className="mt-3 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {quickbooksSnapshot?.shipping_address ?? "Shipping address unavailable"} · Salesperson {salesperson ?? "—"} · Priority {orderLines.some((line) => line.priority === "HIGH" || line.priority === "CRITICAL") ? "HIGH" : orderLines[0]?.priority ?? "NORMAL"}</p>
           </div>
-          <Link href="/orders" className="btn-secondary inline-flex">Back to orders</Link>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
-          <div className="grid gap-4 md:grid-cols-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Customer</p>
-              <p className="mt-2 text-lg font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</p>
-              <p className="mt-1 text-sm text-[#5a5a5a]">{orderRecord.customers?.email ?? "No email"}</p>
-              <p className="text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"}</p>
-              <p className="mt-2 text-sm text-[#5a5a5a]">{quickbooksSnapshot?.shipping_address ?? "Shipping address unavailable"}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Invoice</p>
-              <p className="mt-2 text-lg font-semibold text-[#111827]">#{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</p>
-              <p className="mt-1 text-sm text-[#5a5a5a]">{formatDate(quickbooksSnapshot?.invoice_date)}</p>
-              <p className="mt-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Source</p>
-              <span className="mt-2 inline-flex rounded-full bg-[#e8fff2] px-2.5 py-1 text-xs font-semibold text-[#18794e]">{orderSourceLabel}{orderRecord.source_invoice_id ? " Linked" : " Import"}</span>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Status</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(orderRecord.review_status)}`}>{orderRecord.review_status ?? "PENDING"}</span>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(overallStatus)}`}>{overallStatus.toUpperCase()}</span>
-              </div>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Priority</p>
-              <p className="mt-1 text-sm font-semibold text-[#111827]">{orderLines.some((line) => line.priority === "HIGH" || line.priority === "CRITICAL") ? "HIGH" : orderLines[0]?.priority ?? "NORMAL"}</p>
-            </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Payment Status</p>
-              <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
-              <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]">Total</p>
-              <p className="mt-1 text-sm font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</p>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
-            <div className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Warehouse Snapshot</p>
-              <div className="mt-3 space-y-2 text-sm text-[#374151]">
-                <div className="flex items-center justify-between gap-3"><span>Tracking</span><span className="font-semibold text-[#111827]">{shippingOrderColumnSet.has("tracking_number") ? (orderRecord.tracking_number ?? "Stored on shipments") : "Stored on shipments"}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Carrier</span><span className="font-semibold text-[#111827]">{shippingOrderColumnSet.has("carrier") ? (orderRecord.carrier ?? "Stored on shipments") : "Stored on shipments"}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Salesperson</span><span className="font-semibold text-[#111827]">{salesperson ?? "—"}</span></div>
-              </div>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
+              <details className="group rounded-xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-[#334155]">Edit Order</summary>
+                <form action={updateOrderScheduleAction} className="mt-3 grid min-w-[280px] gap-3">
+                  <input type="hidden" name="orderId" value={orderRecord.id} />
+                  {shippingOrderColumnSet.has("promised_ship_date") ? <input type="date" name="schedule_date" defaultValue={orderRecord.promised_ship_date ?? ""} className="input" /> : null}
+                  {shippingOrderColumnSet.has("shipping_method") ? <input name="shipping_method" defaultValue={orderRecord.shipping_method ?? ""} className="input" placeholder="Shipping method" /> : null}
+                  {shippingOrderColumnSet.has("notes") ? <textarea name="schedule_notes" rows={3} defaultValue={orderRecord.notes ?? ""} className="textarea" placeholder="Operational fields" /> : null}
+                  <button className="btn-secondary" type="submit">Save Order</button>
+                </form>
+              </details>
+            ) : null}
+            <Link href="/orders" className="btn-secondary inline-flex">Back to orders</Link>
           </div>
         </div>
       </div>
@@ -873,8 +874,8 @@ export default async function OrderDetailPage({
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold text-[#111827]">Line Items ({visibleLineCount})</h2>
-                <p className="mt-1 text-sm text-[#5a5a5a]">Every physical order line carries its own warehouse status, allocations, shipments, and history.</p>
+                <h2 className="text-xl font-semibold text-[#111827]">Items & Fulfillment</h2>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Open the order and immediately see what was ordered, where each item is coming from, when it will be available, and what still needs action.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Ordered {visibleOrderedTotal}</span>
@@ -885,190 +886,122 @@ export default async function OrderDetailPage({
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[980px] text-left text-sm">
+              <div className="min-w-[980px]">
                 <thead>
                   <tr className="border-b border-[#edf2f7] text-xs uppercase tracking-[0.08em] text-[#64748b]">
                     <th className="px-2 py-3">#</th>
                     <th className="px-2 py-3">SKU</th>
                     <th className="px-2 py-3">Description</th>
-                    <th className="px-2 py-3">Ordered</th>
-                    <th className="px-2 py-3">Open</th>
-                    <th className="px-2 py-3">Allocation</th>
-                    <th className="px-2 py-3">Suggested Source</th>
+                    <th className="px-2 py-3">Qty</th>
+                    <th className="px-2 py-3">Inventory Source</th>
+                    <th className="px-2 py-3">ETA / Availability</th>
+                    <th className="px-2 py-3">Status</th>
+                    <th className="px-2 py-3">Shipped</th>
                     <th className="px-2 py-3">Actions</th>
                   </tr>
                 </thead>
-                <tbody>
+                <div>
                   {visibleItems.map((item, index) => {
                     const line = item.shippingLine;
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
                     const allocationSummary = line ? summarizeAllocation(line) : (item.isNonInventory ? { label: "N/A", detail: "N/A" } : { label: "UNALLOCATED", detail: "—" });
                     const suggestedInventory = getSuggestedInventory(item);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
+                    const itemStatus = deriveItemStatus(item);
                     return (
-                      <tr key={item.key} className="border-b border-[#f1f5f9] align-top text-[#1f2937]">
-                        <td className="px-2 py-3 font-semibold">{index + 1}</td>
-                        <td className="px-2 py-3 font-semibold text-[#111827]">{item.sku ?? "—"}</td>
-                        <td className="px-2 py-3">
-                          <p className="font-medium text-[#111827]">{item.description}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">{line ? `Warehouse ${formatStatus(line.warehouse_status)} · Fulfillment ${formatStatus(line.fulfillment_status)}` : item.isNonInventory ? "Non-inventory charge" : "Not yet imported into warehouse workflow"}</p>
-                        </td>
-                        <td className="px-2 py-3">{item.orderedQty}</td>
-                        <td className="px-2 py-3">{remainingQty}</td>
-                        <td className="px-2 py-3">
-                          <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${allocationSummary.label === "UNALLOCATED" ? "bg-[#fff1f2] text-[#b91c1c]" : "bg-[#eefbf3] text-[#18794e]"}`}>{allocationSummary.label}</span>
-                          <p className="mt-1 text-xs text-[#64748b]">{allocationSummary.detail}</p>
-                        </td>
-                        <td className="px-2 py-3 text-xs text-[#475569]">
-                          <div>{suggestedInventory.label}</div>
-                          <div className="mt-1 text-[#64748b]">{suggestedInventory.eta}</div>
-                        </td>
-                        <td className="px-2 py-3">
-                          {line ? <details className="group min-w-[190px]">
-                            <summary className="cursor-pointer rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</summary>
-                            <div className="mt-3 space-y-3 rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-3">
-                              <div className="flex flex-wrap gap-2">
-                                {line.approval_status !== "APPROVED" ? <form action={updateOrderLineStatusAction}>
-                                  <input type="hidden" name="lineId" value={line.id} />
-                                  <input type="hidden" name="orderId" value={orderRecord.id} />
-                                  <input type="hidden" name="action" value="approve" />
-                                  <button className="btn-secondary text-xs">Approve</button>
-                                </form> : null}
-                                {line.warehouse_status !== "IN_WAREHOUSE" ? <form action={updateOrderLineStatusAction}>
-                                  <input type="hidden" name="lineId" value={line.id} />
-                                  <input type="hidden" name="orderId" value={orderRecord.id} />
-                                  <input type="hidden" name="action" value="queue" />
-                                  <button className="btn-secondary text-xs">In Warehouse</button>
-                                </form> : null}
-                                {line.approval_status !== "HOLD" ? <form action={updateOrderLineStatusAction}>
-                                  <input type="hidden" name="lineId" value={line.id} />
-                                  <input type="hidden" name="orderId" value={orderRecord.id} />
-                                  <input type="hidden" name="action" value="hold" />
-                                  <button className="btn-secondary text-xs">Hold</button>
-                                </form> : null}
-                              </div>
-                              <form action={updateOrderLineAssignmentAction} className="grid gap-2">
-                                <input type="hidden" name="orderId" value={orderRecord.id} />
-                                <input type="hidden" name="lineId" value={line.id} />
-                                <select name="assignment_source" className="select text-xs" defaultValue={line.inventory_allocations?.[0]?.source_type ?? line.suggested_assignment_source ?? "UNASSIGNED"}>
-                                  <option value="UNASSIGNED">Unassigned</option>
-                                  <option value="FLOOR">On Floor</option>
-                                  <option value="CONTAINER">Container</option>
-                                </select>
-                                <select name="container_id" className="select text-xs" defaultValue={line.inventory_allocations?.[0]?.container_id ?? line.suggested_container_id ?? ""}>
-                                  <option value="">Select container</option>
-                                  {containerOptions.map((container) => (
-                                    <option key={container.id} value={container.id}>
-                                      {(container.container_number ?? "Container")} · {formatStatus(container.lifecycle_status)} · ETA {formatDate(container.eta_confirmed_date ?? container.eta_estimated_date)}
-                                    </option>
-                                  ))}
-                                </select>
-                                <button className="btn-secondary text-xs" type="submit">Save Allocation</button>
-                              </form>
-                              <form action={addOrderNoteAction} className="grid gap-2">
-                                <input type="hidden" name="orderId" value={orderRecord.id} />
-                                <input type="hidden" name="lineId" value={line.id} />
-                                <input type="hidden" name="sku" value={item.sku ?? ""} />
-                                <textarea name="message" rows={2} className="textarea text-xs" placeholder="Add an item note" />
-                                <button className="btn-secondary text-xs" type="submit">Save Item Note</button>
-                              </form>
-                              <p className="text-[11px] text-[#64748b]">Shipments {fulfillmentsByLine[line.id]?.length ?? 0} · History events {lineHistoryCount}</p>
+                      <details key={item.key} className="border-b border-[#f1f5f9] group">
+                        <summary className="grid cursor-pointer grid-cols-[40px_90px_minmax(240px,1.5fr)_80px_170px_150px_120px_90px_120px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
+                          <span className="font-semibold">{index + 1}</span>
+                          <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
+                          <span>
+                            <span className="font-medium text-[#111827]">{item.description}</span>
+                            <span className="mt-1 block text-xs text-[#64748b]">{line ? `Warehouse ${formatStatus(line.warehouse_status)} · Fulfillment ${formatStatus(line.fulfillment_status)}` : item.isNonInventory ? "Non-inventory charge" : "Not yet imported into warehouse workflow"}</span>
+                          </span>
+                          <span>{item.orderedQty}</span>
+                          <span>
+                            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${allocationSummary.label === "UNALLOCATED" ? "bg-[#fff1f2] text-[#b91c1c]" : allocationSummary.label === "N/A" ? "bg-[#eef2f7] text-[#64748b]" : "bg-[#eefbf3] text-[#18794e]"}`}>{allocationSummary.label === "UNALLOCATED" ? suggestedInventory.label : allocationSummary.detail.split(" · ")[0] || allocationSummary.label}</span>
+                            <span className="mt-1 block text-xs text-[#64748b]">{allocationSummary.label === "UNALLOCATED" ? suggestedInventory.detail : allocationSummary.detail}</span>
+                          </span>
+                          <span className="text-xs text-[#475569]">{suggestedInventory.eta}</span>
+                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(itemStatus)}`}>{itemStatus}</span></span>
+                          <span>{Number(line?.fulfilled_qty ?? 0)}</span>
+                          <span>
+                            {line ? <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span> : <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{item.isNonInventory ? "N/A" : "Map SKU"}</span>}
+                          </span>
+                        </summary>
+                        {line ? <div className="grid gap-4 border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4 xl:grid-cols-3">
+                          <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
+                            <h3 className="text-sm font-semibold text-[#111827]">Inventory</h3>
+                            <div className="mt-3 space-y-2 text-sm text-[#374151]">
+                              <div><span className="font-medium text-[#64748b]">Assigned source:</span> {allocationSummary.label === "UNALLOCATED" ? "Unassigned" : allocationSummary.detail}</div>
+                              <div><span className="font-medium text-[#64748b]">ETA:</span> {suggestedInventory.eta}</div>
+                              <div><span className="font-medium text-[#64748b]">Qty assigned:</span> {line.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0}</div>
                             </div>
-                          </details>
-                          : <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{item.isNonInventory ? "N/A" : "Map SKU to manage"}</span>}
-                        </td>
-                      </tr>
+                            <form action={updateOrderLineAssignmentAction} className="mt-4 grid gap-2">
+                              <input type="hidden" name="orderId" value={orderRecord.id} />
+                              <input type="hidden" name="lineId" value={line.id} />
+                              <select name="assignment_source" className="select text-sm" defaultValue={line.inventory_allocations?.[0]?.source_type ?? line.suggested_assignment_source ?? "UNASSIGNED"}>
+                                <option value="UNASSIGNED">Unassigned</option>
+                                <option value="FLOOR">On Floor</option>
+                                <option value="CONTAINER">Container</option>
+                              </select>
+                              <select name="container_id" className="select text-sm" defaultValue={line.inventory_allocations?.[0]?.container_id ?? line.suggested_container_id ?? ""}>
+                                <option value="">Select container</option>
+                                {containerOptions.map((container) => (
+                                  <option key={container.id} value={container.id}>
+                                    {(container.container_number ?? "Container")} · {formatStatus(container.lifecycle_status)} · ETA {formatDate(container.eta_confirmed_date ?? container.eta_estimated_date)}
+                                  </option>
+                                ))}
+                              </select>
+                              <button className="btn-secondary" type="submit">Change Assignment</button>
+                            </form>
+                          </div>
+
+                          <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
+                            <h3 className="text-sm font-semibold text-[#111827]">Shipment</h3>
+                            <div className="mt-3 space-y-2 text-sm text-[#374151]">
+                              {(fulfillmentsByLine[line.id] ?? []).length === 0 ? <p className="text-[#64748b]">No shipments yet.</p> : (fulfillmentsByLine[line.id] ?? []).map((shipment) => (
+                                <div key={shipment.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs">
+                                  <p>{formatDateTime(shipment.fulfilled_at)} · Qty {shipment.fulfilled_qty ?? 0}</p>
+                                  <p>{shipment.carrier ?? "Carrier pending"} · {shipment.tracking_number ?? "Tracking pending"}</p>
+                                </div>
+                              ))}
+                            </div>
+                            <form action={markOrderLineShippedAction} className="mt-4 grid gap-2">
+                              <input type="hidden" name="orderId" value={orderRecord.id} />
+                              <input type="hidden" name="lineId" value={line.id} />
+                              <input name="ship_qty" type="number" min="1" max={remainingQty} step="1" defaultValue={remainingQty > 0 ? 1 : 0} className="input" />
+                              <input name="tracking_number" className="input" placeholder="Tracking #" required />
+                              <input name="carrier" className="input" placeholder="Carrier" />
+                              <input name="shipment_date" type="date" className="input" required />
+                              <button className="btn-primary" type="submit" disabled={remainingQty <= 0}>Mark Shipped</button>
+                            </form>
+                          </div>
+
+                          <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
+                            <h3 className="text-sm font-semibold text-[#111827]">Item Note</h3>
+                            <form action={addOrderNoteAction} className="mt-4 grid gap-2">
+                              <input type="hidden" name="orderId" value={orderRecord.id} />
+                              <input type="hidden" name="lineId" value={line.id} />
+                              <input type="hidden" name="sku" value={item.sku ?? ""} />
+                              <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />
+                              <button className="btn-secondary" type="submit">Save Note</button>
+                            </form>
+                            <p className="mt-3 text-xs text-[#64748b]">History events {lineHistoryCount}</p>
+                          </div>
+                        </div> : null}
+                      </details>
                     );
                   })}
-                </tbody>
-              </table>
+                </div>
+              </div>
             </div>
           </section>
 
           <div className="grid gap-6 xl:grid-cols-2">
-            <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold text-[#111827]">Inventory Allocation</h2>
-                  <p className="mt-1 text-sm text-[#5a5a5a]">Container assignments, ETA visibility, and suggested sources stay visible right beside each product.</p>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
-                  <span className="rounded-full bg-[#fff1f2] px-3 py-1.5 text-[#b91c1c]">Unallocated ({visibleUnallocatedCount})</span>
-                  <span className="rounded-full bg-[#eefbf3] px-3 py-1.5 text-[#18794e]">Allocated ({visibleAllocatedCount})</span>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {visibleItems.map((item) => {
-                  const line = item.shippingLine;
-                  const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
-                  const suggestedInventory = getSuggestedInventory(item);
-                  return (
-                    <div key={item.key} className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-[#111827]">{item.sku ?? "SKU pending"}</p>
-                          <p className="mt-1 text-sm text-[#5a5a5a]">Open Qty {remainingQty}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">Current allocation: {line ? formatAssignmentSource(line) : "Unassigned"}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">Suggested source: {suggestedInventory.label} · {suggestedInventory.eta}</p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="quick-ship">
-              <h2 className="text-xl font-semibold text-[#111827]">Quick Ship (Partial Shipment)</h2>
-              <p className="mt-1 text-sm text-[#5a5a5a]">Ship selected line items. Remaining quantity stays open for backorder.</p>
-              <div className="mt-4 space-y-4">
-                {visibleItems.filter((item) => item.shippingLine && !item.isNonInventory).map((item) => {
-                  const line = item.shippingLine!;
-                  const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-                  return (
-                    <form key={line.id} action={markOrderLineShippedAction} className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-4">
-                      <input type="hidden" name="orderId" value={orderRecord.id} />
-                      <input type="hidden" name="lineId" value={line.id} />
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-[#111827]">{item.sku ?? line.products?.sku ?? "SKU pending"}</p>
-                          <p className="mt-1 text-sm text-[#5a5a5a]">Open Qty {remainingQty} · Shipped {line.fulfilled_qty ?? 0}</p>
-                        </div>
-                        <div className="rounded-full bg-[#f8fafc] px-3 py-1 text-xs font-semibold text-[#475569]">{fulfillmentsByLine[line.id]?.length ?? 0} shipment{(fulfillmentsByLine[line.id]?.length ?? 0) === 1 ? "" : "s"}</div>
-                      </div>
-                      <div className="mt-3 grid gap-2 md:grid-cols-2">
-                        <div>
-                          <label className="text-xs font-medium text-[#334155]">Qty to ship</label>
-                          <input name="ship_qty" type="number" min="1" max={remainingQty} step="1" defaultValue={remainingQty > 0 ? 1 : 0} className="input mt-1" />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-[#334155]">Tracking</label>
-                          <input name="tracking_number" className="input mt-1" placeholder="Enter tracking number" required />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-[#334155]">Carrier</label>
-                          <input name="carrier" className="input mt-1" placeholder="Optional" />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-[#334155]">Ship date</label>
-                          <input name="shipment_date" type="date" className="input mt-1" required />
-                        </div>
-                      </div>
-                      <div className="mt-3 flex justify-end">
-                        <button className="btn-primary" type="submit" disabled={remainingQty <= 0}>Create Shipment</button>
-                      </div>
-                    </form>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
-
-          <div className="grid gap-6 xl:grid-cols-2">
             <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="notes">
-              <h2 className="text-xl font-semibold text-[#111827]">Notes</h2>
-              <p className="mt-1 text-sm text-[#5a5a5a]">Internal order notes stay with the warehouse workflow.</p>
+              <h2 className="text-xl font-semibold text-[#111827]">Order Notes</h2>
+              <p className="mt-1 text-sm text-[#5a5a5a]">Notes record exceptions and customer-specific fulfillment instructions without repeating item data above.</p>
               <form action={addOrderNoteAction} className="mt-4 space-y-3">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <textarea name="message" rows={4} className="w-full rounded-xl border border-[#d1d5db] p-3 text-sm" placeholder="Add a note..." />
@@ -1076,11 +1009,19 @@ export default async function OrderDetailPage({
                   <button className="btn-primary" type="submit">Save Note</button>
                 </div>
               </form>
+              <div className="mt-4 space-y-3">
+                {orderNotes.length === 0 ? <p className="text-sm text-[#6b7280]">No order notes yet.</p> : orderNotes.map((activity) => (
+                  <div key={activity.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-3 text-sm">
+                    <p className="font-semibold text-[#111827]">{formatDateTime(activity.created_at)} — {activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System"}</p>
+                    <p className="mt-1 text-[#5a5a5a]">{typeof activity.details?.message === "string" ? activity.details.message : "Note saved"}</p>
+                  </div>
+                ))}
+              </div>
             </section>
 
             <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-[#111827]">History Timeline</h2>
-              <p className="mt-1 text-sm text-[#5a5a5a]">Order and line-level events are captured here in time order.</p>
+              <h2 className="text-xl font-semibold text-[#111827]">Activity Timeline</h2>
+              <p className="mt-1 text-sm text-[#5a5a5a]">Compact fulfillment history across imports, assignments, receipts, and shipments.</p>
               <div className="mt-4 space-y-3">
                 {activities.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-4 text-sm text-[#6b7280]">No history has been recorded yet.</div>
@@ -1092,6 +1033,7 @@ export default async function OrderDetailPage({
                       <div className="flex-1">
                         <p className="font-semibold text-[#111827]">{activityLabel}</p>
                         <p className="mt-1 text-[#5a5a5a]">{activity.details ? JSON.stringify(activity.details) : "No details"}</p>
+                        <p className="mt-1 text-xs text-[#64748b]">{activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System"}</p>
                       </div>
                       <p className="text-xs text-[#64748b]">{formatDateTime(activity.created_at)}</p>
                     </div>
@@ -1107,7 +1049,7 @@ export default async function OrderDetailPage({
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Order Actions</h2>
             <div className="mt-4 space-y-2">
               <a href="#notes" className="btn-primary flex w-full justify-center">Add Note</a>
-              <a href="#quick-ship" className="btn-secondary flex w-full justify-center">Add Shipment</a>
+              <button type="button" className="btn-secondary w-full" disabled>Add Shipment</button>
               <button type="button" className="btn-secondary w-full" disabled>Split Order</button>
               <button type="button" className="btn-secondary w-full" disabled>Cancel Order</button>
             </div>
@@ -1123,63 +1065,6 @@ export default async function OrderDetailPage({
               <div className="flex items-center justify-between gap-3"><span>Unallocated</span><span className="font-semibold text-[#b91c1c]">{visibleUnallocatedCount}</span></div>
               <div className="border-t border-[#eef2f7] pt-2 flex items-center justify-between gap-3"><span>Total</span><span className="font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</span></div>
             </div>
-          </section>
-
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Legacy / Import Info</h2>
-            <div className="mt-4 space-y-2 text-sm text-[#374151]">
-              <div className="flex items-center justify-between gap-3"><span>Import Source</span><span className="font-semibold text-[#111827]">{orderSourceLabel}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Imported At</span><span className="font-semibold text-[#111827]">{formatDateTime(importTimestamp)}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Legacy Assignment</span><span className="font-semibold text-[#111827]">{orderLines.some((line) => Boolean(line.legacy_container_assignment)) ? "Present" : "None"}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Suggested Assignment</span><span className="font-semibold text-[#111827]">{visibleItems.some((item) => getSuggestedInventory(item).label !== "Waiting" && getSuggestedInventory(item).label !== "Needs mapping" && getSuggestedInventory(item).label !== "N/A") ? "Present" : "None"}</span></div>
-            </div>
-          </section>
-
-          {hasOrderAttachmentsTable ? <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Documents</h2>
-            <p className="mt-1 text-sm text-[#5a5a5a]">Order-level files and shipping documents.</p>
-            <form action={uploadOrderAttachmentAction} className="mt-4 space-y-3">
-              <input type="hidden" name="order_id" value={orderRecord.id} />
-              <input type="file" name="attachments" multiple className="block w-full text-sm text-[#374151]" />
-              <button className="btn-secondary w-full">Upload</button>
-            </form>
-            <div className="mt-4 space-y-2">
-              {attachmentLinks.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-4 text-center text-xs text-[#6b7280]">Drop files here or click to upload</div>
-              ) : attachmentLinks.filter((item): item is NonNullable<typeof item> => Boolean(item)).map((attachment) => (
-                <div key={attachment.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-3 text-sm">
-                  <p className="font-semibold text-[#111827]">{attachment.file_name}</p>
-                  <p className="mt-1 text-xs text-[#64748b]">{attachment.mime_type ?? "Attachment"} • {attachment.file_size ? `${Math.round(attachment.file_size / 1024)} KB` : "—"}</p>
-                  <div className="mt-2 flex gap-2">
-                    {attachment.signedUrl ? <a href={attachment.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary inline-flex text-xs">Open</a> : null}
-                    <form action={deleteOrderAttachmentAction}>
-                      <input type="hidden" name="order_id" value={orderRecord.id} />
-                      <input type="hidden" name="attachment_id" value={attachment.id} />
-                      <button className="btn-secondary text-xs">Delete</button>
-                    </form>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section> : null}
-
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">QuickBooks Snapshot</h2>
-            {quickbooksSnapshot ? (
-              <div className="mt-4 space-y-3 text-sm text-[#374151]">
-                <div className="flex items-center justify-between gap-3"><span>Invoice</span><span className="font-semibold text-[#111827]">#{quickbooksSnapshot.invoice_number ?? orderRecord.order_number ?? "—"}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Payment</span><span className="font-semibold text-[#111827]">{quickbooksSnapshot.payment_status ?? "Pending"}</span></div>
-                <div className="flex items-center justify-between gap-3"><span>Invoice Date</span><span className="font-semibold text-[#111827]">{formatDate(quickbooksSnapshot.invoice_date)}</span></div>
-                <div className="border-t border-[#eef2f7] pt-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Invoice Lines</p>
-                  <div className="mt-2 space-y-1 text-xs text-[#5a5a5a]">
-                    {quickbooksLineItems.length > 0 ? quickbooksLineItems.slice(0, 5).map((line) => <p key={line}>{line}</p>) : <p>No line items found in snapshot.</p>}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-[#915b12]">QuickBooks invoice data is not linked yet.</p>
-            )}
           </section>
         </aside>
       </div>

@@ -92,6 +92,8 @@ type QuickbooksInvoiceSnapshot = {
   payment_status: string | null;
   invoice_date: string | null;
   total_amount: number | null;
+  billing_address?: string | null;
+  shipping_address?: string | null;
   raw_payload?: unknown;
 };
 
@@ -117,6 +119,40 @@ function formatDate(value: string | null | undefined) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Pending";
   return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function parseInvoiceLineItems(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return [] as string[];
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  return lines
+    .map((line, index) => {
+      if (!line || typeof line !== "object") return null;
+
+      const item = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        Amount?: unknown;
+        SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } };
+      };
+
+      const description = typeof item.Description === "string"
+        ? item.Description.trim()
+        : typeof item.SalesItemLineDetail?.ItemRef?.name === "string"
+          ? item.SalesItemLineDetail.ItemRef.name.trim()
+          : "";
+
+      if (!description) return null;
+
+      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty;
+      const qty = typeof qtyRaw === "number" || typeof qtyRaw === "string" ? String(qtyRaw).trim() : "";
+      const amount = typeof item.Amount === "number" ? formatCurrency(item.Amount) : null;
+
+      return `${index + 1}. ${description}${qty ? ` (Qty ${qty})` : ""}${amount ? ` - ${amount}` : ""}`;
+    })
+    .filter((line): line is string => Boolean(line));
 }
 
 function formatAssignmentSource(line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]) {
@@ -248,13 +284,37 @@ export default async function OrderDetailPage({
   if (!quickbooksSnapshot && orderRecord.order_number) {
     const { data: fallbackInvoice } = await supabase
       .from("qbo_invoices")
-      .select("id, invoice_number, payment_status, invoice_date, total_amount, raw_payload")
+      .select("id, invoice_number, payment_status, invoice_date, total_amount, billing_address, shipping_address, raw_payload")
       .eq("invoice_number", orderRecord.order_number)
       .limit(1)
       .maybeSingle();
 
     quickbooksSnapshot = (fallbackInvoice as QuickbooksInvoiceSnapshot | null) ?? null;
   }
+
+  if (!quickbooksSnapshot && orderRecord.order_number) {
+    const { data: legacyInvoice } = await supabase
+      .from("quickbooks_invoices")
+      .select("id, invoice_number, payment_status, invoice_date, invoice_total, billing_address, shipping_address, raw_payload")
+      .eq("invoice_number", orderRecord.order_number)
+      .limit(1)
+      .maybeSingle();
+
+    if (legacyInvoice) {
+      quickbooksSnapshot = {
+        id: legacyInvoice.id,
+        invoice_number: legacyInvoice.invoice_number,
+        payment_status: legacyInvoice.payment_status,
+        invoice_date: legacyInvoice.invoice_date,
+        total_amount: legacyInvoice.invoice_total,
+        billing_address: legacyInvoice.billing_address,
+        shipping_address: legacyInvoice.shipping_address,
+        raw_payload: legacyInvoice.raw_payload,
+      };
+    }
+  }
+
+  const quickbooksLineItems = parseInvoiceLineItems(quickbooksSnapshot?.raw_payload);
 
   const containerOptions = (containerRows ?? []) as ContainerOption[];
   const containersById = new Map(containerOptions.map((container) => [container.id, container]));
@@ -362,27 +422,50 @@ export default async function OrderDetailPage({
         </div>
 
         {quickbooksSnapshot ? (
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div>
-              <p className="text-sm font-medium text-[#6b7280]">Invoice Number</p>
-              <p className="mt-1 font-semibold text-[#111827]">#{quickbooksSnapshot.invoice_number ?? orderRecord.order_number ?? "—"}</p>
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Invoice Number</p>
+                <p className="mt-1 font-semibold text-[#111827]">#{quickbooksSnapshot.invoice_number ?? orderRecord.order_number ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Payment Status</p>
+                <p className="mt-1 font-semibold text-[#111827]">{quickbooksSnapshot.payment_status ?? "Pending"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Invoice Date</p>
+                <p className="mt-1 font-semibold text-[#111827]">{formatDate(quickbooksSnapshot.invoice_date)}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Total</p>
+                <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot.total_amount)}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Billing Address</p>
+                <p className="mt-1 text-sm text-[#111827]">{quickbooksSnapshot.billing_address ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[#6b7280]">Shipping Address</p>
+                <p className="mt-1 text-sm text-[#111827]">{quickbooksSnapshot.shipping_address ?? "—"}</p>
+              </div>
             </div>
+
             <div>
-              <p className="text-sm font-medium text-[#6b7280]">Payment Status</p>
-              <p className="mt-1 font-semibold text-[#111827]">{quickbooksSnapshot.payment_status ?? "Pending"}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-[#6b7280]">Invoice Date</p>
-              <p className="mt-1 font-semibold text-[#111827]">{formatDate(quickbooksSnapshot.invoice_date)}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-[#6b7280]">Total</p>
-              <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot.total_amount)}</p>
+              <p className="text-sm font-medium text-[#6b7280]">Invoice Line Items</p>
+              {quickbooksLineItems.length > 0 ? (
+                <div className="mt-2 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm text-[#374151]">
+                  {quickbooksLineItems.map((line) => (
+                    <p key={line}>{line}</p>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-[#6b7280]">No line items were available in the QuickBooks snapshot payload.</p>
+              )}
             </div>
           </div>
         ) : (
           <div className="mt-4 rounded-lg border border-[#f1d3a4] bg-[#fff8ec] p-4 text-sm text-[#915b12]">
-            No QuickBooks invoice snapshot is linked for invoice #{orderRecord.order_number ?? "—"} yet. Once QuickBooks invoices are synced into `qbo_invoices`, this page can show the actual invoice details here.
+            No QuickBooks invoice snapshot is linked for invoice #{orderRecord.order_number ?? "—"} yet. Once QuickBooks invoices are synced, this page can show the actual invoice details here.
           </div>
         )}
       </div>

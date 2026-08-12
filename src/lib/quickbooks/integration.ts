@@ -299,6 +299,24 @@ export async function connectQuickbooksFromCallback(options: {
     config.clientSecret,
   );
 
+  let connectedByUserId: string | null = options.connectedBy;
+
+  if (connectedByUserId) {
+    const { data: accessUser, error: accessUserError } = await supabase
+      .from("access_users")
+      .select("id")
+      .eq("id", connectedByUserId)
+      .maybeSingle();
+
+    if (accessUserError) {
+      throw new Error(accessUserError.message);
+    }
+
+    if (!accessUser?.id) {
+      connectedByUserId = null;
+    }
+  }
+
   await supabase
     .from("quickbooks_connections")
     .update({
@@ -316,7 +334,7 @@ export async function connectQuickbooksFromCallback(options: {
       encrypted_refresh_token: encryptToken(tokenPayload.refresh_token),
       access_token_expires_at: parseTokenExpiry(tokenPayload.expires_in),
       refresh_token_expires_at: parseTokenExpiry(tokenPayload.x_refresh_token_expires_in),
-      connected_by: options.connectedBy,
+      connected_by: connectedByUserId,
       last_sync_error: null,
     }, {
       onConflict: "realm_id",

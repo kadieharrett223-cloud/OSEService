@@ -34,6 +34,7 @@ type OrderDetailRow = {
   } | null;
   shipping_order_lines?: Array<{
     id: string;
+    product_id?: string | null;
     ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
@@ -97,6 +98,17 @@ type FulfillmentEntry = {
   reason: string | null;
 };
 
+type InvoiceItem = {
+  key: string;
+  sku: string | null;
+  description: string;
+  orderedQty: number;
+  amount: number | null;
+  productId: string | null;
+  shippingLine: NonNullable<OrderDetailRow["shipping_order_lines"]>[number] | null;
+  isNonInventory: boolean;
+};
+
 type QuickbooksInvoiceSnapshot = {
   id: string;
   invoice_number: string | null;
@@ -106,6 +118,50 @@ type QuickbooksInvoiceSnapshot = {
   billing_address?: string | null;
   shipping_address?: string | null;
   raw_payload?: unknown;
+};
+
+type ProductAliasLookupRow = {
+  product_id: string;
+  alias: string;
+  products?: {
+    id: string;
+    sku: string | null;
+    canonical_name: string | null;
+  } | null;
+};
+
+type InventoryTransactionLookupRow = {
+  product_id: string | null;
+  bucket: string | null;
+  delta: number | null;
+};
+
+type ContainerLineLookupRow = {
+  product_id: string | null;
+  on_order_qty: number | null;
+  container_id: string | null;
+  containers?: {
+    id: string;
+    container_number: string | null;
+    lifecycle_status: string | null;
+    eta_confirmed_date: string | null;
+    eta_estimated_date: string | null;
+  } | null;
+};
+
+type AllocationLookupRow = {
+  product_id: string | null;
+  container_id: string | null;
+  quantity: number | null;
+  source_type: string | null;
+  shipping_order_line_id: string | null;
+  containers?: {
+    id: string;
+    container_number: string | null;
+    lifecycle_status: string | null;
+    eta_confirmed_date: string | null;
+    eta_estimated_date: string | null;
+  } | null;
 };
 
 function formatStatus(value: string | null | undefined) {
@@ -143,6 +199,11 @@ function formatDateTime(value: string | null | undefined) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function normalizeSkuKey(value: string | null | undefined) {
+  const normalized = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return normalized || null;
 }
 
 function metricStatusClass(value: string | null | undefined) {
@@ -276,6 +337,47 @@ function getQuickbooksLineDescriptions(rawPayload: unknown) {
       return null;
     })
     .filter((value): value is string => Boolean(value));
+}
+
+function parseQuickbooksInvoiceItems(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return [] as Array<{ sku: string | null; description: string; qty: number; amount: number | null; isNonInventory: boolean }>;
+
+  const payload = rawPayload as { Line?: unknown[] };
+  const lines = Array.isArray(payload.Line) ? payload.Line : [];
+
+  return lines
+    .map((line) => {
+      if (!line || typeof line !== "object") return null;
+
+      const item = line as {
+        Description?: unknown;
+        Qty?: unknown;
+        Amount?: unknown;
+        SalesItemLineDetail?: {
+          Qty?: unknown;
+          ItemRef?: { name?: unknown };
+        };
+      };
+
+      const sku = typeof item.SalesItemLineDetail?.ItemRef?.name === "string" ? item.SalesItemLineDetail.ItemRef.name.trim() : null;
+      const description = typeof item.Description === "string" && item.Description.trim()
+        ? item.Description.trim()
+        : sku ?? "Invoice line";
+
+      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0;
+      const qty = Number(qtyRaw);
+      const amount = Number(item.Amount ?? 0);
+      const isNonInventory = description.trim().startsWith("--") || description.toLowerCase().includes("discount");
+
+      return {
+        sku,
+        description,
+        qty: Number.isFinite(qty) && qty > 0 ? qty : (isNonInventory ? 0 : 1),
+        amount: Number.isFinite(amount) ? amount : null,
+        isNonInventory,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
 function deriveOverallOrderStatus(lines: NonNullable<OrderDetailRow["shipping_order_lines"]>) {
@@ -443,6 +545,7 @@ export default async function OrderDetailPage({
 
   const quickbooksLineItems = parseInvoiceLineItems(quickbooksSnapshot?.raw_payload);
   const quickbooksDescriptions = getQuickbooksLineDescriptions(quickbooksSnapshot?.raw_payload);
+  const parsedInvoiceItems = parseQuickbooksInvoiceItems(quickbooksSnapshot?.raw_payload);
 
   const containerOptions = (containerRows ?? []) as ContainerOption[];
   const containersById = new Map(containerOptions.map((container) => [container.id, container]));
@@ -495,6 +598,185 @@ export default async function OrderDetailPage({
 
   const orderSourceLabel = orderRecord.source_invoice_id ? "QuickBooks" : "OLD_ERP";
   const importTimestamp = activities.find((activity) => activity.action === "ORDER_IMPORTED")?.created_at ?? orderRecord.created_at;
+
+  const allProductRows = parsedInvoiceItems.length > 0
+    ? Array.from(new Set(parsedInvoiceItems.map((item) => item.sku).filter(Boolean)))
+    : [];
+
+  const { data: productRows } = allProductRows.length
+    ? await supabase.from("products").select("id, sku, canonical_name").in("sku", allProductRows as string[])
+    : { data: [] };
+
+  const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
+  for (const product of productRows ?? []) {
+    const skuKey = normalizeSkuKey(product.sku);
+    if (skuKey) productMap.set(skuKey, product);
+  }
+
+  const { data: aliasRows } = allProductRows.length
+    ? await supabase.from("product_aliases").select("product_id, alias, products (id, sku, canonical_name)")
+    : { data: [] };
+
+  for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
+    const aliasKey = normalizeSkuKey(alias.alias);
+    const product = alias.products as { id: string; sku: string | null; canonical_name: string | null } | null;
+    if (aliasKey && product) {
+      productMap.set(aliasKey, product);
+    }
+  }
+
+  const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.map((item) => {
+    const direct = item.sku ? productMap.get(normalizeSkuKey(item.sku) ?? "") : null;
+    return direct?.id ?? null;
+  }).filter(Boolean))) as string[];
+
+  const { data: onFloorRows } = resolvedProductIds.length
+    ? await supabase
+        .from("inventory_transactions")
+        .select("product_id, bucket, delta")
+        .in("product_id", resolvedProductIds)
+        .eq("bucket", "ON_FLOOR")
+    : { data: [] };
+
+  const { data: containerLineRows } = resolvedProductIds.length
+    ? await supabase
+        .from("container_lines")
+        .select("product_id, on_order_qty, container_id, containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+        .in("product_id", resolvedProductIds)
+    : { data: [] };
+
+  const { data: allAllocRows } = resolvedProductIds.length
+    ? await supabase
+        .from("inventory_allocations")
+        .select("product_id, container_id, quantity, source_type, shipping_order_line_id, containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+        .in("product_id", resolvedProductIds)
+    : { data: [] };
+
+  const onFloorAvailableByProduct = new Map<string, number>();
+  for (const row of (onFloorRows ?? []) as InventoryTransactionLookupRow[]) {
+    const productId = row.product_id ?? null;
+    if (!productId) continue;
+    onFloorAvailableByProduct.set(productId, (onFloorAvailableByProduct.get(productId) ?? 0) + Number(row.delta ?? 0));
+  }
+
+  const floorCommittedByProduct = new Map<string, number>();
+  const containerCommittedByKey = new Map<string, number>();
+  for (const row of (allAllocRows ?? []) as AllocationLookupRow[]) {
+    const productId = row.product_id ?? null;
+    if (!productId) continue;
+    const qty = Number(row.quantity ?? 0);
+    if (row.source_type === "FLOOR") {
+      floorCommittedByProduct.set(productId, (floorCommittedByProduct.get(productId) ?? 0) + qty);
+    }
+    if (row.source_type === "CONTAINER" && row.container_id) {
+      const key = `${productId}:${row.container_id}`;
+      containerCommittedByKey.set(key, (containerCommittedByKey.get(key) ?? 0) + qty);
+    }
+  }
+
+  const shippingLineBySkuKey = new Map<string, NonNullable<OrderDetailRow["shipping_order_lines"]>[number]>();
+  for (const line of orderLines) {
+    const keys = [
+      normalizeSkuKey(line.products?.sku),
+      normalizeSkuKey(line.legacy_container_assignment),
+    ].filter(Boolean) as string[];
+    if ((line as { legacy_item_code?: string | null }).legacy_item_code) {
+      keys.push(normalizeSkuKey((line as { legacy_item_code?: string | null }).legacy_item_code) as string);
+    }
+    for (const key of keys) {
+      if (key && !shippingLineBySkuKey.has(key)) shippingLineBySkuKey.set(key, line);
+    }
+  }
+
+  const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
+    sku: line.products?.sku ?? null,
+    description: line.products?.canonical_name ?? line.products?.sku ?? "Line item",
+    qty: Number(line.ordered_qty ?? 0),
+    amount: null,
+    isNonInventory: false,
+  }))).map((item, index) => {
+    const skuKey = normalizeSkuKey(item.sku);
+    const shippingLine = skuKey ? shippingLineBySkuKey.get(skuKey) ?? null : orderLines[index] ?? null;
+    const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
+    return {
+      key: `${skuKey ?? "line"}-${index}`,
+      sku: item.sku,
+      description: item.description,
+      orderedQty: item.qty,
+      amount: item.amount,
+      productId: shippingLine?.product_id ?? resolvedProduct?.id ?? null,
+      shippingLine,
+      isNonInventory: item.isNonInventory,
+    };
+  });
+
+  const visibleLineCount = visibleItems.length;
+  const visibleOrderedTotal = visibleItems.reduce((sum, item) => sum + item.orderedQty, 0);
+  const visibleOpenTotal = visibleItems.reduce((sum, item) => {
+    if (item.shippingLine) return sum + Math.max(0, Number(item.shippingLine.approved_qty ?? 0) - Number(item.shippingLine.fulfilled_qty ?? 0));
+    return sum + Math.max(0, item.orderedQty);
+  }, 0);
+  const visibleShippedTotal = visibleItems.reduce((sum, item) => sum + Number(item.shippingLine?.fulfilled_qty ?? 0), 0);
+  const visibleAllocatedCount = visibleItems.filter((item) => (item.shippingLine?.inventory_allocations?.length ?? 0) > 0).length;
+  const visibleUnallocatedCount = visibleItems.filter((item) => !item.isNonInventory && (item.shippingLine?.inventory_allocations?.length ?? 0) === 0).length;
+
+  function getSuggestedInventory(item: InvoiceItem) {
+    if (item.isNonInventory) {
+      return { label: "N/A", eta: "No inventory required", detail: "N/A" };
+    }
+
+    const line = item.shippingLine;
+    if (line && (line.inventory_allocations?.length ?? 0) > 0) {
+      const allocation = line.inventory_allocations?.[0];
+      if (allocation?.source_type === "FLOOR") {
+        return { label: "On Floor", eta: "Available now", detail: "Ready" };
+      }
+      if (allocation?.source_type === "CONTAINER") {
+        return {
+          label: allocation.containers?.container_number ?? "Container",
+          eta: formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date),
+          detail: `${Number(allocation.quantity ?? 0)} assigned`,
+        };
+      }
+    }
+
+    const productId = item.productId;
+    if (!productId) {
+      return { label: "Needs mapping", eta: "Unavailable", detail: "Map SKU to manage inventory" };
+    }
+
+    const floorAvailable = (onFloorAvailableByProduct.get(productId) ?? 0) - (floorCommittedByProduct.get(productId) ?? 0);
+    if (floorAvailable > 0) {
+      return { label: "On Floor", eta: "Available now", detail: "Ready" };
+    }
+
+    const candidateContainer = ((containerLineRows ?? []) as ContainerLineLookupRow[])
+      .filter((row) => row.product_id === productId && row.containers && ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(row.containers.lifecycle_status ?? "").toUpperCase()))
+      .map((row) => {
+        const committed = row.container_id ? (containerCommittedByKey.get(`${productId}:${row.container_id}`) ?? 0) : 0;
+        const available = Number(row.on_order_qty ?? 0) - committed;
+        return {
+          container: row.containers,
+          available,
+        };
+      })
+      .filter((row) => row.available > 0)
+      .sort((left, right) => {
+        const leftDate = new Date(left.container?.eta_confirmed_date ?? left.container?.eta_estimated_date ?? "9999-12-31").getTime();
+        const rightDate = new Date(right.container?.eta_confirmed_date ?? right.container?.eta_estimated_date ?? "9999-12-31").getTime();
+        return leftDate - rightDate;
+      })[0];
+
+    if (candidateContainer?.container) {
+      return {
+        label: candidateContainer.container.container_number ?? "Container",
+        eta: formatDate(candidateContainer.container.eta_confirmed_date ?? candidateContainer.container.eta_estimated_date),
+        detail: `${candidateContainer.available} available`,
+      };
+    }
+
+    return { label: "Waiting", eta: "No source available", detail: "Unassigned" };
+  }
 
   const attachmentLinks = await Promise.all(
     attachments.map(async (attachment) => {
@@ -578,8 +860,8 @@ export default async function OrderDetailPage({
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-2 text-sm font-semibold text-[#475569]">
           <span className="rounded-full bg-[#fff1f2] px-3 py-2 text-[#d50917]">Overview</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Line Items ({lineItemCount})</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Allocations ({allocatedLines})</span>
+          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Line Items ({visibleLineCount})</span>
+          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Allocations ({visibleAllocatedCount})</span>
           <span className="rounded-full bg-[#f8fafc] px-3 py-2">Shipments ({shipmentCount})</span>
           <span className="rounded-full bg-[#f8fafc] px-3 py-2">Notes ({noteCount})</span>
           <span className="rounded-full bg-[#f8fafc] px-3 py-2">History ({activityCount})</span>
@@ -591,14 +873,14 @@ export default async function OrderDetailPage({
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold text-[#111827]">Line Items ({lineItemCount})</h2>
+                <h2 className="text-xl font-semibold text-[#111827]">Line Items ({visibleLineCount})</h2>
                 <p className="mt-1 text-sm text-[#5a5a5a]">Every physical order line carries its own warehouse status, allocations, shipments, and history.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Ordered {orderedQtyTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Open {openQtyTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Shipped {shippedQtyTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Backordered {openQtyTotal}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Ordered {visibleOrderedTotal}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Open {visibleOpenTotal}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Shipped {visibleShippedTotal}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Backordered {visibleOpenTotal}</span>
               </div>
             </div>
 
@@ -617,50 +899,53 @@ export default async function OrderDetailPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {orderLines.map((line, index) => {
-                    const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-                    const allocationSummary = summarizeAllocation(line);
-                    const quickbooksDescription = quickbooksDescriptions[index] ?? line.products?.canonical_name ?? line.products?.sku ?? "Line item";
-                    const suggested = formatSuggestedAssignment(line, containersById);
-                    const lineHistoryCount = lineHistoryById[line.id]?.length ?? 0;
+                  {visibleItems.map((item, index) => {
+                    const line = item.shippingLine;
+                    const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
+                    const allocationSummary = line ? summarizeAllocation(line) : (item.isNonInventory ? { label: "N/A", detail: "N/A" } : { label: "UNALLOCATED", detail: "—" });
+                    const suggestedInventory = getSuggestedInventory(item);
+                    const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     return (
-                      <tr key={line.id} className="border-b border-[#f1f5f9] align-top text-[#1f2937]">
+                      <tr key={item.key} className="border-b border-[#f1f5f9] align-top text-[#1f2937]">
                         <td className="px-2 py-3 font-semibold">{index + 1}</td>
-                        <td className="px-2 py-3 font-semibold text-[#111827]">{line.products?.sku ?? "SKU"}</td>
+                        <td className="px-2 py-3 font-semibold text-[#111827]">{item.sku ?? "—"}</td>
                         <td className="px-2 py-3">
-                          <p className="font-medium text-[#111827]">{quickbooksDescription}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">Warehouse {formatStatus(line.warehouse_status)} · Fulfillment {formatStatus(line.fulfillment_status)}</p>
+                          <p className="font-medium text-[#111827]">{item.description}</p>
+                          <p className="mt-1 text-xs text-[#64748b]">{line ? `Warehouse ${formatStatus(line.warehouse_status)} · Fulfillment ${formatStatus(line.fulfillment_status)}` : item.isNonInventory ? "Non-inventory charge" : "Not yet imported into warehouse workflow"}</p>
                         </td>
-                        <td className="px-2 py-3">{line.ordered_qty ?? 0}</td>
+                        <td className="px-2 py-3">{item.orderedQty}</td>
                         <td className="px-2 py-3">{remainingQty}</td>
                         <td className="px-2 py-3">
                           <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${allocationSummary.label === "UNALLOCATED" ? "bg-[#fff1f2] text-[#b91c1c]" : "bg-[#eefbf3] text-[#18794e]"}`}>{allocationSummary.label}</span>
                           <p className="mt-1 text-xs text-[#64748b]">{allocationSummary.detail}</p>
                         </td>
-                        <td className="px-2 py-3 text-xs text-[#475569]">{suggested === "No legacy assignment suggestion" ? "—" : suggested}</td>
+                        <td className="px-2 py-3 text-xs text-[#475569]">
+                          <div>{suggestedInventory.label}</div>
+                          <div className="mt-1 text-[#64748b]">{suggestedInventory.eta}</div>
+                        </td>
                         <td className="px-2 py-3">
-                          <details className="group min-w-[190px]">
+                          {line ? <details className="group min-w-[190px]">
                             <summary className="cursor-pointer rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</summary>
                             <div className="mt-3 space-y-3 rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-3">
                               <div className="flex flex-wrap gap-2">
-                                <form action={updateOrderLineStatusAction}>
+                                {line.approval_status !== "APPROVED" ? <form action={updateOrderLineStatusAction}>
                                   <input type="hidden" name="lineId" value={line.id} />
                                   <input type="hidden" name="orderId" value={orderRecord.id} />
                                   <input type="hidden" name="action" value="approve" />
                                   <button className="btn-secondary text-xs">Approve</button>
-                                </form>
-                                <form action={updateOrderLineStatusAction}>
+                                </form> : null}
+                                {line.warehouse_status !== "IN_WAREHOUSE" ? <form action={updateOrderLineStatusAction}>
                                   <input type="hidden" name="lineId" value={line.id} />
                                   <input type="hidden" name="orderId" value={orderRecord.id} />
                                   <input type="hidden" name="action" value="queue" />
                                   <button className="btn-secondary text-xs">In Warehouse</button>
-                                </form>
-                                <form action={updateOrderLineStatusAction}>
+                                </form> : null}
+                                {line.approval_status !== "HOLD" ? <form action={updateOrderLineStatusAction}>
                                   <input type="hidden" name="lineId" value={line.id} />
                                   <input type="hidden" name="orderId" value={orderRecord.id} />
                                   <input type="hidden" name="action" value="hold" />
                                   <button className="btn-secondary text-xs">Hold</button>
-                                </form>
+                                </form> : null}
                               </div>
                               <form action={updateOrderLineAssignmentAction} className="grid gap-2">
                                 <input type="hidden" name="orderId" value={orderRecord.id} />
@@ -680,9 +965,17 @@ export default async function OrderDetailPage({
                                 </select>
                                 <button className="btn-secondary text-xs" type="submit">Save Allocation</button>
                               </form>
+                              <form action={addOrderNoteAction} className="grid gap-2">
+                                <input type="hidden" name="orderId" value={orderRecord.id} />
+                                <input type="hidden" name="lineId" value={line.id} />
+                                <input type="hidden" name="sku" value={item.sku ?? ""} />
+                                <textarea name="message" rows={2} className="textarea text-xs" placeholder="Add an item note" />
+                                <button className="btn-secondary text-xs" type="submit">Save Item Note</button>
+                              </form>
                               <p className="text-[11px] text-[#64748b]">Shipments {fulfillmentsByLine[line.id]?.length ?? 0} · History events {lineHistoryCount}</p>
                             </div>
                           </details>
+                          : <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{item.isNonInventory ? "N/A" : "Map SKU to manage"}</span>}
                         </td>
                       </tr>
                     );
@@ -700,22 +993,24 @@ export default async function OrderDetailPage({
                   <p className="mt-1 text-sm text-[#5a5a5a]">Container assignments, ETA visibility, and suggested sources stay visible right beside each product.</p>
                 </div>
                 <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
-                  <span className="rounded-full bg-[#fff1f2] px-3 py-1.5 text-[#b91c1c]">Unallocated ({unallocatedLines})</span>
-                  <span className="rounded-full bg-[#eefbf3] px-3 py-1.5 text-[#18794e]">Allocated ({allocatedLines})</span>
+                  <span className="rounded-full bg-[#fff1f2] px-3 py-1.5 text-[#b91c1c]">Unallocated ({visibleUnallocatedCount})</span>
+                  <span className="rounded-full bg-[#eefbf3] px-3 py-1.5 text-[#18794e]">Allocated ({visibleAllocatedCount})</span>
                 </div>
               </div>
 
               <div className="mt-4 space-y-3">
-                {orderLines.map((line) => {
-                  const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+                {visibleItems.map((item) => {
+                  const line = item.shippingLine;
+                  const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
+                  const suggestedInventory = getSuggestedInventory(item);
                   return (
-                    <div key={line.id} className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-3">
+                    <div key={item.key} className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-3">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
+                          <p className="font-semibold text-[#111827]">{item.sku ?? "SKU pending"}</p>
                           <p className="mt-1 text-sm text-[#5a5a5a]">Open Qty {remainingQty}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">Current allocation: {formatAssignmentSource(line)}</p>
-                          <p className="mt-1 text-xs text-[#64748b]">Suggested source: {formatSuggestedAssignment(line, containersById)}</p>
+                          <p className="mt-1 text-xs text-[#64748b]">Current allocation: {line ? formatAssignmentSource(line) : "Unassigned"}</p>
+                          <p className="mt-1 text-xs text-[#64748b]">Suggested source: {suggestedInventory.label} · {suggestedInventory.eta}</p>
                         </div>
                       </div>
                     </div>
@@ -728,7 +1023,8 @@ export default async function OrderDetailPage({
               <h2 className="text-xl font-semibold text-[#111827]">Quick Ship (Partial Shipment)</h2>
               <p className="mt-1 text-sm text-[#5a5a5a]">Ship selected line items. Remaining quantity stays open for backorder.</p>
               <div className="mt-4 space-y-4">
-                {orderLines.map((line) => {
+                {visibleItems.filter((item) => item.shippingLine && !item.isNonInventory).map((item) => {
+                  const line = item.shippingLine!;
                   const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
                   return (
                     <form key={line.id} action={markOrderLineShippedAction} className="rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-4">
@@ -736,7 +1032,7 @@ export default async function OrderDetailPage({
                       <input type="hidden" name="lineId" value={line.id} />
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="font-semibold text-[#111827]">{line.products?.sku ?? "SKU pending"}</p>
+                          <p className="font-semibold text-[#111827]">{item.sku ?? line.products?.sku ?? "SKU pending"}</p>
                           <p className="mt-1 text-sm text-[#5a5a5a]">Open Qty {remainingQty} · Shipped {line.fulfilled_qty ?? 0}</p>
                         </div>
                         <div className="rounded-full bg-[#f8fafc] px-3 py-1 text-xs font-semibold text-[#475569]">{fulfillmentsByLine[line.id]?.length ?? 0} shipment{(fulfillmentsByLine[line.id]?.length ?? 0) === 1 ? "" : "s"}</div>
@@ -820,11 +1116,11 @@ export default async function OrderDetailPage({
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Order Summary</h2>
             <div className="mt-4 space-y-2 text-sm text-[#374151]">
-              <div className="flex items-center justify-between gap-3"><span>Line Items</span><span className="font-semibold text-[#111827]">{lineItemCount}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Open Quantity</span><span className="font-semibold text-[#111827]">{openQtyTotal}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Shipped Quantity</span><span className="font-semibold text-[#111827]">{shippedQtyTotal}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Backordered</span><span className="font-semibold text-[#b91c1c]">{openQtyTotal}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Unallocated</span><span className="font-semibold text-[#b91c1c]">{unallocatedLines}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Line Items</span><span className="font-semibold text-[#111827]">{visibleLineCount}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Open Quantity</span><span className="font-semibold text-[#111827]">{visibleOpenTotal}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Shipped Quantity</span><span className="font-semibold text-[#111827]">{visibleShippedTotal}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Backordered</span><span className="font-semibold text-[#b91c1c]">{visibleOpenTotal}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Unallocated</span><span className="font-semibold text-[#b91c1c]">{visibleUnallocatedCount}</span></div>
               <div className="border-t border-[#eef2f7] pt-2 flex items-center justify-between gap-3"><span>Total</span><span className="font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</span></div>
             </div>
           </section>
@@ -835,7 +1131,7 @@ export default async function OrderDetailPage({
               <div className="flex items-center justify-between gap-3"><span>Import Source</span><span className="font-semibold text-[#111827]">{orderSourceLabel}</span></div>
               <div className="flex items-center justify-between gap-3"><span>Imported At</span><span className="font-semibold text-[#111827]">{formatDateTime(importTimestamp)}</span></div>
               <div className="flex items-center justify-between gap-3"><span>Legacy Assignment</span><span className="font-semibold text-[#111827]">{orderLines.some((line) => Boolean(line.legacy_container_assignment)) ? "Present" : "None"}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Suggested Assignment</span><span className="font-semibold text-[#111827]">{orderLines.some((line) => line.suggested_assignment_source && line.suggested_assignment_source !== "UNASSIGNED") ? "Present" : "None"}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Suggested Assignment</span><span className="font-semibold text-[#111827]">{visibleItems.some((item) => getSuggestedInventory(item).label !== "Waiting" && getSuggestedInventory(item).label !== "Needs mapping" && getSuggestedInventory(item).label !== "N/A") ? "Present" : "None"}</span></div>
             </div>
           </section>
 

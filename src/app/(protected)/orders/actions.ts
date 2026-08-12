@@ -251,7 +251,10 @@ export async function updateOrderScheduleAction(formData: FormData) {
 }
 
 export async function addOrderNoteAction(formData: FormData) {
+  const user = await requireUser();
   const orderId = formData.get("orderId")?.toString();
+  const lineId = formData.get("lineId")?.toString();
+  const sku = formData.get("sku")?.toString();
   const message = formData.get("message")?.toString()?.trim();
   const adminClient = getSupabaseAdmin();
 
@@ -263,7 +266,12 @@ export async function addOrderNoteAction(formData: FormData) {
     entity_type: "shipping_order",
     entity_id: orderId,
     action: "ORDER_NOTE_ADDED",
-    details: { message },
+    actor_id: user.id,
+    details: {
+      message,
+      line_id: lineId ?? null,
+      sku: sku ?? null,
+    },
   });
 
   revalidatePath("/orders");

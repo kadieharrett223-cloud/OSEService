@@ -493,6 +493,39 @@ async function findCustomerIdByName(supabase, customerName) {
   return null;
 }
 
+async function loadQuickbooksInvoiceMap(supabase, invoiceNumbers) {
+  const normalizedInvoiceNumbers = Array.from(new Set(
+    invoiceNumbers
+      .map((value) => normalizeText(value))
+      .filter(Boolean),
+  ));
+
+  if (normalizedInvoiceNumbers.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("qbo_invoices")
+    .select("id, invoice_number, customer_id")
+    .in("invoice_number", normalizedInvoiceNumbers);
+
+  if (error) {
+    fail(`Could not load QuickBooks invoice map: ${error.message}`);
+  }
+
+  const map = new Map();
+  for (const row of data ?? []) {
+    const invoiceNumber = normalizeText(row.invoice_number);
+    if (!invoiceNumber) continue;
+    map.set(invoiceNumber, {
+      id: row.id,
+      customerId: row.customer_id ?? null,
+    });
+  }
+
+  return map;
+}
+
 function computeOrderReviewStatus(lines) {
   if (lines.every((line) => line.fulfillmentStatus === "FULFILLED")) return "FULFILLED";
   if (lines.some((line) => line.warehouseStatus === "HOLD")) return "HOLD";
@@ -686,6 +719,10 @@ async function main() {
   }
 
   const orderEntries = Array.from(groupedOrders.values());
+  const quickbooksInvoiceMap = await loadQuickbooksInvoiceMap(
+    supabase,
+    orderEntries.map((order) => order.invoiceNumber),
+  );
   const eligibleLineCount = orderEntries.reduce((sum, order) => sum + order.lines.length, 0);
   const totalQty = orderEntries.reduce(
     (sum, order) => sum + order.lines.reduce((lineSum, line) => lineSum + Number(line.qty ?? 0), 0),
@@ -741,10 +778,11 @@ async function main() {
   };
 
   for (const order of orderEntries) {
-    const customerId = await findCustomerIdByName(supabase, order.customerName);
+    const matchedQuickbooksInvoice = order.invoiceNumber ? quickbooksInvoiceMap.get(order.invoiceNumber) ?? null : null;
+    const customerId = matchedQuickbooksInvoice?.customerId ?? await findCustomerIdByName(supabase, order.customerName);
     const orderPayload = {
       customer_id: customerId,
-      source_invoice_id: null,
+      source_invoice_id: matchedQuickbooksInvoice?.id ?? null,
       order_number: order.invoiceNumber,
       source_type: ORDER_SOURCE_TYPE,
       review_status: computeOrderReviewStatus(order.lines),

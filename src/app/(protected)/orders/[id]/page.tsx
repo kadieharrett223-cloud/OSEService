@@ -14,6 +14,7 @@ import {
 type OrderDetailRow = {
   id: string;
   order_number: string | null;
+  source_invoice_id: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
   promised_ship_date: string | null;
@@ -28,6 +29,7 @@ type OrderDetailRow = {
     invoice_number: string | null;
     payment_status: string | null;
     invoice_date: string | null;
+    total_amount: number | null;
     raw_payload?: unknown;
   } | null;
   shipping_order_lines?: Array<{
@@ -84,6 +86,15 @@ type OrderAttachmentEntry = {
   created_at: string;
 };
 
+type QuickbooksInvoiceSnapshot = {
+  id: string;
+  invoice_number: string | null;
+  payment_status: string | null;
+  invoice_date: string | null;
+  total_amount: number | null;
+  raw_payload?: unknown;
+};
+
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
@@ -94,6 +105,11 @@ function parseSalesperson(rawPayload: unknown) {
   const payload = rawPayload as Record<string, unknown>;
   const salesrep = payload.SalesRepRef as { name?: unknown } | undefined;
   return typeof salesrep?.name === "string" ? salesrep.name : null;
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
 }
 
 function formatDate(value: string | null | undefined) {
@@ -166,6 +182,7 @@ export default async function OrderDetailPage({
       .select(`
         id,
         order_number,
+        source_invoice_id,
         legacy_customer_name,
         review_status,
         promised_ship_date,
@@ -175,7 +192,7 @@ export default async function OrderDetailPage({
         carrier,
         created_at,
         customers (company_name, full_name, email, phone),
-        qbo_invoices (id, invoice_number, payment_status, invoice_date, raw_payload),
+        qbo_invoices (id, invoice_number, payment_status, invoice_date, total_amount, raw_payload),
         shipping_order_lines (
           id,
           ordered_qty,
@@ -227,9 +244,21 @@ export default async function OrderDetailPage({
     return <div className="p-6">Order not found.</div>;
   }
 
+  let quickbooksSnapshot = (orderRecord.qbo_invoices as QuickbooksInvoiceSnapshot | null | undefined) ?? null;
+  if (!quickbooksSnapshot && orderRecord.order_number) {
+    const { data: fallbackInvoice } = await supabase
+      .from("qbo_invoices")
+      .select("id, invoice_number, payment_status, invoice_date, total_amount, raw_payload")
+      .eq("invoice_number", orderRecord.order_number)
+      .limit(1)
+      .maybeSingle();
+
+    quickbooksSnapshot = (fallbackInvoice as QuickbooksInvoiceSnapshot | null) ?? null;
+  }
+
   const containerOptions = (containerRows ?? []) as ContainerOption[];
   const containersById = new Map(containerOptions.map((container) => [container.id, container]));
-  const salesperson = parseSalesperson(orderRecord.qbo_invoices?.raw_payload);
+  const salesperson = parseSalesperson(quickbooksSnapshot?.raw_payload);
   const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED")
     ? "Fulfilled"
     : orderRecord.shipping_order_lines?.some((line) => line.warehouse_status === "IN_WAREHOUSE")
@@ -278,7 +307,7 @@ export default async function OrderDetailPage({
             </div>
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Invoice</p>
-              <p className="mt-1 font-semibold text-[#111827]">#{orderRecord.qbo_invoices?.invoice_number ?? orderRecord.order_number ?? "—"}</p>
+              <p className="mt-1 font-semibold text-[#111827]">#{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</p>
             </div>
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Salesperson</p>
@@ -319,6 +348,43 @@ export default async function OrderDetailPage({
             <button className="btn-secondary" type="submit">Update Schedule</button>
           </form>
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-[#111827]">QuickBooks Invoice</h2>
+            <p className="mt-1 text-sm text-[#5a5a5a]">Linked QuickBooks snapshot for this order when an invoice sync exists.</p>
+          </div>
+          <div className={`rounded-md px-3 py-1 text-xs font-semibold ${quickbooksSnapshot ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fff8ec] text-[#915b12]"}`}>
+            {quickbooksSnapshot ? "Snapshot linked" : "Snapshot missing"}
+          </div>
+        </div>
+
+        {quickbooksSnapshot ? (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Invoice Number</p>
+              <p className="mt-1 font-semibold text-[#111827]">#{quickbooksSnapshot.invoice_number ?? orderRecord.order_number ?? "—"}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Payment Status</p>
+              <p className="mt-1 font-semibold text-[#111827]">{quickbooksSnapshot.payment_status ?? "Pending"}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Invoice Date</p>
+              <p className="mt-1 font-semibold text-[#111827]">{formatDate(quickbooksSnapshot.invoice_date)}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[#6b7280]">Total</p>
+              <p className="mt-1 font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot.total_amount)}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-lg border border-[#f1d3a4] bg-[#fff8ec] p-4 text-sm text-[#915b12]">
+            No QuickBooks invoice snapshot is linked for invoice #{orderRecord.order_number ?? "—"} yet. Once QuickBooks invoices are synced into `qbo_invoices`, this page can show the actual invoice details here.
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

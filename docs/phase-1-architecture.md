@@ -48,6 +48,7 @@ The app now includes an additive operations layer while preserving the original 
 - Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
 - Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
 - Orders is the shipping operations workflow. Order detail is a single fulfillment worksheet (Item, Qty, Coming From, Availability, Fulfillment, Action) with per-line Manage expansion for assignment, partial shipment, and item notes.
+- Freight Claims is a dedicated operational view over `Freight Damage` cases so staff can track claim status, priority, assignment, and resolution without leaving the shipping workflow.
 - Container-linked lines read container number/status/ETA directly from container records, so order availability updates automatically when container ETAs change.
 - Open approved/unfulfilled lines now calculate Suggested Source + Suggested ETA automatically from queue-aware inventory logic (warehouse stock first, then first-fit inbound container by ETA after live allocation deductions).
 - Suggested source is advisory only. Live `inventory_allocations` rows are created only when Shipping confirms assignment; ETA is not persisted on order lines.

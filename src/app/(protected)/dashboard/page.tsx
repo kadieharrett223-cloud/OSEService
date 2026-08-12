@@ -309,6 +309,7 @@ export default async function DashboardPage() {
 
   const quickActions = [
     { label: "Create New Case", href: "/cases/new" },
+    { label: "Freight Claims", href: "/freight-claims" },
     { label: "Add Container", href: "/containers#add-container" },
     { label: "New Order Note", href: "/orders?tab=new" },
     { label: "Upload Document", href: "/cases" },

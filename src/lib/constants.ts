@@ -12,7 +12,7 @@ export const CASE_STATUSES = [
   "Closed",
 ] as const;
 
-export const CASE_TYPES = ["General", "Warranty"] as const;
+export const CASE_TYPES = ["General", "Warranty", "Freight Damage"] as const;
 
 export const PRIORITIES = ["Low", "Medium", "High"] as const;
 

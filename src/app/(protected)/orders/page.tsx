@@ -81,7 +81,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     `)
     .order("created_at", { ascending: false });
 
-  const orderSummaries = ((orders ?? []) as OrderSummary[]).filter((order) => {
+  const allOrders = (orders ?? []) as OrderSummary[];
+
+  function matchesTab(order: OrderSummary, tabId: string) {
     const lines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
     const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
@@ -90,7 +92,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     const anyShipped = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED");
     const anyReview = lines.some((line) => line.approval_status === "PENDING_REVIEW");
 
-    switch (activeTab) {
+    switch (tabId) {
       case "review":
         return order.review_status === "PENDING_REVIEW" || !hasLines || anyReview;
       case "accepted":
@@ -104,7 +106,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       default:
         return true;
     }
-  });
+  }
+
+  const orderSummaries = allOrders.filter((order) => matchesTab(order, activeTab));
+
+  const tabCounts = {
+    review: allOrders.filter((order) => matchesTab(order, "review")).length,
+    accepted: allOrders.filter((order) => matchesTab(order, "accepted")).length,
+    warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
+    shipped: allOrders.filter((order) => matchesTab(order, "shipped")).length,
+    fulfilled: allOrders.filter((order) => matchesTab(order, "fulfilled")).length,
+  };
 
   const tabs = [
     { id: "review", label: "New / Review" },
@@ -139,7 +151,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 href={`/orders?tab=${tab.id}`}
                 className={`rounded-full px-3 py-2 text-sm font-semibold ${isActive ? "bg-[#111827] text-white" : "bg-[#f3f4f6] text-[#374151]"}`}
               >
-                {tab.label}
+                {tab.label} ({tabCounts[tab.id as keyof typeof tabCounts] ?? 0})
               </Link>
             );
           })}
@@ -149,7 +161,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         {orderSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
-            No orders match this status yet.
+            <p>No orders match this status yet.</p>
+            {activeTab === "review" && tabCounts.accepted > 0 ? (
+              <p className="mt-2">
+                {tabCounts.accepted} approved open order{tabCounts.accepted === 1 ? "" : "s"} are available under{" "}
+                <Link href="/orders?tab=accepted" className="font-semibold text-[#2563eb] hover:underline">Accepted</Link>.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

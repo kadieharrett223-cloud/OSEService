@@ -20,8 +20,7 @@ type ArchiveEntry = {
       invoice_number: string | null;
       customers?: {
         company_name: string | null;
-        first_name: string | null;
-        last_name: string | null;
+        full_name: string | null;
       } | null;
     } | null;
   } | null;
@@ -59,7 +58,7 @@ export default async function OrderArchivePage({
         order_number,
         qbo_invoices (
           invoice_number,
-          customers (company_name, first_name, last_name)
+          customers (company_name, full_name)
         )
       )
     `)
@@ -76,8 +75,7 @@ export default async function OrderArchivePage({
       line.shipping_orders?.order_number,
       line.shipping_orders?.qbo_invoices?.invoice_number,
       line.shipping_orders?.qbo_invoices?.customers?.company_name,
-      line.shipping_orders?.qbo_invoices?.customers?.first_name,
-      line.shipping_orders?.qbo_invoices?.customers?.last_name,
+      line.shipping_orders?.qbo_invoices?.customers?.full_name,
     ]
       .filter(Boolean)
       .join(" ")
@@ -145,7 +143,7 @@ export default async function OrderArchivePage({
             {archiveEntries.map((line) => {
               const productName = line.products?.canonical_name ?? line.products?.sku ?? "Unmapped product";
               const customerName = line.shipping_orders?.qbo_invoices?.customers?.company_name
-                ?? [line.shipping_orders?.qbo_invoices?.customers?.first_name, line.shipping_orders?.qbo_invoices?.customers?.last_name].filter(Boolean).join(" ")
+                ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
                 ?? "Customer pending";
               const invoiceNumber = line.shipping_orders?.qbo_invoices?.invoice_number ?? line.shipping_orders?.order_number ?? "—";
               const history = fulfillmentByLine[line.id] ?? [];

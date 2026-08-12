@@ -154,6 +154,11 @@ function normalizeFulfillmentStatus(queueStatus, warehouseStatus) {
   return "PENDING";
 }
 
+function isWarehouseReservedStatus(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return normalized === "IN_WAREHOUSE" || normalized === "ON_FLOOR";
+}
+
 function toInteger(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
@@ -231,6 +236,11 @@ function parseRecordLine(rawRecord) {
     return { line: null, exclusionReason: "queueStatusExcluded" };
   }
 
+  const rawWarehouseStatus = String(pickFirst(rawRecord, ["warehouseStatus", "warehouse_status"]) ?? "").trim().toUpperCase();
+  if (["SHIPPED", "FULFILLED"].includes(rawWarehouseStatus)) {
+    return { line: null, exclusionReason: "warehouseStatusExcluded" };
+  }
+
   const qty = toNumber(pickFirst(rawRecord, ["qty", "approvedQty", "quantity", "orderedQty"]));
   if (!qty || qty <= 0) {
     return { line: null, exclusionReason: "invalidQty" };
@@ -300,6 +310,7 @@ function parseLines(rawRecords) {
     removedTrue: 0,
     approvalNotApproved: 0,
     queueStatusExcluded: 0,
+    warehouseStatusExcluded: 0,
     invalidQty: 0,
     missingSku: 0,
   };
@@ -330,7 +341,7 @@ async function assertRequiredSchema(supabase) {
 
   const { error: lineError } = await supabase
     .from("shipping_order_lines")
-    .select("id, source_system, source_record_id, source_key, legacy_item_code, legacy_matched_item_code, legacy_queue_status, legacy_warehouse_status, legacy_priority_flag, legacy_fulfillment_method, legacy_expected_by, legacy_qbo_shipping_method, legacy_floor_assignment")
+    .select("id, source_system, source_record_id, source_key, legacy_item_code, legacy_matched_item_code, legacy_queue_status, legacy_warehouse_status, legacy_priority_flag, legacy_fulfillment_method, legacy_expected_by, legacy_qbo_shipping_method, legacy_floor_assignment, legacy_container_assignment, suggested_assignment_source, suggested_container_id")
     .limit(1);
 
   if (lineError) {
@@ -401,7 +412,7 @@ function resolveProductId(productMap, line) {
 async function loadContainerLegacyMap(supabase) {
   const { data, error } = await supabase
     .from("containers")
-    .select("id, source_system, source_record_id")
+    .select("id, source_system, source_record_id, lifecycle_status")
     .eq("source_system", "OLD_ERP")
     .not("source_record_id", "is", null);
 
@@ -409,13 +420,54 @@ async function loadContainerLegacyMap(supabase) {
     fail(`Could not load imported container legacy map: ${error.message}`);
   }
 
-  const map = new Map();
+  const allContainers = new Map();
+  const activeContainers = new Map();
   for (const row of data ?? []) {
     const legacyId = normalizeText(row.source_record_id);
     if (!legacyId) continue;
-    map.set(legacyId, row.id);
+    allContainers.set(legacyId, row.id);
+    if (["ORDERED", "PRODUCTION", "INBOUND"].includes(String(row.lifecycle_status ?? "").trim().toUpperCase())) {
+      activeContainers.set(legacyId, row.id);
+    }
   }
-  return map;
+  return { allContainers, activeContainers };
+}
+
+function resolveSuggestedAssignment(line, activeContainerLegacyMap) {
+  const legacyContainerAssignment = line.assignment.containerLegacyId ?? null;
+
+  if (isWarehouseReservedStatus(line.warehouseStatus)) {
+    return {
+      source: "FLOOR",
+      containerId: null,
+      legacyContainerAssignment,
+    };
+  }
+
+  if (line.assignment.type === "FLOOR") {
+    return {
+      source: "FLOOR",
+      containerId: null,
+      legacyContainerAssignment,
+    };
+  }
+
+  if (line.assignment.type === "CONTAINER" && legacyContainerAssignment) {
+    const containerId = activeContainerLegacyMap.get(legacyContainerAssignment) ?? null;
+    if (containerId) {
+      return {
+        source: "CONTAINER",
+        containerId,
+        legacyContainerAssignment,
+      };
+    }
+  }
+
+  return {
+    source: "UNASSIGNED",
+    containerId: null,
+    legacyContainerAssignment,
+  };
 }
 
 async function findCustomerIdByName(supabase, customerName) {
@@ -538,73 +590,6 @@ async function upsertLineBySourceKey(supabase, payload) {
   return inserted.id;
 }
 
-async function upsertAllocation(supabase, lineId, line, containerLegacyMap, quantity) {
-  if (line.assignment.type === "UNASSIGNED") {
-    return { allocationStatus: "UNASSIGNED", allocationId: null, containerMapped: false };
-  }
-
-  const sourceType = line.assignment.type === "CONTAINER" ? "CONTAINER" : "FLOOR";
-  let containerId = null;
-  let containerMapped = false;
-
-  if (sourceType === "CONTAINER") {
-    if (!line.assignment.containerLegacyId) {
-      return { allocationStatus: "CONTAINER_MISSING_LEGACY_ID", allocationId: null, containerMapped: false };
-    }
-    containerId = containerLegacyMap.get(line.assignment.containerLegacyId) ?? null;
-    if (!containerId) {
-      return { allocationStatus: "CONTAINER_NOT_FOUND", allocationId: null, containerMapped: false };
-    }
-    containerMapped = true;
-  }
-
-  const { data: existing, error: existingError } = await supabase
-    .from("inventory_allocations")
-    .select("id")
-    .eq("shipping_order_line_id", lineId)
-    .eq("source_type", sourceType)
-    .eq("allocation_status", "ALLOCATED")
-    .maybeSingle();
-
-  if (existingError) {
-    fail(`Could not query allocation for line ${line.sourceRecordId}: ${existingError.message}`);
-  }
-
-  const payload = {
-    shipping_order_line_id: lineId,
-    product_id: line.productId,
-    container_id: containerId,
-    quantity,
-    allocation_status: "ALLOCATED",
-    source_type: sourceType,
-  };
-
-  if (existing?.id) {
-    const { error: updateError } = await supabase
-      .from("inventory_allocations")
-      .update(payload)
-      .eq("id", existing.id);
-
-    if (updateError) {
-      fail(`Could not update allocation for line ${line.sourceRecordId}: ${updateError.message}`);
-    }
-
-    return { allocationStatus: sourceType, allocationId: existing.id, containerMapped };
-  }
-
-  const { data: inserted, error: insertError } = await supabase
-    .from("inventory_allocations")
-    .insert(payload)
-    .select("id")
-    .single();
-
-  if (insertError || !inserted?.id) {
-    fail(`Could not insert allocation for line ${line.sourceRecordId}: ${insertError?.message ?? "unknown error"}`);
-  }
-
-  return { allocationStatus: sourceType, allocationId: inserted.id, containerMapped };
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.input) {
@@ -648,13 +633,13 @@ async function main() {
     : new Set();
 
   const productMap = await loadProductMap(supabase);
-  const containerLegacyMap = await loadContainerLegacyMap(supabase);
+  const { activeContainers: activeContainerLegacyMap } = await loadContainerLegacyMap(supabase);
 
   const groupedOrders = new Map();
   const unmappedSkus = new Set();
   const containerAssignmentMissing = [];
-  let floorAssignedCount = 0;
-  let containerAssignedCount = 0;
+  let suggestedFloorCount = 0;
+  let suggestedContainerCount = 0;
   let unassignedCount = 0;
 
   for (const line of parsed.lines) {
@@ -664,21 +649,25 @@ async function main() {
       continue;
     }
 
-    if (line.assignment.type === "FLOOR") {
-      floorAssignedCount += 1;
-    } else if (line.assignment.type === "CONTAINER") {
-      if (!line.assignment.containerLegacyId || !containerLegacyMap.has(line.assignment.containerLegacyId)) {
+    const suggestedAssignment = resolveSuggestedAssignment(line, activeContainerLegacyMap);
+
+    if (suggestedAssignment.source === "FLOOR") {
+      suggestedFloorCount += 1;
+    } else if (suggestedAssignment.source === "CONTAINER") {
+      suggestedContainerCount += 1;
+    } else {
+      unassignedCount += 1;
+    }
+
+    if (line.assignment.type === "CONTAINER") {
+      if (!line.assignment.containerLegacyId || !activeContainerLegacyMap.has(line.assignment.containerLegacyId)) {
         containerAssignmentMissing.push({
           sourceRecordId: line.sourceRecordId,
           containerLegacyId: line.assignment.containerLegacyId,
           invoiceNumber: line.invoiceNumber,
           itemCode: line.itemCode,
         });
-      } else {
-        containerAssignedCount += 1;
       }
-    } else {
-      unassignedCount += 1;
     }
 
     const orderKey = line.orderSourceKey;
@@ -692,7 +681,7 @@ async function main() {
       lines: [],
     };
 
-    orderEntry.lines.push({ ...line, productId });
+    orderEntry.lines.push({ ...line, productId, suggestedAssignment });
     groupedOrders.set(orderKey, orderEntry);
   }
 
@@ -709,8 +698,8 @@ async function main() {
     eligibleOrderCount: orderEntries.length,
     eligibleLineCount,
     totalQty,
-    floorAssignedCount,
-    containerAssignedCount,
+    suggestedFloorCount,
+    suggestedContainerCount,
     unassignedCount,
     unmappedSkuCount: unmappedSkus.size,
     unmappedSkus: Array.from(unmappedSkus).sort(),
@@ -745,6 +734,8 @@ async function main() {
     ordersUpserted: 0,
     linesUpserted: 0,
     allocationsUpserted: 0,
+    suggestedContainerAssignments: suggestedContainerCount,
+    suggestedFloorAssignments: suggestedFloorCount,
     linesSkippedUnmappedSku: Array.from(unmappedSkus),
     linesSkippedMissingContainerMapping: [],
   };
@@ -791,7 +782,7 @@ async function main() {
         cancelled_qty: 0,
         approval_status: "APPROVED",
         warehouse_status: line.warehouseStatus,
-        allocation_status: line.assignment.type === "UNASSIGNED" ? "UNALLOCATED" : "ALLOCATED",
+        allocation_status: "UNALLOCATED",
         fulfillment_status: line.fulfillmentStatus,
         priority: line.priority,
         queue_position_start: line.queuePosition,
@@ -810,25 +801,19 @@ async function main() {
         legacy_expected_by: line.expectedBy,
         legacy_qbo_shipping_method: line.qboShippingMethod,
         legacy_floor_assignment: line.floorAssignment && typeof line.floorAssignment === "object" ? line.floorAssignment : null,
+        legacy_container_assignment: line.suggestedAssignment.legacyContainerAssignment,
+        suggested_assignment_source: line.suggestedAssignment.source,
+        suggested_container_id: line.suggestedAssignment.containerId,
       };
 
-      const shippingOrderLineId = await upsertLineBySourceKey(supabase, linePayload);
+      await upsertLineBySourceKey(supabase, linePayload);
       results.linesUpserted += 1;
 
-      if (line.assignment.type === "CONTAINER") {
-        const legacyId = line.assignment.containerLegacyId;
-        if (!legacyId || !containerLegacyMap.has(legacyId)) {
-          results.linesSkippedMissingContainerMapping.push({
-            sourceRecordId: line.sourceRecordId,
-            containerLegacyId: legacyId,
-          });
-          continue;
-        }
-      }
-
-      const allocationResult = await upsertAllocation(supabase, shippingOrderLineId, line, containerLegacyMap, qty);
-      if (allocationResult.allocationId) {
-        results.allocationsUpserted += 1;
+      if (line.assignment.type === "CONTAINER" && line.suggestedAssignment.source !== "CONTAINER") {
+        results.linesSkippedMissingContainerMapping.push({
+          sourceRecordId: line.sourceRecordId,
+          containerLegacyId: line.assignment.containerLegacyId,
+        });
       }
     }
   }

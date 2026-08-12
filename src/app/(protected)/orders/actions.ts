@@ -249,6 +249,17 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     }
   }
 
+  const { error: statusError } = await adminClient
+    .from("shipping_order_lines")
+    .update({
+      allocation_status: remainingQty > 0 && source !== "UNASSIGNED" ? "ALLOCATED" : "UNALLOCATED",
+    })
+    .eq("id", lineRow.id);
+
+  if (statusError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(statusError.message)}`);
+  }
+
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_ASSIGNMENT_UPDATED", {
     line_id: lineId,
     source,

@@ -49,8 +49,7 @@ type ContainerAllocationPreview = {
         invoice_number: string | null;
         customers?: {
           company_name: string | null;
-          first_name: string | null;
-          last_name: string | null;
+          full_name: string | null;
         } | null;
       } | null;
     } | null;
@@ -152,7 +151,7 @@ export default async function ContainerDetailPage({
             id,
             qbo_invoices (
               invoice_number,
-              customers (company_name, first_name, last_name)
+              customers (company_name, full_name)
             )
           )
         )
@@ -237,10 +236,7 @@ export default async function ContainerDetailPage({
       if (!line?.id) return null;
 
       const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
-        ?? [
-          line.shipping_orders?.qbo_invoices?.customers?.first_name,
-          line.shipping_orders?.qbo_invoices?.customers?.last_name,
-        ].filter(Boolean).join(" ")
+        ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
         ?? "Customer pending";
 
       const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";

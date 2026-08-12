@@ -13,6 +13,7 @@ import {
 type OrderDetailRow = {
   id: string;
   order_number: string | null;
+  legacy_customer_name: string | null;
   review_status: string | null;
   promised_ship_date: string | null;
   shipping_method: string | null;
@@ -36,8 +37,12 @@ type OrderDetailRow = {
     approval_status: string | null;
     warehouse_status: string | null;
     fulfillment_status: string | null;
+    allocation_status: string | null;
     priority: string | null;
     queue_position_start: number | null;
+    legacy_container_assignment: string | null;
+    suggested_assignment_source: string | null;
+    suggested_container_id: string | null;
     products?: { sku: string | null; canonical_name: string | null } | null;
     inventory_allocations?: Array<{
       quantity: number | null;
@@ -118,6 +123,30 @@ function formatAssignmentSource(line: NonNullable<OrderDetailRow["shipping_order
   }).join("; ");
 }
 
+function formatSuggestedAssignment(
+  line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number],
+  containersById: Map<string, ContainerOption>,
+) {
+  if (line.suggested_assignment_source === "FLOOR") {
+    return "Suggested from legacy backlog: On Floor";
+  }
+
+  if (line.suggested_assignment_source === "CONTAINER" && line.suggested_container_id) {
+    const container = containersById.get(line.suggested_container_id);
+    if (container) {
+      const eta = formatDate(container.eta_confirmed_date ?? container.eta_estimated_date);
+      return `Suggested from legacy backlog: ${container.container_number ?? "Container"} (${formatStatus(container.lifecycle_status)} · ETA ${eta})`;
+    }
+    return "Suggested from legacy backlog: Active container match";
+  }
+
+  if (line.legacy_container_assignment) {
+    return `Legacy container assignment preserved: ${line.legacy_container_assignment}`;
+  }
+
+  return "No legacy assignment suggestion";
+}
+
 export default async function OrderDetailPage({
   params,
   searchParams,
@@ -135,6 +164,7 @@ export default async function OrderDetailPage({
       .select(`
         id,
         order_number,
+        legacy_customer_name,
         review_status,
         promised_ship_date,
         shipping_method,
@@ -152,8 +182,12 @@ export default async function OrderDetailPage({
           approval_status,
           warehouse_status,
           fulfillment_status,
+          allocation_status,
           priority,
           queue_position_start,
+          legacy_container_assignment,
+          suggested_assignment_source,
+          suggested_container_id,
           products (sku, canonical_name),
           inventory_allocations (
             quantity,
@@ -192,6 +226,7 @@ export default async function OrderDetailPage({
   }
 
   const containerOptions = (containerRows ?? []) as ContainerOption[];
+  const containersById = new Map(containerOptions.map((container) => [container.id, container]));
   const salesperson = parseSalesperson(orderRecord.qbo_invoices?.raw_payload);
   const overallStatus = orderRecord.shipping_order_lines?.some((line) => line.fulfillment_status === "FULFILLED")
     ? "Fulfilled"
@@ -237,7 +272,7 @@ export default async function OrderDetailPage({
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Customer</p>
-              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? "Customer pending"}</p>
+              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</p>
             </div>
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Invoice</p>
@@ -296,6 +331,7 @@ export default async function OrderDetailPage({
                 <p className="mt-1 text-[#5a5a5a]">Warehouse {formatStatus(line.warehouse_status)} • Fulfillment {formatStatus(line.fulfillment_status)}</p>
                 <p className="mt-1 text-[#5a5a5a]">Priority {line.priority ?? "NORMAL"} • Queue {line.queue_position_start ?? "—"}</p>
                 <p className="mt-1 text-[#1f2937]"><span className="font-semibold">Inventory Source:</span> {formatAssignmentSource(line)}</p>
+                <p className="mt-1 text-[#5a5a5a]"><span className="font-semibold">Legacy / Suggested:</span> {formatSuggestedAssignment(line, containersById)}</p>
               </div>
             );
           })}
@@ -342,15 +378,18 @@ export default async function OrderDetailPage({
               <div className="mt-3 rounded-lg border border-[#dbe5f0] bg-white p-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">Inventory Assignment</p>
                 <p className="mt-1 text-sm text-[#334155]">{formatAssignmentSource(line)}</p>
+                {line.inventory_allocations?.length ? null : (
+                  <p className="mt-2 rounded-md border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-sm text-[#1d4ed8]">{formatSuggestedAssignment(line, containersById)}</p>
+                )}
                 <form action={updateOrderLineAssignmentAction} className="mt-3 grid gap-2 md:grid-cols-[180px_minmax(240px,1fr)_auto]">
                   <input type="hidden" name="orderId" value={orderRecord.id} />
                   <input type="hidden" name="lineId" value={line.id} />
-                  <select name="assignment_source" className="select" defaultValue={line.inventory_allocations?.[0]?.source_type ?? "UNASSIGNED"}>
+                  <select name="assignment_source" className="select" defaultValue={line.inventory_allocations?.[0]?.source_type ?? line.suggested_assignment_source ?? "UNASSIGNED"}>
                     <option value="UNASSIGNED">Unassigned</option>
                     <option value="FLOOR">On Floor</option>
                     <option value="CONTAINER">Container</option>
                   </select>
-                  <select name="container_id" className="select" defaultValue={line.inventory_allocations?.[0]?.container_id ?? ""}>
+                  <select name="container_id" className="select" defaultValue={line.inventory_allocations?.[0]?.container_id ?? line.suggested_container_id ?? ""}>
                     <option value="">Select container (for Container source)</option>
                     {containerOptions.map((container) => (
                       <option key={container.id} value={container.id}>

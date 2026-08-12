@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 type OrderSummary = {
   id: string;
   order_number: string | null;
+  legacy_customer_name: string | null;
   review_status: string | null;
   created_at: string;
   customers?: {
@@ -61,6 +62,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     .select(`
       id,
       order_number,
+      legacy_customer_name,
       review_status,
       created_at,
       customers (company_name, full_name),
@@ -154,7 +156,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         {orderSummaries.length > 0 ? (
           <div className="space-y-3">
             {orderSummaries.map((order) => {
-              const customerName = order.customers?.company_name ?? order.customers?.full_name ?? "Customer pending";
+              const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
               const salesperson = parseSalesperson(order.qbo_invoices?.raw_payload);
               const firstLine = order.shipping_order_lines?.[0];

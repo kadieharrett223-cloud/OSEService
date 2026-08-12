@@ -37,12 +37,12 @@ type QueueLine = {
   queue_position_start: number | null;
   shipping_orders?: {
     id: string;
+    legacy_customer_name: string | null;
     qbo_invoices?: {
       invoice_number: string | null;
       customers?: {
         company_name: string | null;
-        first_name: string | null;
-        last_name: string | null;
+        full_name: string | null;
       } | null;
     } | null;
   } | null;
@@ -191,9 +191,10 @@ export default async function InventoryPage({
         queue_position_start,
         shipping_orders (
           id,
+          legacy_customer_name,
           qbo_invoices (
             invoice_number,
-            customers (company_name, first_name, last_name)
+            customers (company_name, full_name)
           )
         ),
         inventory_allocations (
@@ -262,7 +263,8 @@ export default async function InventoryPage({
 
     const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
     const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
-      ?? [line.shipping_orders?.qbo_invoices?.customers?.first_name, line.shipping_orders?.qbo_invoices?.customers?.last_name].filter(Boolean).join(" ")
+      ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
+      ?? line.shipping_orders?.legacy_customer_name
       ?? "Customer pending";
 
     const row = {

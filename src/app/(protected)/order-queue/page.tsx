@@ -20,12 +20,12 @@ type QueueEntry = {
   shipping_orders?: {
     id: string;
     order_number: string | null;
+    legacy_customer_name: string | null;
     qbo_invoices?: {
       invoice_number: string | null;
       customers?: {
         company_name: string | null;
-        first_name: string | null;
-        last_name: string | null;
+        full_name: string | null;
       } | null;
     } | null;
   } | null;
@@ -76,9 +76,10 @@ export default async function OrderQueuePage() {
       shipping_orders (
         id,
         order_number,
+        legacy_customer_name,
         qbo_invoices (
           invoice_number,
-          customers (company_name, first_name, last_name)
+          customers (company_name, full_name)
         )
       )
     `)
@@ -155,7 +156,8 @@ export default async function OrderQueuePage() {
             {queueEntries.map((line) => {
               const productName = line.products?.canonical_name ?? line.products?.sku ?? "Unmapped product";
               const customerName = line.shipping_orders?.qbo_invoices?.customers?.company_name
-                ?? [line.shipping_orders?.qbo_invoices?.customers?.first_name, line.shipping_orders?.qbo_invoices?.customers?.last_name].filter(Boolean).join(" ")
+                ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
+                ?? line.shipping_orders?.legacy_customer_name
                 ?? "Customer pending";
               const invoiceNumber = line.shipping_orders?.qbo_invoices?.invoice_number ?? line.shipping_orders?.order_number ?? "—";
               const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));

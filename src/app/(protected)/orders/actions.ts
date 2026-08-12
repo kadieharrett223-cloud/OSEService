@@ -6,6 +6,35 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+async function loadTableColumnSet(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  tableName: string,
+  candidates: string[],
+) {
+  const columns = new Set<string>();
+
+  for (const column of candidates) {
+    const { error } = await supabase.from(tableName).select(column).limit(1);
+    if (!error) {
+      columns.add(column);
+    }
+  }
+
+  return columns;
+}
+
+function filterPayloadByColumnSet<T extends Record<string, unknown>>(payload: T, columnSet: Set<string>) {
+  const filtered: Partial<T> = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (columnSet.has(key)) {
+      filtered[key as keyof T] = value as T[keyof T];
+    }
+  }
+
+  return filtered;
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -85,14 +114,23 @@ async function syncOrderSummaryState(
   const reviewStatus = allFulfilled ? "FULFILLED" : anyHold ? "HOLD" : "APPROVED";
   const fulfillmentStatus = allFulfilled ? "FULFILLED" : anyShipped ? "PARTIALLY_FULFILLED" : "PENDING";
 
+  const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
+    "review_status",
+    "fulfillment_status",
+    "tracking_number",
+    "carrier",
+  ]);
+
+  const payload = filterPayloadByColumnSet({
+    review_status: reviewStatus,
+    fulfillment_status: fulfillmentStatus,
+    tracking_number: trackingNumber,
+    carrier,
+  }, shippingOrderColumnSet);
+
   const { error: orderUpdateError } = await supabase
     .from("shipping_orders")
-    .update({
-      review_status: reviewStatus,
-      fulfillment_status: fulfillmentStatus,
-      tracking_number: trackingNumber,
-      carrier,
-    })
+    .update(payload)
     .eq("id", orderId);
 
   if (orderUpdateError) {
@@ -180,9 +218,21 @@ export async function updateOrderScheduleAction(formData: FormData) {
     notes: scheduleNotes && scheduleNotes.trim() ? scheduleNotes.trim() : null,
   };
 
+  const shippingOrderColumnSet = await loadTableColumnSet(adminClient, "shipping_orders", [
+    "promised_ship_date",
+    "shipping_method",
+    "notes",
+  ]);
+
+  const compatiblePayload = filterPayloadByColumnSet(payload, shippingOrderColumnSet);
+
+  if (Object.keys(compatiblePayload).length === 0) {
+    redirect(`/orders/${orderId}?error=Schedule+fields+are+not+available+in+the+current+database+schema`);
+  }
+
   const { error } = await adminClient
     .from("shipping_orders")
-    .update(payload)
+    .update(compatiblePayload)
     .eq("id", orderId);
 
   if (error) {

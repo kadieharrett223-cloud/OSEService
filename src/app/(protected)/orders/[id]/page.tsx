@@ -200,6 +200,69 @@ function formatSuggestedAssignment(
   return "No legacy assignment suggestion";
 }
 
+async function loadTableColumnSet(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  tableName: string,
+  candidates: string[],
+) {
+  const columns = new Set<string>();
+
+  for (const column of candidates) {
+    const { error } = await supabase.from(tableName).select(column).limit(1);
+    if (!error) {
+      columns.add(column);
+    }
+  }
+
+  return columns;
+}
+
+function buildShippingOrderSelect(columnSet: Set<string>) {
+  const columns = [
+    "id",
+    "order_number",
+    "source_invoice_id",
+    "legacy_customer_name",
+    "review_status",
+    "created_at",
+  ];
+
+  if (columnSet.has("promised_ship_date")) columns.push("promised_ship_date");
+  if (columnSet.has("shipping_method")) columns.push("shipping_method");
+  if (columnSet.has("notes")) columns.push("notes");
+  if (columnSet.has("tracking_number")) columns.push("tracking_number");
+  if (columnSet.has("carrier")) columns.push("carrier");
+
+  columns.push(
+    "customers (company_name, full_name, email, phone)",
+    "qbo_invoices (id, invoice_number, payment_status, invoice_date, total_amount, raw_payload)",
+    `shipping_order_lines (
+      id,
+      ordered_qty,
+      approved_qty,
+      fulfilled_qty,
+      approval_status,
+      warehouse_status,
+      fulfillment_status,
+      allocation_status,
+      priority,
+      queue_position_start,
+      legacy_container_assignment,
+      suggested_assignment_source,
+      suggested_container_id,
+      products (sku, canonical_name),
+      inventory_allocations (
+        quantity,
+        source_type,
+        container_id,
+        containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
+      )
+    )`,
+  );
+
+  return columns.join(",\n        ");
+}
+
 export default async function OrderDetailPage({
   params,
   searchParams,
@@ -212,46 +275,20 @@ export default async function OrderDetailPage({
   const { id } = await params;
   const { error, message } = await searchParams;
 
-  const [{ data: order }, { data: activityRows }, { data: attachmentRows }, { data: containerRows }] = await Promise.all([
+  const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
+    "promised_ship_date",
+    "shipping_method",
+    "notes",
+    "tracking_number",
+    "carrier",
+  ]);
+  const hasOrderAttachmentsTable = (await loadTableColumnSet(supabase, "order_attachments", ["id"])).has("id");
+  const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet);
+
+  const [{ data: order }, { data: activityRows }, attachmentResult, { data: containerRows }] = await Promise.all([
     supabase
       .from("shipping_orders")
-      .select(`
-        id,
-        order_number,
-        source_invoice_id,
-        legacy_customer_name,
-        review_status,
-        promised_ship_date,
-        shipping_method,
-        notes,
-        tracking_number,
-        carrier,
-        created_at,
-        customers (company_name, full_name, email, phone),
-        qbo_invoices (id, invoice_number, payment_status, invoice_date, total_amount, raw_payload),
-        shipping_order_lines (
-          id,
-          ordered_qty,
-          approved_qty,
-          fulfilled_qty,
-          approval_status,
-          warehouse_status,
-          fulfillment_status,
-          allocation_status,
-          priority,
-          queue_position_start,
-          legacy_container_assignment,
-          suggested_assignment_source,
-          suggested_container_id,
-          products (sku, canonical_name),
-          inventory_allocations (
-            quantity,
-            source_type,
-            container_id,
-            containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
-          )
-        )
-      `)
+      .select(shippingOrderSelect)
       .eq("id", id)
       .maybeSingle(),
     supabase
@@ -260,11 +297,13 @@ export default async function OrderDetailPage({
       .eq("entity_type", "shipping_order")
       .eq("entity_id", id)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("order_attachments")
-      .select("id, file_name, file_path, file_size, mime_type, created_at")
-      .eq("shipping_order_id", id)
-      .order("created_at", { ascending: false }),
+    hasOrderAttachmentsTable
+      ? supabase
+          .from("order_attachments")
+          .select("id, file_name, file_path, file_size, mime_type, created_at")
+          .eq("shipping_order_id", id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as OrderAttachmentEntry[] }),
     supabase
       .from("containers")
       .select("id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date")
@@ -274,7 +313,7 @@ export default async function OrderDetailPage({
 
   const orderRecord = order as OrderDetailRow | null;
   const activities = (activityRows ?? []) as OrderActivityEntry[];
-  const attachments = (attachmentRows ?? []) as OrderAttachmentEntry[];
+  const attachments = (attachmentResult.data ?? []) as OrderAttachmentEntry[];
 
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
@@ -379,35 +418,37 @@ export default async function OrderDetailPage({
             </div>
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Tracking</p>
-              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.tracking_number ?? "Not set"}</p>
+              <p className="mt-1 font-semibold text-[#111827]">{shippingOrderColumnSet.has("tracking_number") ? (orderRecord.tracking_number ?? "Not set") : "Stored on shipment records"}</p>
             </div>
             <div>
               <p className="text-sm font-medium text-[#6b7280]">Carrier</p>
-              <p className="mt-1 font-semibold text-[#111827]">{orderRecord.carrier ?? "Not set"}</p>
+              <p className="mt-1 font-semibold text-[#111827]">{shippingOrderColumnSet.has("carrier") ? (orderRecord.carrier ?? "Not set") : "Stored on shipment records"}</p>
             </div>
           </div>
         </div>
 
+        {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-[#111827]">Schedule</h2>
           <p className="mt-1 text-sm text-[#5a5a5a]">Scheduling updates feed the shared shipping calendar immediately.</p>
           <form action={updateOrderScheduleAction} className="mt-4 grid gap-3">
             <input type="hidden" name="orderId" value={orderRecord.id} />
-            <div>
+            {shippingOrderColumnSet.has("promised_ship_date") ? <div>
               <label htmlFor="schedule_date" className="text-sm font-medium text-[#334155]">Shipment / Pickup Date</label>
               <input id="schedule_date" type="date" name="schedule_date" defaultValue={orderRecord.promised_ship_date ?? ""} className="input mt-1" />
-            </div>
-            <div>
+            </div> : null}
+            {shippingOrderColumnSet.has("shipping_method") ? <div>
               <label htmlFor="shipping_method" className="text-sm font-medium text-[#334155]">Method</label>
               <input id="shipping_method" name="shipping_method" defaultValue={orderRecord.shipping_method ?? ""} className="input mt-1" placeholder="Pickup, LTL, Olympic Delivery" />
-            </div>
-            <div>
+            </div> : null}
+            {shippingOrderColumnSet.has("notes") ? <div>
               <label htmlFor="schedule_notes" className="text-sm font-medium text-[#334155]">Schedule Notes</label>
               <textarea id="schedule_notes" name="schedule_notes" rows={3} defaultValue={orderRecord.notes ?? ""} className="textarea mt-1" placeholder="Optional notes for scheduling" />
-            </div>
+            </div> : null}
             <button className="btn-secondary" type="submit">Update Schedule</button>
           </form>
         </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -584,7 +625,7 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+      {hasOrderAttachmentsTable ? <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <h2 className="text-xl font-semibold text-[#111827]">Attachments</h2>
         <form action={uploadOrderAttachmentAction} className="mt-3 space-y-3">
           <input type="hidden" name="order_id" value={orderRecord.id} />
@@ -615,7 +656,7 @@ export default async function OrderDetailPage({
             </div>
           ))}
         </div>
-      </div>
+      </div> : null}
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <h2 className="text-xl font-semibold text-[#111827]">Add note</h2>

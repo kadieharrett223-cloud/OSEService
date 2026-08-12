@@ -49,6 +49,8 @@ The app now includes an additive operations layer while preserving the original 
 - Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
 - Orders is the shipping operations workflow. Order detail is a single fulfillment worksheet (Item, Qty, Coming From, Availability, Fulfillment, Action) with per-line Manage expansion for assignment, partial shipment, and item notes.
 - Container-linked lines read container number/status/ETA directly from container records, so order availability updates automatically when container ETAs change.
+- Open approved/unfulfilled lines now calculate Suggested Source + Suggested ETA automatically from queue-aware inventory logic (warehouse stock first, then first-fit inbound container by ETA after live allocation deductions).
+- Suggested source is advisory only. Live `inventory_allocations` rows are created only when Shipping confirms assignment; ETA is not persisted on order lines.
 - Schedule is a dedicated shared shipping calendar view backed by `shipping_orders.promised_ship_date` and linked to order detail.
 - Containers remains inbound supply and ETA workflow.
 - Container detail now includes a customer-impact acceptance step: before marking a container received, operators see the affected customer/invoice lines, a confirmation summary, and can run one action to mark only applicable allocated lines as `IN_WAREHOUSE` based on available received quantity for that container.

@@ -1,5 +1,10 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import {
+  getSuggestedAllocation,
+  type OpenQueueLine,
+  type ProductContainerSupply,
+} from "@/lib/fulfillment/suggested-allocation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addOrderNoteAction,
@@ -67,6 +72,7 @@ type ContainerOption = {
   id: string;
   container_number: string | null;
   lifecycle_status: string | null;
+  entered_date: string | null;
   eta_confirmed_date: string | null;
   eta_estimated_date: string | null;
 };
@@ -115,6 +121,14 @@ type InvoiceItem = {
   isNonInventory: boolean;
 };
 
+type ItemSupplySnapshot = {
+  comingFrom: string;
+  availability: string;
+  fulfillment: string;
+  action: string;
+  suggestion: ReturnType<typeof getSuggestedAllocation> | null;
+};
+
 type QuickbooksInvoiceSnapshot = {
   id: string;
   invoice_number: string | null;
@@ -149,6 +163,7 @@ type ContainerLineLookupRow = {
   containers?: {
     id: string;
     container_number: string | null;
+    entered_date: string | null;
     lifecycle_status: string | null;
     eta_confirmed_date: string | null;
     eta_estimated_date: string | null;
@@ -160,14 +175,31 @@ type AllocationLookupRow = {
   container_id: string | null;
   quantity: number | null;
   source_type: string | null;
+  allocation_status: string | null;
   shipping_order_line_id: string | null;
   containers?: {
     id: string;
     container_number: string | null;
+    entered_date: string | null;
     lifecycle_status: string | null;
     eta_confirmed_date: string | null;
     eta_estimated_date: string | null;
   } | null;
+};
+
+type OpenQueueLineLookupRow = {
+  id: string;
+  product_id: string | null;
+  approved_qty: number | null;
+  fulfilled_qty: number | null;
+  priority: string | null;
+  queue_position_start: number | null;
+  approved_at: string | null;
+  created_at: string;
+  inventory_allocations?: Array<{
+    id: string;
+    allocation_status: string | null;
+  }>;
 };
 
 function formatStatus(value: string | null | undefined) {
@@ -509,6 +541,7 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
       inventory_allocations (
         quantity,
         source_type,
+        allocation_status,
         container_id,
         containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
       )
@@ -622,7 +655,7 @@ export default async function OrderDetailPage({
       : Promise.resolve({ data: [] as OrderAttachmentEntry[] }),
     supabase
       .from("containers")
-      .select("id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date")
+      .select("id, container_number, lifecycle_status, entered_date, eta_confirmed_date, eta_estimated_date")
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
   ]);
@@ -761,15 +794,24 @@ export default async function OrderDetailPage({
   const { data: containerLineRows } = resolvedProductIds.length
     ? await supabase
         .from("container_lines")
-        .select("product_id, on_order_qty, container_id, containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+        .select("product_id, on_order_qty, container_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
         .in("product_id", resolvedProductIds)
     : { data: [] };
 
   const { data: allAllocRows } = resolvedProductIds.length
     ? await supabase
         .from("inventory_allocations")
-        .select("product_id, container_id, quantity, source_type, shipping_order_line_id, containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+        .select("product_id, container_id, quantity, source_type, allocation_status, shipping_order_line_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
         .in("product_id", resolvedProductIds)
+    : { data: [] };
+
+  const { data: openQueueRows } = resolvedProductIds.length
+    ? await supabase
+        .from("shipping_order_lines")
+        .select("id, product_id, approved_qty, fulfilled_qty, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
+        .in("product_id", resolvedProductIds)
+        .eq("approval_status", "APPROVED")
+        .neq("fulfillment_status", "FULFILLED")
     : { data: [] };
 
   const onFloorAvailableByProduct = new Map<string, number>();
@@ -782,6 +824,7 @@ export default async function OrderDetailPage({
   const floorCommittedByProduct = new Map<string, number>();
   const containerCommittedByKey = new Map<string, number>();
   for (const row of (allAllocRows ?? []) as AllocationLookupRow[]) {
+    if (row.allocation_status && row.allocation_status !== "ALLOCATED") continue;
     const productId = row.product_id ?? null;
     if (!productId) continue;
     const qty = Number(row.quantity ?? 0);
@@ -792,6 +835,77 @@ export default async function OrderDetailPage({
       const key = `${productId}:${row.container_id}`;
       containerCommittedByKey.set(key, (containerCommittedByKey.get(key) ?? 0) + qty);
     }
+  }
+
+  const floorAvailableByProduct = new Map<string, number>();
+  for (const [productId, floorTotal] of onFloorAvailableByProduct.entries()) {
+    floorAvailableByProduct.set(productId, Math.max(0, floorTotal - (floorCommittedByProduct.get(productId) ?? 0)));
+  }
+
+  const activeContainerStatus = new Set(["ORDERED", "PRODUCTION", "INBOUND"]);
+  const containerSupplyByProduct = new Map<string, ProductContainerSupply[]>();
+  const containerSupplyByProductContainer = new Map<string, ProductContainerSupply>();
+  for (const row of (containerLineRows ?? []) as ContainerLineLookupRow[]) {
+    const productId = row.product_id ?? null;
+    const containerId = row.container_id;
+    const container = row.containers;
+    if (!productId || !containerId || !container) continue;
+
+    const lifecycle = String(container.lifecycle_status ?? "").toUpperCase();
+    if (!activeContainerStatus.has(lifecycle)) continue;
+
+    const key = `${productId}:${containerId}`;
+    const rawQty = Math.max(0, Number(row.on_order_qty ?? 0));
+    const previous = containerSupplyByProductContainer.get(key);
+    if (previous) {
+      previous.available_qty += rawQty;
+    } else {
+      containerSupplyByProductContainer.set(key, {
+        container_id: containerId,
+        container_number: container.container_number,
+        available_qty: rawQty,
+        entered_date: container.entered_date,
+        eta_confirmed_date: container.eta_confirmed_date,
+        eta_estimated_date: container.eta_estimated_date,
+      });
+    }
+  }
+
+  for (const [key, supply] of containerSupplyByProductContainer.entries()) {
+    const [productId] = key.split(":");
+    const availableQty = Math.max(0, supply.available_qty - (containerCommittedByKey.get(key) ?? 0));
+    if (availableQty <= 0) continue;
+    const existingRows = containerSupplyByProduct.get(productId) ?? [];
+    existingRows.push({
+      ...supply,
+      available_qty: availableQty,
+    });
+    containerSupplyByProduct.set(productId, existingRows);
+  }
+
+  const queueLinesByProduct = new Map<string, OpenQueueLine[]>();
+  const queueLineById = new Map<string, OpenQueueLine>();
+  for (const row of (openQueueRows ?? []) as OpenQueueLineLookupRow[]) {
+    if (!row.product_id) continue;
+    const remainingQty = Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0));
+    if (remainingQty <= 0) continue;
+
+    const hasLiveAllocation = (row.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED");
+    const queueLine: OpenQueueLine = {
+      id: row.id,
+      product_id: row.product_id,
+      remaining_qty: remainingQty,
+      priority: row.priority,
+      queue_position_start: row.queue_position_start,
+      approved_at: row.approved_at,
+      created_at: row.created_at,
+      has_live_allocation: hasLiveAllocation,
+    };
+
+    const lines = queueLinesByProduct.get(row.product_id) ?? [];
+    lines.push(queueLine);
+    queueLinesByProduct.set(row.product_id, lines);
+    queueLineById.set(queueLine.id, queueLine);
   }
 
   const shippingLineBySkuKey = new Map<string, NonNullable<OrderDetailRow["shipping_order_lines"]>[number]>();
@@ -861,13 +975,14 @@ export default async function OrderDetailPage({
     orderRecord.customers?.email,
   );
 
-  function getItemSupplySnapshot(item: InvoiceItem) {
+  function getItemSupplySnapshot(item: InvoiceItem): ItemSupplySnapshot {
     if (item.isNonInventory) {
       return {
         comingFrom: "N/A",
         availability: "No inventory required",
         fulfillment: "N/A",
         action: "N/A",
+        suggestion: null,
       };
     }
 
@@ -897,6 +1012,7 @@ export default async function OrderDetailPage({
           availability: parts.join(" + "),
           fulfillment: itemStatus,
           action: "Manage",
+          suggestion: null,
         };
       }
 
@@ -910,6 +1026,7 @@ export default async function OrderDetailPage({
           availability: floorAvailable > 0 ? `${floorAvailable} available now` : `${Number(allocation.quantity ?? 0)} assigned`,
           fulfillment: itemStatus,
           action: "Manage",
+          suggestion: null,
         };
       }
 
@@ -921,6 +1038,7 @@ export default async function OrderDetailPage({
           availability: `ETA ${eta}`,
           fulfillment: itemStatus,
           action: "Manage",
+          suggestion: null,
         };
       }
 
@@ -929,6 +1047,7 @@ export default async function OrderDetailPage({
         availability: "No source selected",
         fulfillment: itemStatus,
         action: "Manage",
+        suggestion: null,
       };
     }
 
@@ -939,42 +1058,59 @@ export default async function OrderDetailPage({
         availability: "—",
         fulfillment: "Waiting",
         action: "Map SKU",
+        suggestion: null,
       };
     }
 
-    const floorAvailable = (onFloorAvailableByProduct.get(productId) ?? 0) - (floorCommittedByProduct.get(productId) ?? 0);
-    if (floorAvailable > 0) {
+    const remainingQty = line
+      ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))
+      : Math.max(0, item.orderedQty);
+
+    if (!line || remainingQty <= 0) {
+      return {
+        comingFrom: "Unassigned",
+        availability: "No source available",
+        fulfillment: "Waiting",
+        action: "Map SKU",
+        suggestion: null,
+      };
+    }
+
+    const queueLine = queueLineById.get(line.id) ?? {
+      id: line.id,
+      product_id: productId,
+      remaining_qty: remainingQty,
+      priority: line.priority,
+      queue_position_start: line.queue_position_start,
+      approved_at: null,
+      created_at: orderRecord?.created_at ?? new Date().toISOString(),
+      has_live_allocation: false,
+    };
+
+    const suggested = getSuggestedAllocation(queueLine, {
+      floorAvailableByProduct,
+      queueLinesByProduct,
+      containerSupplyByProduct,
+    });
+
+    if (suggested.source_type === "WAREHOUSE") {
+      const availableNow = floorAvailableByProduct.get(productId) ?? 0;
       return {
         comingFrom: "Warehouse",
-        availability: `${Math.max(0, floorAvailable)} available now`,
+        availability: `${Math.max(0, availableNow)} available now`,
         fulfillment: "Ready",
-        action: line ? "Manage" : "Map SKU",
+        action: "Manage",
+        suggestion: suggested,
       };
     }
 
-    const candidateContainer = ((containerLineRows ?? []) as ContainerLineLookupRow[])
-      .filter((row) => row.product_id === productId && row.containers && ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(row.containers.lifecycle_status ?? "").toUpperCase()))
-      .map((row) => {
-        const committed = row.container_id ? (containerCommittedByKey.get(`${productId}:${row.container_id}`) ?? 0) : 0;
-        const available = Number(row.on_order_qty ?? 0) - committed;
-        return {
-          container: row.containers,
-          available,
-        };
-      })
-      .filter((row) => row.available > 0)
-      .sort((left, right) => {
-        const leftDate = new Date(left.container?.eta_confirmed_date ?? left.container?.eta_estimated_date ?? "9999-12-31").getTime();
-        const rightDate = new Date(right.container?.eta_confirmed_date ?? right.container?.eta_estimated_date ?? "9999-12-31").getTime();
-        return leftDate - rightDate;
-      })[0];
-
-    if (candidateContainer?.container) {
+    if (suggested.source_type === "CONTAINER") {
       return {
-        comingFrom: candidateContainer.container.container_number ?? "Container",
-        availability: `ETA ${formatDate(candidateContainer.container.eta_confirmed_date ?? candidateContainer.container.eta_estimated_date)}`,
+        comingFrom: suggested.container_number ?? "Container",
+        availability: suggested.eta_date ? `ETA ${formatDate(suggested.eta_date)}` : "ETA pending",
         fulfillment: "Waiting",
-        action: line ? "Manage" : "Map SKU",
+        action: "Manage",
+        suggestion: suggested,
       };
     }
 
@@ -983,6 +1119,7 @@ export default async function OrderDetailPage({
       availability: "No source available",
       fulfillment: "Waiting",
       action: line ? "Manage" : "Map SKU",
+      suggestion: suggested,
     };
   }
 
@@ -1100,6 +1237,23 @@ export default async function OrderDetailPage({
                               <div><span className="font-medium text-[#64748b]">Current source:</span> {supply.comingFrom}</div>
                               <div><span className="font-medium text-[#64748b]">Availability:</span> {supply.availability}</div>
                             </div>
+                            {(line.inventory_allocations?.length ?? 0) === 0 && supply.suggestion && supply.suggestion.source_type !== "UNASSIGNED" ? (
+                              <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
+                                <p><span className="font-semibold">Suggested:</span> {supply.suggestion.source_type === "WAREHOUSE" ? "Warehouse" : supply.suggestion.container_number ?? "Container"}</p>
+                                <p className="mt-1"><span className="font-semibold">Estimated ETA:</span> {supply.suggestion.eta_type === "AVAILABLE_NOW" ? "Available now" : supply.suggestion.eta_date ? formatDate(supply.suggestion.eta_date) : "Pending"}</p>
+                                <p className="mt-1 text-xs text-[#64748b]">{supply.suggestion.reason}</p>
+                                <form action={updateOrderLineAssignmentAction} className="mt-2">
+                                  <input type="hidden" name="orderId" value={orderRecord.id} />
+                                  <input type="hidden" name="lineId" value={line.id} />
+                                  <input type="hidden" name="assignment_source" value={supply.suggestion.source_type === "WAREHOUSE" ? "FLOOR" : "CONTAINER"} />
+                                  <input type="hidden" name="container_id" value={supply.suggestion.container_id ?? ""} />
+                                  <input type="hidden" name="qty_assigned" value={String(Math.max(1, Math.min(remainingQty || 1, supply.suggestion.suggested_qty || 1)))} />
+                                  <button className="btn-secondary" type="submit" disabled={remainingQty <= 0}>
+                                    {supply.suggestion.source_type === "WAREHOUSE" ? "Assign to warehouse" : "Assign to this container"}
+                                  </button>
+                                </form>
+                              </div>
+                            ) : null}
                             <form action={updateOrderLineAssignmentAction} className="mt-4 grid gap-2">
                               <input type="hidden" name="orderId" value={orderRecord.id} />
                               <input type="hidden" name="lineId" value={line.id} />

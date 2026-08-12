@@ -571,6 +571,62 @@ async function upsertOrderBySourceKey(supabase, payload) {
     return updated.id;
   }
 
+  if (payload.source_invoice_id && payload.source_type) {
+    const { data: existingByInvoice, error: existingByInvoiceError } = await supabase
+      .from("shipping_orders")
+      .select("id")
+      .eq("source_invoice_id", payload.source_invoice_id)
+      .eq("source_type", payload.source_type)
+      .maybeSingle();
+
+    if (existingByInvoiceError) {
+      fail(`Could not query existing shipping order by invoice for ${payload.source_key}: ${existingByInvoiceError.message}`);
+    }
+
+    if (existingByInvoice?.id) {
+      const { data: updated, error: updateError } = await supabase
+        .from("shipping_orders")
+        .update(payload)
+        .eq("id", existingByInvoice.id)
+        .select("id")
+        .single();
+
+      if (updateError || !updated?.id) {
+        fail(`Could not update shipping order by invoice ${payload.source_key}: ${updateError?.message ?? "unknown error"}`);
+      }
+
+      return updated.id;
+    }
+  }
+
+  if (payload.order_number && payload.source_type) {
+    const { data: existingByOrderNumber, error: existingByOrderNumberError } = await supabase
+      .from("shipping_orders")
+      .select("id")
+      .eq("order_number", payload.order_number)
+      .eq("source_type", payload.source_type)
+      .maybeSingle();
+
+    if (existingByOrderNumberError) {
+      fail(`Could not query existing shipping order by order number for ${payload.source_key}: ${existingByOrderNumberError.message}`);
+    }
+
+    if (existingByOrderNumber?.id) {
+      const { data: updated, error: updateError } = await supabase
+        .from("shipping_orders")
+        .update(payload)
+        .eq("id", existingByOrderNumber.id)
+        .select("id")
+        .single();
+
+      if (updateError || !updated?.id) {
+        fail(`Could not update shipping order by order number ${payload.source_key}: ${updateError?.message ?? "unknown error"}`);
+      }
+
+      return updated.id;
+    }
+  }
+
   const { data: inserted, error: insertError } = await supabase
     .from("shipping_orders")
     .insert(payload)

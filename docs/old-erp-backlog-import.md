@@ -57,6 +57,7 @@ Protected staff can now run the backlog import from `/orders/import`.
 - Upload a `.json` file or paste raw JSON matching the OLD_ERP queue export shape.
 - `Preview Import` stages the payload under the local ignored `imports/backlog/` folder and runs the existing script in preview mode.
 - `Apply Import` stages the payload and runs the same script with `--apply`.
+- If an invoice number already exists in `shipping_orders`, the bulk upload page pauses before apply and shows the duplicate invoices. Staff can either proceed and reuse/update the existing orders or skip selected duplicate invoices.
 - Reports are written to `tmp/import-reports/` and shown back in the UI.
 
 This route is intended for local/sandbox operational use where the workspace can write staged files and report files.

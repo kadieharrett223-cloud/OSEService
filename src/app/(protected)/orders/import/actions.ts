@@ -8,10 +8,31 @@ import { promisify } from "node:util";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const execFileAsync = promisify(execFile);
 const IMPORTS_DIR = path.join(process.cwd(), "imports", "backlog");
 const REPORTS_DIR = path.join(process.cwd(), "tmp", "import-reports");
+const PENDING_IMPORTS_DIR = path.join(REPORTS_DIR, "pending");
+
+type PendingDuplicateEntry = {
+  invoiceNumber: string;
+  importedCustomerNames: string[];
+  existingOrders: Array<{
+    id: string;
+    orderNumber: string | null;
+    reviewStatus: string | null;
+    fulfillmentStatus: string | null;
+    customerName: string | null;
+    createdAt: string | null;
+  }>;
+};
+
+type PendingImportSession = {
+  stagedPath: string;
+  mode: "apply";
+  duplicates: PendingDuplicateEntry[];
+};
 
 function sanitizeFileSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, "-");
@@ -34,12 +55,17 @@ async function ensureDir(dirPath: string) {
   await fs.mkdir(dirPath, { recursive: true });
 }
 
+function isPathInside(parentPath: string, childPath: string) {
+  const relative = path.relative(parentPath, childPath);
+  return !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
 async function resolvePayloadText(formData: FormData) {
   const rawJson = getString(formData, "raw_json");
   if (rawJson) {
     return {
       payloadText: rawJson,
-      sourceLabel: "pasted-json",
+      sourceLabel: "pasted-json.json",
     };
   }
 
@@ -67,20 +93,115 @@ async function stagePayload(sourceLabel: string, payloadText: string) {
   return stagedPath;
 }
 
-export async function bulkImportOrdersAction(formData: FormData) {
-  await requireUser();
+function normalizeInvoiceNumber(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text.length > 0 ? text : null;
+}
 
-  const mode = getString(formData, "mode") === "apply" ? "apply" : "preview";
-  const { payloadText, sourceLabel } = await resolvePayloadText(formData);
-
-  try {
-    JSON.parse(payloadText);
-  } catch {
-    redirect("/orders/import?error=Uploaded+content+is+not+valid+JSON");
+async function detectExistingInvoiceDuplicates(payloadText: string) {
+  const parsed = JSON.parse(payloadText);
+  if (!Array.isArray(parsed)) {
+    redirect("/orders/import?error=Bulk+upload+JSON+must+be+an+array+of+records");
   }
 
+  const invoiceMap = new Map<string, Set<string>>();
+  for (const record of parsed) {
+    const invoiceNumber = normalizeInvoiceNumber(record?.invoiceNumber);
+    if (!invoiceNumber) continue;
+
+    const customerName = String(record?.customerName ?? "").trim() || "Unknown customer";
+    if (!invoiceMap.has(invoiceNumber)) {
+      invoiceMap.set(invoiceNumber, new Set());
+    }
+    invoiceMap.get(invoiceNumber)?.add(customerName);
+  }
+
+  const invoiceNumbers = Array.from(invoiceMap.keys());
+  if (invoiceNumbers.length === 0) {
+    return [];
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("shipping_orders")
+    .select("id, order_number, review_status, fulfillment_status, legacy_customer_name, created_at")
+    .in("order_number", invoiceNumbers);
+
+  if (error) {
+    redirect(`/orders/import?error=${encodeURIComponent(error.message)}`);
+  }
+
+  const existingByInvoice = new Map<string, PendingDuplicateEntry["existingOrders"]>();
+  for (const row of data ?? []) {
+    const invoiceNumber = normalizeInvoiceNumber(row.order_number);
+    if (!invoiceNumber) continue;
+    const existingOrders = existingByInvoice.get(invoiceNumber) ?? [];
+    existingOrders.push({
+      id: row.id,
+      orderNumber: row.order_number,
+      reviewStatus: row.review_status,
+      fulfillmentStatus: row.fulfillment_status,
+      customerName: row.legacy_customer_name,
+      createdAt: row.created_at,
+    });
+    existingByInvoice.set(invoiceNumber, existingOrders);
+  }
+
+  return Array.from(existingByInvoice.entries()).map(([invoiceNumber, existingOrders]) => ({
+    invoiceNumber,
+    importedCustomerNames: Array.from(invoiceMap.get(invoiceNumber) ?? []),
+    existingOrders,
+  }));
+}
+
+async function writePendingImportSession(session: PendingImportSession) {
+  await ensureDir(PENDING_IMPORTS_DIR);
+  const fileName = `pending-backlog-${timestampSegment()}-${crypto.randomUUID()}.json`;
+  await fs.writeFile(path.join(PENDING_IMPORTS_DIR, fileName), `${JSON.stringify(session, null, 2)}\n`, "utf8");
+  return fileName;
+}
+
+async function loadPendingImportSession(token: string) {
+  const safeToken = path.basename(token);
+  if (safeToken !== token) {
+    redirect("/orders/import?error=Invalid+pending+import+token");
+  }
+
+  const filePath = path.join(PENDING_IMPORTS_DIR, safeToken);
+  if (!isPathInside(PENDING_IMPORTS_DIR, filePath)) {
+    redirect("/orders/import?error=Invalid+pending+import+path");
+  }
+
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return JSON.parse(raw) as PendingImportSession;
+  } catch {
+    redirect("/orders/import?error=Pending+import+session+not+found");
+  }
+}
+
+async function filterPayloadBySkippedInvoices(stagedPath: string, skippedInvoices: string[]) {
+  const raw = await fs.readFile(stagedPath, "utf8");
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    redirect("/orders/import?error=Pending+payload+is+not+a+JSON+array");
+  }
+
+  const skipSet = new Set(skippedInvoices.map((invoiceNumber) => invoiceNumber.trim()).filter(Boolean));
+  if (skipSet.size === 0) {
+    return raw;
+  }
+
+  const filtered = parsed.filter((record) => {
+    const invoiceNumber = normalizeInvoiceNumber(record?.invoiceNumber);
+    return !invoiceNumber || !skipSet.has(invoiceNumber);
+  });
+
+  return `${JSON.stringify(filtered, null, 2)}\n`;
+}
+
+async function runImporter({ stagedPath, mode }: { stagedPath: string; mode: "preview" | "apply" }) {
   await ensureDir(REPORTS_DIR);
-  const stagedPath = await stagePayload(sourceLabel, payloadText);
   const previewReportName = getReportFileName("preview");
   const previewReportPath = path.join(REPORTS_DIR, previewReportName);
 
@@ -106,9 +227,64 @@ export async function bulkImportOrdersAction(formData: FormData) {
     redirect(`/orders/import?error=${encodeURIComponent(message.slice(0, 400))}`);
   }
 
-  const reportName = mode === "apply"
+  return mode === "apply"
     ? previewReportName.replace("preview", "apply")
     : previewReportName;
+}
+
+export async function bulkImportOrdersAction(formData: FormData) {
+  await requireUser();
+
+  const mode = getString(formData, "mode") === "apply" ? "apply" : "preview";
+  const pendingToken = getString(formData, "pending_token");
+
+  if (pendingToken) {
+    const pendingSession = await loadPendingImportSession(pendingToken);
+    if (!isPathInside(IMPORTS_DIR, pendingSession.stagedPath)) {
+      redirect("/orders/import?error=Pending+payload+path+is+invalid");
+    }
+
+    const duplicateStrategy = getString(formData, "duplicate_strategy") === "skip" ? "skip" : "proceed";
+    const stagedPath = duplicateStrategy === "skip"
+      ? await stagePayload(
+        "filtered-duplicates.json",
+        await filterPayloadBySkippedInvoices(
+          pendingSession.stagedPath,
+          formData.getAll("skip_invoice_numbers").map((value) => String(value)),
+        ),
+      )
+      : pendingSession.stagedPath;
+
+    const reportName = await runImporter({ stagedPath, mode: pendingSession.mode });
+
+    revalidatePath("/orders");
+    revalidatePath("/orders/import");
+    redirect(`/orders/import?mode=${pendingSession.mode}&report=${encodeURIComponent(reportName)}&message=${encodeURIComponent("Import applied")}`);
+  }
+
+  const { payloadText, sourceLabel } = await resolvePayloadText(formData);
+
+  try {
+    JSON.parse(payloadText);
+  } catch {
+    redirect("/orders/import?error=Uploaded+content+is+not+valid+JSON");
+  }
+
+  if (mode === "apply") {
+    const duplicates = await detectExistingInvoiceDuplicates(payloadText);
+    if (duplicates.length > 0) {
+      const stagedPathForReview = await stagePayload(sourceLabel, payloadText);
+      const pendingTokenValue = await writePendingImportSession({
+        stagedPath: stagedPathForReview,
+        mode,
+        duplicates,
+      });
+      redirect(`/orders/import?pending=${encodeURIComponent(pendingTokenValue)}&message=${encodeURIComponent("Duplicate invoices found. Review before applying import.")}`);
+    }
+  }
+
+  const stagedPath = await stagePayload(sourceLabel, payloadText);
+  const reportName = await runImporter({ stagedPath, mode });
 
   revalidatePath("/orders");
   revalidatePath("/orders/import");

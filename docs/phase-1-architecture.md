@@ -49,6 +49,7 @@ The app now includes an additive operations layer while preserving the original 
 - Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
 - Orders is the shipping operations workflow. Order detail is a single fulfillment worksheet (Item, Qty, Coming From, Availability, Fulfillment, Action) with per-line Manage expansion for assignment, partial shipment, and item notes.
 - Orders also includes a bulk backlog upload workspace at `/orders/import` that wraps the existing OLD_ERP backlog importer with preview/apply controls and local report visibility.
+- Bulk backlog upload now checks for duplicate invoice numbers already present in `shipping_orders` before apply and gives staff a choice to proceed against the existing orders or skip selected duplicates.
 - Freight Claims is a dedicated operational view over `Freight Damage` cases so staff can track claim status, priority, assignment, and resolution without leaving the shipping workflow.
 - Container-linked lines read container number/status/ETA directly from container records, so order availability updates automatically when container ETAs change.
 - Open approved/unfulfilled lines now calculate Suggested Source + Suggested ETA automatically from queue-aware inventory logic (warehouse stock first, then first-fit inbound container by ETA after live allocation deductions).

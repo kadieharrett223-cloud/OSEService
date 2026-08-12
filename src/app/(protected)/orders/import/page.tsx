@@ -5,12 +5,33 @@ import { requireUser } from "@/lib/auth";
 import { bulkImportOrdersAction } from "./actions";
 
 const REPORTS_DIR = path.join(process.cwd(), "tmp", "import-reports");
+const PENDING_IMPORTS_DIR = path.join(REPORTS_DIR, "pending");
 
 type SearchParams = {
   error?: string;
   message?: string;
   report?: string;
   mode?: string;
+  pending?: string;
+};
+
+type PendingDuplicateEntry = {
+  invoiceNumber: string;
+  importedCustomerNames: string[];
+  existingOrders: Array<{
+    id: string;
+    orderNumber: string | null;
+    reviewStatus: string | null;
+    fulfillmentStatus: string | null;
+    customerName: string | null;
+    createdAt: string | null;
+  }>;
+};
+
+type PendingImportSession = {
+  stagedPath: string;
+  mode: "apply";
+  duplicates: PendingDuplicateEntry[];
 };
 
 type ImportPreview = {
@@ -72,6 +93,19 @@ async function loadReport(reportName: string | undefined) {
   }
 }
 
+async function loadPendingImport(token: string | undefined) {
+  if (!token) return null;
+  const safeToken = path.basename(token);
+  if (safeToken !== token) return null;
+
+  try {
+    const raw = await fs.readFile(path.join(PENDING_IMPORTS_DIR, safeToken), "utf8");
+    return JSON.parse(raw) as PendingImportSession;
+  } catch {
+    return null;
+  }
+}
+
 function formatCount(value: number | undefined) {
   return new Intl.NumberFormat("en-US").format(value ?? 0);
 }
@@ -84,6 +118,7 @@ export default async function OrderImportPage({
   await requireUser();
   const params = await searchParams;
   const report = await loadReport(params.report);
+  const pendingImport = await loadPendingImport(params.pending);
 
   return (
     <div className="space-y-6">
@@ -146,6 +181,63 @@ export default async function OrderImportPage({
           </div>
         </form>
       </section>
+
+      {pendingImport ? (
+        <section className="card border border-[#f5c98a] bg-[#fffaf2] p-4 shadow-sm">
+          <h2 className="text-xl font-semibold text-[#121826]">Duplicate Invoice Review</h2>
+          <p className="mt-1 text-sm text-[#7c4a03]">
+            These invoice numbers already exist in shipping orders. Proceed to reuse and update the existing orders, or skip selected invoices before apply.
+          </p>
+
+          <form action={bulkImportOrdersAction} className="mt-4 space-y-4">
+            <input type="hidden" name="pending_token" value={params.pending ?? ""} />
+
+            <div className="overflow-hidden rounded-lg border border-[#ecd8b2] bg-white">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-[#ececec] text-[#5a5a5a]">
+                    <th className="px-3 py-2">Skip</th>
+                    <th className="px-3 py-2">Invoice</th>
+                    <th className="px-3 py-2">Imported Customer</th>
+                    <th className="px-3 py-2">Existing Orders</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingImport.duplicates.map((duplicate) => (
+                    <tr key={duplicate.invoiceNumber} className="border-b border-[#f1f5f9] align-top last:border-b-0">
+                      <td className="px-3 py-3">
+                        <input type="checkbox" name="skip_invoice_numbers" value={duplicate.invoiceNumber} className="h-4 w-4 rounded border-[#cbd5e1]" />
+                      </td>
+                      <td className="px-3 py-3 font-medium text-[#111827]">{duplicate.invoiceNumber}</td>
+                      <td className="px-3 py-3 text-[#334155]">{duplicate.importedCustomerNames.join(", ")}</td>
+                      <td className="px-3 py-3 text-[#334155]">
+                        <div className="space-y-2">
+                          {duplicate.existingOrders.map((existingOrder) => (
+                            <div key={existingOrder.id} className="rounded-md border border-[#ececec] bg-[#fafbfc] p-2">
+                              <Link href={`/orders/${existingOrder.id}`} className="font-semibold text-[#b20610] hover:underline">
+                                Open existing order
+                              </Link>
+                              <p className="mt-1 text-xs text-[#5a5a5a]">
+                                Customer: {existingOrder.customerName ?? "Unknown"} • Review: {existingOrder.reviewStatus ?? "-"} • Fulfillment: {existingOrder.fulfillmentStatus ?? "-"}
+                              </p>
+                              <p className="text-xs text-[#5a5a5a]">Created: {existingOrder.createdAt ? new Date(existingOrder.createdAt).toLocaleString() : "-"}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" name="duplicate_strategy" value="proceed" className="btn-primary">Proceed And Reuse Existing Orders</button>
+              <button type="submit" name="duplicate_strategy" value="skip" className="btn-secondary">Apply And Skip Checked Invoices</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       {report ? (
         <div className="space-y-4">

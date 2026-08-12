@@ -286,6 +286,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const lineId = getString(formData, "lineId");
   const source = (getString(formData, "assignment_source") ?? "UNASSIGNED").toUpperCase();
   const containerId = getString(formData, "container_id");
+  const requestedQty = getPositiveNumber(formData, "qty_assigned");
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || !lineId) {
@@ -310,6 +311,13 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   }
 
   const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
+  const assignedQty = source === "UNASSIGNED"
+    ? 0
+    : Math.min(remainingQty, requestedQty > 0 ? requestedQty : remainingQty);
+
+  if (source !== "UNASSIGNED" && assignedQty <= 0) {
+    redirect(`/orders/${orderId}?error=Assigned+quantity+must+be+greater+than+zero`);
+  }
 
   const { error: clearError } = await adminClient
     .from("inventory_allocations")
@@ -329,7 +337,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
         shipping_order_line_id: lineRow.id,
         product_id: lineRow.product_id,
-        quantity: remainingQty,
+        quantity: assignedQty,
         allocation_status: "ALLOCATED",
         source_type: "CONTAINER",
         container_id: containerId,
@@ -344,7 +352,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
         shipping_order_line_id: lineRow.id,
         product_id: lineRow.product_id,
-        quantity: remainingQty,
+        quantity: assignedQty,
         allocation_status: "ALLOCATED",
         source_type: "FLOOR",
         container_id: null,
@@ -359,7 +367,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const { error: statusError } = await adminClient
     .from("shipping_order_lines")
     .update({
-      allocation_status: remainingQty > 0 && source !== "UNASSIGNED" ? "ALLOCATED" : "UNALLOCATED",
+      allocation_status: assignedQty > 0 && source !== "UNASSIGNED" ? "ALLOCATED" : "UNALLOCATED",
     })
     .eq("id", lineRow.id);
 
@@ -371,7 +379,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     line_id: lineId,
     source,
     container_id: source === "CONTAINER" ? (containerId ?? null) : null,
-    quantity: remainingQty,
+    quantity: assignedQty,
   });
 
   revalidatePath("/inventory");

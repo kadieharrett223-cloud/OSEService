@@ -47,7 +47,8 @@ The app now includes an additive operations layer while preserving the original 
 - Main Dashboard is now company-wide: Inventory, Orders, Containers, Service widgets, plus cross-domain Recent Activity links.
 - Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
 - Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
-- Orders is the shipping operations workflow with tabs (New/Review, Accepted, In Warehouse, Shipped, Fulfilled) and line-level assignment/shipment controls.
+- Orders is the shipping operations workflow. Order detail is a single fulfillment worksheet (Item, Qty, Coming From, Availability, Fulfillment, Action) with per-line Manage expansion for assignment, partial shipment, and item notes.
+- Container-linked lines read container number/status/ETA directly from container records, so order availability updates automatically when container ETAs change.
 - Schedule is a dedicated shared shipping calendar view backed by `shipping_orders.promised_ship_date` and linked to order detail.
 - Containers remains inbound supply and ETA workflow.
 - Container detail now includes a customer-impact acceptance step: before marking a container received, operators see the affected customer/invoice lines, a confirmation summary, and can run one action to mark only applicable allocated lines as `IN_WAREHOUSE` based on available received quantity for that container.

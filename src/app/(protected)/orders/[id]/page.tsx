@@ -207,6 +207,47 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
+function truncateText(value: string, maxLength: number) {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, maxLength - 1)}…`;
+}
+
+function cleanAddressForHeader(address: string | null | undefined, phone: string | null | undefined, email: string | null | undefined) {
+  if (!address) return "Shipping address unavailable";
+
+  const normalizedPhone = String(phone ?? "").replace(/\D/g, "");
+  const normalizedEmail = String(email ?? "").trim().toLowerCase();
+  const seen = new Set<string>();
+
+  const chunks = address
+    .split(/\r?\n|,/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .filter((chunk) => {
+      const lower = chunk.toLowerCase();
+      if (lower.startsWith("phone:")) return false;
+      if (lower.startsWith("email:")) return false;
+      if (normalizedEmail && lower.includes(normalizedEmail)) return false;
+
+      const digits = chunk.replace(/\D/g, "");
+      if (normalizedPhone.length >= 7 && digits.length >= 7 && digits.includes(normalizedPhone.slice(-7))) {
+        return false;
+      }
+
+      return true;
+    });
+
+  const deduped = chunks.filter((chunk) => {
+    const key = chunk.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return deduped.join(", ") || "Shipping address unavailable";
+}
+
 function normalizeSkuKey(value: string | null | undefined) {
   const normalized = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   return normalized || null;
@@ -477,6 +518,67 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
   return columns.join(",\n        ");
 }
 
+function buildActivityDedupKey(activity: OrderActivityEntry) {
+  const details = activity.details ?? {};
+  const stableDetails = {
+    line_id: typeof details.line_id === "string" ? details.line_id : null,
+    message: typeof details.message === "string" ? details.message : null,
+    source: typeof details.source === "string" ? details.source : null,
+    container_id: typeof details.container_id === "string" ? details.container_id : null,
+    ship_qty: typeof details.ship_qty === "number" ? details.ship_qty : null,
+    tracking_number: typeof details.tracking_number === "string" ? details.tracking_number : null,
+    shipment_date: typeof details.shipment_date === "string" ? details.shipment_date : null,
+  };
+
+  return `${activity.action ?? "ORDER_EVENT"}|${JSON.stringify(stableDetails)}`;
+}
+
+function describeActivityEvent(
+  activity: OrderActivityEntry,
+  lineSkuById: Map<string, string>,
+  containerNumberById: Map<string, string>,
+) {
+  const details = activity.details ?? {};
+  const lineId = typeof details.line_id === "string" ? details.line_id : null;
+  const sku = lineId ? lineSkuById.get(lineId) ?? "Item" : "Order";
+  const source = typeof details.source === "string" ? details.source.toUpperCase() : null;
+  const containerId = typeof details.container_id === "string" ? details.container_id : null;
+  const containerNumber = containerId ? containerNumberById.get(containerId) ?? "Container" : null;
+  const shipQty = typeof details.ship_qty === "number" ? details.ship_qty : null;
+
+  switch (activity.action) {
+    case "ORDER_IMPORTED":
+      return "Order imported from backlog";
+    case "ORDER_NOTE_ADDED":
+      return `${lineId ? `${sku} note added` : "Order note added"}`;
+    case "ORDER_SCHEDULE_UPDATED":
+      return "Order schedule updated";
+    case "ORDER_LINE_ASSIGNMENT_UPDATED":
+      if (source === "FLOOR") return `${sku} moved to warehouse`;
+      if (source === "CONTAINER") return `${sku} assigned to ${containerNumber ?? "container"}`;
+      return `${sku} marked unassigned`;
+    case "ORDER_LINE_SHIPPED":
+      return `${sku} shipped${shipQty ? ` (Qty ${shipQty})` : ""}`;
+    case "ORDER_LINE_APPROVED":
+      return `${sku} approved`;
+    case "ORDER_LINE_QUEUED":
+      return `${sku} moved to queue`;
+    case "ORDER_LINE_HOLD":
+      return `${sku} put on hold`;
+    case "ORDER_LINE_FULFILLED":
+      return `${sku} marked fulfilled`;
+    case "ORDER_ATTACHMENT_UPLOADED":
+      return "Order attachment uploaded";
+    case "ORDER_ATTACHMENT_DELETED":
+      return "Order attachment deleted";
+    default:
+      return (activity.action ?? "ORDER_EVENT")
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+}
+
 export default async function OrderDetailPage({
   params,
   searchParams,
@@ -567,7 +669,6 @@ export default async function OrderDetailPage({
     }
   }
 
-  const quickbooksLineItems = parseInvoiceLineItems(quickbooksSnapshot?.raw_payload);
   const parsedInvoiceItems = parseQuickbooksInvoiceItems(quickbooksSnapshot?.raw_payload);
 
   const actorIds = Array.from(new Set(activities.map((activity) => activity.actor_id).filter(Boolean))) as string[];
@@ -604,16 +705,7 @@ export default async function OrderDetailPage({
     return acc;
   }, {});
 
-  const activityCount = activities.length;
   const noteCount = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED").length;
-  const shipmentCount = fulfillments.length;
-  const lineItemCount = orderLines.length;
-  const orderedQtyTotal = orderLines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
-  const openQtyTotal = orderLines.reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-  const shippedQtyTotal = orderLines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
-  const unallocatedLines = orderLines.filter((line) => (line.inventory_allocations?.length ?? 0) === 0).length;
-  const allocatedLines = orderLines.filter((line) => (line.inventory_allocations?.length ?? 0) > 0).length;
-  const overallStatus = deriveOverallOrderStatus(orderLines);
 
   const lineHistoryById = activities.reduce<Record<string, OrderActivityEntry[]>>((acc, activity) => {
     const lineId = typeof activity.details?.line_id === "string" ? activity.details.line_id : null;
@@ -625,8 +717,6 @@ export default async function OrderDetailPage({
     return acc;
   }, {});
 
-  const orderSourceLabel = orderRecord.source_invoice_id ? "QuickBooks" : "OLD_ERP";
-  const importTimestamp = activities.find((activity) => activity.action === "ORDER_IMPORTED")?.created_at ?? orderRecord.created_at;
   const orderNotes = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED");
 
   const allProductRows = parsedInvoiceItems.length > 0
@@ -747,37 +837,119 @@ export default async function OrderDetailPage({
     return sum + Math.max(0, item.orderedQty);
   }, 0);
   const visibleShippedTotal = visibleItems.reduce((sum, item) => sum + Number(item.shippingLine?.fulfilled_qty ?? 0), 0);
-  const visibleAllocatedCount = visibleItems.filter((item) => (item.shippingLine?.inventory_allocations?.length ?? 0) > 0).length;
   const visibleUnallocatedCount = visibleItems.filter((item) => !item.isNonInventory && (item.shippingLine?.inventory_allocations?.length ?? 0) === 0).length;
 
-  function getSuggestedInventory(item: InvoiceItem) {
+  const lineSkuById = new Map(orderLines.map((line) => [line.id, line.products?.sku ?? "Item"]));
+  const containerNumberById = new Map(containerOptions.map((container) => [container.id, container.container_number ?? "Container"]));
+
+  const seenActivityKeys = new Set<string>();
+  const dedupedActivities = activities.filter((activity) => {
+    const key = buildActivityDedupKey(activity);
+    if (seenActivityKeys.has(key)) return false;
+    seenActivityKeys.add(key);
+    return true;
+  });
+
+  const timelineActivities = dedupedActivities.slice(0, 10).map((activity) => ({
+    ...activity,
+    message: describeActivityEvent(activity, lineSkuById, containerNumberById),
+  }));
+
+  const contactAddress = cleanAddressForHeader(
+    quickbooksSnapshot?.shipping_address,
+    orderRecord.customers?.phone,
+    orderRecord.customers?.email,
+  );
+
+  function getItemSupplySnapshot(item: InvoiceItem) {
     if (item.isNonInventory) {
-      return { label: "N/A", eta: "No inventory required", detail: "N/A" };
+      return {
+        comingFrom: "N/A",
+        availability: "No inventory required",
+        fulfillment: "N/A",
+        action: "N/A",
+      };
     }
 
     const line = item.shippingLine;
+    const itemStatus = deriveItemStatus(item);
+
     if (line && (line.inventory_allocations?.length ?? 0) > 0) {
-      const allocation = line.inventory_allocations?.[0];
-      if (allocation?.source_type === "FLOOR") {
-        return { label: "On Floor", eta: "Available now", detail: "Ready" };
-      }
-      if (allocation?.source_type === "CONTAINER") {
+      const allocations = line.inventory_allocations ?? [];
+      const distinctSources = new Set(allocations.map((allocation) => allocation.source_type ?? "UNASSIGNED"));
+
+      if (allocations.length > 1 || distinctSources.size > 1) {
+        const parts = allocations.map((allocation) => {
+          const qty = Number(allocation.quantity ?? 0);
+          if (allocation.source_type === "FLOOR") {
+            return `Warehouse ${qty}`;
+          }
+          if (allocation.source_type === "CONTAINER") {
+            const containerName = allocation.containers?.container_number ?? "Container";
+            const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
+            return `${containerName} ${qty} (ETA ${eta})`;
+          }
+          return `Unassigned ${qty}`;
+        });
+
         return {
-          label: allocation.containers?.container_number ?? "Container",
-          eta: formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date),
-          detail: `${Number(allocation.quantity ?? 0)} assigned`,
+          comingFrom: "Split",
+          availability: parts.join(" + "),
+          fulfillment: itemStatus,
+          action: "Manage",
         };
       }
+
+      const allocation = allocations[0];
+      if (allocation?.source_type === "FLOOR") {
+        const floorAvailable = item.productId
+          ? Math.max(0, (onFloorAvailableByProduct.get(item.productId) ?? 0) - (floorCommittedByProduct.get(item.productId) ?? 0))
+          : 0;
+        return {
+          comingFrom: "Warehouse",
+          availability: floorAvailable > 0 ? `${floorAvailable} available now` : `${Number(allocation.quantity ?? 0)} assigned`,
+          fulfillment: itemStatus,
+          action: "Manage",
+        };
+      }
+
+      if (allocation?.source_type === "CONTAINER") {
+        const containerName = allocation.containers?.container_number ?? "Container";
+        const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
+        return {
+          comingFrom: containerName,
+          availability: `ETA ${eta}`,
+          fulfillment: itemStatus,
+          action: "Manage",
+        };
+      }
+
+      return {
+        comingFrom: "Unassigned",
+        availability: "No source selected",
+        fulfillment: itemStatus,
+        action: "Manage",
+      };
     }
 
     const productId = item.productId;
     if (!productId) {
-      return { label: "Needs mapping", eta: "Unavailable", detail: "Map SKU to manage inventory" };
+      return {
+        comingFrom: "⚠ Needs mapping",
+        availability: "—",
+        fulfillment: "Waiting",
+        action: "Map SKU",
+      };
     }
 
     const floorAvailable = (onFloorAvailableByProduct.get(productId) ?? 0) - (floorCommittedByProduct.get(productId) ?? 0);
     if (floorAvailable > 0) {
-      return { label: "On Floor", eta: "Available now", detail: "Ready" };
+      return {
+        comingFrom: "Warehouse",
+        availability: `${Math.max(0, floorAvailable)} available now`,
+        fulfillment: "Ready",
+        action: line ? "Manage" : "Map SKU",
+      };
     }
 
     const candidateContainer = ((containerLineRows ?? []) as ContainerLineLookupRow[])
@@ -799,13 +971,19 @@ export default async function OrderDetailPage({
 
     if (candidateContainer?.container) {
       return {
-        label: candidateContainer.container.container_number ?? "Container",
-        eta: formatDate(candidateContainer.container.eta_confirmed_date ?? candidateContainer.container.eta_estimated_date),
-        detail: `${candidateContainer.available} available`,
+        comingFrom: candidateContainer.container.container_number ?? "Container",
+        availability: `ETA ${formatDate(candidateContainer.container.eta_confirmed_date ?? candidateContainer.container.eta_estimated_date)}`,
+        fulfillment: "Waiting",
+        action: line ? "Manage" : "Map SKU",
       };
     }
 
-    return { label: "Waiting", eta: "No source available", detail: "Unassigned" };
+    return {
+      comingFrom: "Unassigned",
+      availability: "No source available",
+      fulfillment: "Waiting",
+      action: line ? "Manage" : "Map SKU",
+    };
   }
 
   const attachmentLinks = await Promise.all(
@@ -838,7 +1016,7 @@ export default async function OrderDetailPage({
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(orderRecord.review_status)}`}>{orderRecord.review_status ?? "APPROVED"}</span>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
             </div>
-            <p className="mt-3 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {quickbooksSnapshot?.shipping_address ?? "Shipping address unavailable"} · Salesperson {salesperson ?? "—"} · Priority {orderLines.some((line) => line.priority === "HIGH" || line.priority === "CRITICAL") ? "HIGH" : orderLines[0]?.priority ?? "NORMAL"}</p>
+            <p className="mt-3 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
@@ -858,93 +1036,80 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap gap-2 text-sm font-semibold text-[#475569]">
-          <span className="rounded-full bg-[#fff1f2] px-3 py-2 text-[#d50917]">Overview</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Line Items ({visibleLineCount})</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Allocations ({visibleAllocatedCount})</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Shipments ({shipmentCount})</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">Notes ({noteCount})</span>
-          <span className="rounded-full bg-[#f8fafc] px-3 py-2">History ({activityCount})</span>
-        </div>
-      </div>
-
       <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
         <div className="space-y-6">
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-[#111827]">Items & Fulfillment</h2>
-                <p className="mt-1 text-sm text-[#5a5a5a]">Open the order and immediately see what was ordered, where each item is coming from, when it will be available, and what still needs action.</p>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Each row answers: What is it, how many, where it is coming from, and what to do next.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Ordered {visibleOrderedTotal}</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Open {visibleOpenTotal}</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Shipped {visibleShippedTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Backordered {visibleOpenTotal}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Needs Source {visibleUnallocatedCount}</span>
               </div>
             </div>
 
             <div className="mt-4 overflow-x-auto">
-              <div className="min-w-[980px]">
-                <thead>
-                  <tr className="border-b border-[#edf2f7] text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                    <th className="px-2 py-3">#</th>
-                    <th className="px-2 py-3">SKU</th>
-                    <th className="px-2 py-3">Description</th>
-                    <th className="px-2 py-3">Qty</th>
-                    <th className="px-2 py-3">Inventory Source</th>
-                    <th className="px-2 py-3">ETA / Availability</th>
-                    <th className="px-2 py-3">Status</th>
-                    <th className="px-2 py-3">Shipped</th>
-                    <th className="px-2 py-3">Actions</th>
-                  </tr>
-                </thead>
+              <div className="min-w-[900px]">
+                <div className="grid grid-cols-[minmax(280px,2fr)_70px_180px_180px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                  <span>Item</span>
+                  <span>Qty</span>
+                  <span>Coming From</span>
+                  <span>Availability</span>
+                  <span>Fulfillment</span>
+                  <span>Action</span>
+                </div>
                 <div>
-                  {visibleItems.map((item, index) => {
+                  {visibleItems.map((item) => {
                     const line = item.shippingLine;
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
-                    const allocationSummary = line ? summarizeAllocation(line) : (item.isNonInventory ? { label: "N/A", detail: "N/A" } : { label: "UNALLOCATED", detail: "—" });
-                    const suggestedInventory = getSuggestedInventory(item);
+                    const supply = getItemSupplySnapshot(item);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
-                    const itemStatus = deriveItemStatus(item);
+                    const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
+                    const assignmentSourceDefault = line?.inventory_allocations?.[0]?.source_type ?? line?.suggested_assignment_source ?? "UNASSIGNED";
+                    const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
+                    const descriptionSummary = truncateText(item.description, 84);
+
                     return (
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[40px_90px_minmax(240px,1.5fr)_80px_170px_150px_120px_90px_120px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
-                          <span className="font-semibold">{index + 1}</span>
-                          <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
+                        <summary className="grid cursor-pointer grid-cols-[minmax(280px,2fr)_70px_180px_180px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
-                            <span className="font-medium text-[#111827]">{item.description}</span>
-                            <span className="mt-1 block text-xs text-[#64748b]">{line ? `Warehouse ${formatStatus(line.warehouse_status)} · Fulfillment ${formatStatus(line.fulfillment_status)}` : item.isNonInventory ? "Non-inventory charge" : "Not yet imported into warehouse workflow"}</span>
+                            <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
+                            <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
                           <span>{item.orderedQty}</span>
+                          <span className="font-medium text-[#111827]">{supply.comingFrom}</span>
+                          <span className="text-xs text-[#475569]">{supply.availability}</span>
+                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(supply.fulfillment)}`}>{supply.fulfillment}</span></span>
                           <span>
-                            <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${allocationSummary.label === "UNALLOCATED" ? "bg-[#fff1f2] text-[#b91c1c]" : allocationSummary.label === "N/A" ? "bg-[#eef2f7] text-[#64748b]" : "bg-[#eefbf3] text-[#18794e]"}`}>{allocationSummary.label === "UNALLOCATED" ? suggestedInventory.label : allocationSummary.detail.split(" · ")[0] || allocationSummary.label}</span>
-                            <span className="mt-1 block text-xs text-[#64748b]">{allocationSummary.label === "UNALLOCATED" ? suggestedInventory.detail : allocationSummary.detail}</span>
-                          </span>
-                          <span className="text-xs text-[#475569]">{suggestedInventory.eta}</span>
-                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(itemStatus)}`}>{itemStatus}</span></span>
-                          <span>{Number(line?.fulfilled_qty ?? 0)}</span>
-                          <span>
-                            {line ? <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span> : <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{item.isNonInventory ? "N/A" : "Map SKU"}</span>}
+                            {line ? (
+                              <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
+                            ) : (
+                              <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{supply.action}</span>
+                            )}
                           </span>
                         </summary>
                         {line ? <div className="grid gap-4 border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4 xl:grid-cols-3">
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
-                            <h3 className="text-sm font-semibold text-[#111827]">Inventory</h3>
+                            <h3 className="text-sm font-semibold text-[#111827]">Inventory Source</h3>
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
-                              <div><span className="font-medium text-[#64748b]">Assigned source:</span> {allocationSummary.label === "UNALLOCATED" ? "Unassigned" : allocationSummary.detail}</div>
-                              <div><span className="font-medium text-[#64748b]">ETA:</span> {suggestedInventory.eta}</div>
-                              <div><span className="font-medium text-[#64748b]">Qty assigned:</span> {line.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0}</div>
+                              <div><span className="font-medium text-[#64748b]">Item:</span> {item.sku ?? "—"} · {item.description}</div>
+                              <div><span className="font-medium text-[#64748b]">Current source:</span> {supply.comingFrom}</div>
+                              <div><span className="font-medium text-[#64748b]">Availability:</span> {supply.availability}</div>
                             </div>
                             <form action={updateOrderLineAssignmentAction} className="mt-4 grid gap-2">
                               <input type="hidden" name="orderId" value={orderRecord.id} />
                               <input type="hidden" name="lineId" value={line.id} />
-                              <select name="assignment_source" className="select text-sm" defaultValue={line.inventory_allocations?.[0]?.source_type ?? line.suggested_assignment_source ?? "UNASSIGNED"}>
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Inventory source</label>
+                              <select name="assignment_source" className="select text-sm" defaultValue={assignmentSourceDefault}>
                                 <option value="UNASSIGNED">Unassigned</option>
-                                <option value="FLOOR">On Floor</option>
+                                <option value="FLOOR">Warehouse</option>
                                 <option value="CONTAINER">Container</option>
                               </select>
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Container (when source is Container)</label>
                               <select name="container_id" className="select text-sm" defaultValue={line.inventory_allocations?.[0]?.container_id ?? line.suggested_container_id ?? ""}>
                                 <option value="">Select container</option>
                                 {containerOptions.map((container) => (
@@ -953,12 +1118,15 @@ export default async function OrderDetailPage({
                                   </option>
                                 ))}
                               </select>
-                              <button className="btn-secondary" type="submit">Change Assignment</button>
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Qty assigned</label>
+                              <input name="qty_assigned" type="number" min="1" max={Math.max(1, remainingQty || 1)} defaultValue={qtyAssignedDefault} className="input" />
+                              <p className="text-xs text-[#64748b]">Container status and ETA are read automatically from Containers.</p>
+                              <button className="btn-secondary" type="submit" disabled={remainingQty <= 0}>Save Assignment</button>
                             </form>
                           </div>
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
-                            <h3 className="text-sm font-semibold text-[#111827]">Shipment</h3>
+                            <h3 className="text-sm font-semibold text-[#111827]">Ship</h3>
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
                               {(fulfillmentsByLine[line.id] ?? []).length === 0 ? <p className="text-[#64748b]">No shipments yet.</p> : (fulfillmentsByLine[line.id] ?? []).map((shipment) => (
                                 <div key={shipment.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs">
@@ -970,9 +1138,13 @@ export default async function OrderDetailPage({
                             <form action={markOrderLineShippedAction} className="mt-4 grid gap-2">
                               <input type="hidden" name="orderId" value={orderRecord.id} />
                               <input type="hidden" name="lineId" value={line.id} />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Qty</label>
                               <input name="ship_qty" type="number" min="1" max={remainingQty} step="1" defaultValue={remainingQty > 0 ? 1 : 0} className="input" />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Tracking</label>
                               <input name="tracking_number" className="input" placeholder="Tracking #" required />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Carrier</label>
                               <input name="carrier" className="input" placeholder="Carrier" />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Ship date</label>
                               <input name="shipment_date" type="date" className="input" required />
                               <button className="btn-primary" type="submit" disabled={remainingQty <= 0}>Mark Shipped</button>
                             </form>
@@ -987,7 +1159,7 @@ export default async function OrderDetailPage({
                               <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />
                               <button className="btn-secondary" type="submit">Save Note</button>
                             </form>
-                            <p className="mt-3 text-xs text-[#64748b]">History events {lineHistoryCount}</p>
+                            <p className="mt-3 text-xs text-[#64748b]">Line activity events: {lineHistoryCount}</p>
                           </div>
                         </div> : null}
                       </details>
@@ -1021,19 +1193,17 @@ export default async function OrderDetailPage({
 
             <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
               <h2 className="text-xl font-semibold text-[#111827]">Activity Timeline</h2>
-              <p className="mt-1 text-sm text-[#5a5a5a]">Compact fulfillment history across imports, assignments, receipts, and shipments.</p>
+              <p className="mt-1 text-sm text-[#5a5a5a]">Human-readable order events with duplicates removed.</p>
               <div className="mt-4 space-y-3">
-                {activities.length === 0 ? (
+                {timelineActivities.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-4 text-sm text-[#6b7280]">No history has been recorded yet.</div>
-                ) : activities.slice(0, 8).map((activity) => {
-                  const activityLabel = (activity.action ?? "ORDER_EVENT").replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+                ) : timelineActivities.map((activity) => {
                   return (
                     <div key={activity.id} className="flex items-start gap-3 rounded-xl border border-[#eef2f7] bg-[#fafbfc] p-3 text-sm">
                       <div className="mt-1 h-8 w-8 rounded-full bg-[#eefbf3] text-center text-xs font-bold leading-8 text-[#18794e]">{activity.action?.startsWith("ORDER_LINE") ? "L" : "O"}</div>
                       <div className="flex-1">
-                        <p className="font-semibold text-[#111827]">{activityLabel}</p>
-                        <p className="mt-1 text-[#5a5a5a]">{activity.details ? JSON.stringify(activity.details) : "No details"}</p>
-                        <p className="mt-1 text-xs text-[#64748b]">{activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System"}</p>
+                        <p className="font-semibold text-[#111827]">{activity.message}</p>
+                        <p className="mt-1 text-xs text-[#64748b]">{formatDate(activity.created_at)} · {activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System"}</p>
                       </div>
                       <p className="text-xs text-[#64748b]">{formatDateTime(activity.created_at)}</p>
                     </div>
@@ -1045,16 +1215,6 @@ export default async function OrderDetailPage({
         </div>
 
         <aside className="space-y-6">
-          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Order Actions</h2>
-            <div className="mt-4 space-y-2">
-              <a href="#notes" className="btn-primary flex w-full justify-center">Add Note</a>
-              <button type="button" className="btn-secondary w-full" disabled>Add Shipment</button>
-              <button type="button" className="btn-secondary w-full" disabled>Split Order</button>
-              <button type="button" className="btn-secondary w-full" disabled>Cancel Order</button>
-            </div>
-          </section>
-
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Order Summary</h2>
             <div className="mt-4 space-y-2 text-sm text-[#374151]">

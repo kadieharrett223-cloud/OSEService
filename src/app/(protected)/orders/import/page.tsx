@@ -22,7 +22,6 @@ type PendingDuplicateEntry = {
     id: string;
     orderNumber: string | null;
     reviewStatus: string | null;
-    fulfillmentStatus: string | null;
     customerName: string | null;
     createdAt: string | null;
   }>;
@@ -218,7 +217,7 @@ export default async function OrderImportPage({
                                 Open existing order
                               </Link>
                               <p className="mt-1 text-xs text-[#5a5a5a]">
-                                Customer: {existingOrder.customerName ?? "Unknown"} • Review: {existingOrder.reviewStatus ?? "-"} • Fulfillment: {existingOrder.fulfillmentStatus ?? "-"}
+                                Customer: {existingOrder.customerName ?? "Unknown"} • Review: {existingOrder.reviewStatus ?? "-"}
                               </p>
                               <p className="text-xs text-[#5a5a5a]">Created: {existingOrder.createdAt ? new Date(existingOrder.createdAt).toLocaleString() : "-"}</p>
                             </div>

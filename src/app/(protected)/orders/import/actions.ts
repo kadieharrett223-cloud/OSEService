@@ -22,7 +22,6 @@ type PendingDuplicateEntry = {
     id: string;
     orderNumber: string | null;
     reviewStatus: string | null;
-    fulfillmentStatus: string | null;
     customerName: string | null;
     createdAt: string | null;
   }>;
@@ -32,6 +31,14 @@ type PendingImportSession = {
   stagedPath: string;
   mode: "apply";
   duplicates: PendingDuplicateEntry[];
+};
+
+type ExistingShippingOrderRow = {
+  id: string;
+  order_number: string | null;
+  review_status: string | null;
+  legacy_customer_name: string | null;
+  created_at: string | null;
 };
 
 function sanitizeFileSegment(value: string) {
@@ -53,6 +60,20 @@ function getReportFileName(mode: "preview" | "apply") {
 
 async function ensureDir(dirPath: string) {
   await fs.mkdir(dirPath, { recursive: true });
+}
+
+async function loadTableColumnSet(tableName: string, candidates: string[]) {
+  const supabase = getSupabaseAdmin();
+  const columns = new Set<string>();
+
+  for (const column of candidates) {
+    const { error } = await supabase.from(tableName).select(column).limit(1);
+    if (!error) {
+      columns.add(column);
+    }
+  }
+
+  return columns;
 }
 
 function isPathInside(parentPath: string, childPath: string) {
@@ -124,7 +145,7 @@ async function detectExistingInvoiceDuplicates(payloadText: string) {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from("shipping_orders")
-    .select("id, order_number, review_status, fulfillment_status, legacy_customer_name, created_at")
+    .select("id, order_number, review_status, legacy_customer_name, created_at")
     .in("order_number", invoiceNumbers);
 
   if (error) {
@@ -132,7 +153,8 @@ async function detectExistingInvoiceDuplicates(payloadText: string) {
   }
 
   const existingByInvoice = new Map<string, PendingDuplicateEntry["existingOrders"]>();
-  for (const row of data ?? []) {
+  const existingRows = (data ?? []) as unknown as ExistingShippingOrderRow[];
+  for (const row of existingRows) {
     const invoiceNumber = normalizeInvoiceNumber(row.order_number);
     if (!invoiceNumber) continue;
     const existingOrders = existingByInvoice.get(invoiceNumber) ?? [];
@@ -140,7 +162,6 @@ async function detectExistingInvoiceDuplicates(payloadText: string) {
       id: row.id,
       orderNumber: row.order_number,
       reviewStatus: row.review_status,
-      fulfillmentStatus: row.fulfillment_status,
       customerName: row.legacy_customer_name,
       createdAt: row.created_at,
     });

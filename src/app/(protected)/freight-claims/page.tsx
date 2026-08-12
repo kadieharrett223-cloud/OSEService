@@ -103,6 +103,8 @@ export default async function FreightClaimsPage({
   const openClaims = freightRows.filter((row) => !isResolvedStatus(row.status)).length;
   const highPriorityClaims = freightRows.filter((row) => row.priority === "High" && !isResolvedStatus(row.status)).length;
   const waitingCustomerClaims = freightRows.filter((row) => row.status === "Waiting for Customer").length;
+  const inProgressClaims = freightRows.filter((row) => row.status === "In Progress").length;
+  const resolvedClaims = freightRows.filter((row) => isResolvedStatus(row.status)).length;
 
   const filteredRows = ((rows ?? []) as unknown as FreightClaimRow[]).filter((row) => {
     const shouldHideCompletedByDefault = !params.status && !params.priority && !params.employee && !query;
@@ -152,25 +154,22 @@ export default async function FreightClaimsPage({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Freight Claims</p>
-          <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Freight Claim Tracking</h1>
-          <p className="mt-2 max-w-2xl text-sm text-[#5a5a5a]">
-            Track damage and freight claims as operational cases. Open claims, carrier follow-up, and resolution all stay in one workflow.
-          </p>
+          <h1 className="text-3xl">Freight Claim List</h1>
+          <p className="text-sm text-[#5a5a5a]">Track freight damage claims in the same workflow used for service cases.</p>
         </div>
         <div className="flex gap-2">
           <Link href="/cases/new?case_type=Freight%20Damage" className="btn-primary">
             Create Freight Claim
           </Link>
           <Link href="/cases" className="btn-secondary">
-            Back to Cases
+            Cases
           </Link>
         </div>
       </div>
 
-      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
         <article className="card p-3">
           <p className="text-xs text-[#6b7280]">Open Claims</p>
           <p className="mt-1 text-3xl font-semibold text-[#111827]">{openClaims}</p>
@@ -185,6 +184,16 @@ export default async function FreightClaimsPage({
           <p className="text-xs text-[#6b7280]">Waiting Customer</p>
           <p className="mt-1 text-3xl font-semibold text-[#111827]">{waitingCustomerClaims}</p>
           <Link href="/freight-claims?status=Waiting%20for%20Customer" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Open →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">In Progress</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{inProgressClaims}</p>
+          <Link href="/freight-claims?status=In%20Progress" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Track →</Link>
+        </article>
+        <article className="card p-3">
+          <p className="text-xs text-[#6b7280]">Resolved</p>
+          <p className="mt-1 text-3xl font-semibold text-[#111827]">{resolvedClaims}</p>
+          <Link href="/freight-claims?status=Resolved" className="mt-2 inline-flex text-xs font-medium text-[#d50917] hover:underline">Review →</Link>
         </article>
         <article className="card p-3">
           <p className="text-xs text-[#6b7280]">Updated (7 days)</p>

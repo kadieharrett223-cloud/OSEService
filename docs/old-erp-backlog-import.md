@@ -62,6 +62,30 @@ Protected staff can now run the backlog import from `/orders/import`.
 
 This route is intended for local/sandbox operational use where the workspace can write staged files and report files.
 
+## Import Previous Azure SKU Mappings
+
+If the OLD_ERP backlog payload includes historical `matchedItemCode` values, you can recover those mappings into `product_aliases`.
+
+1. Build a mapping preview CSV from backlog JSON:
+
+```powershell
+node scripts/import-old-erp-sku-mapping-from-backlog.mjs --input imports/backlog/manual-import.json --csv-out tmp/azure-previous-sku-mapping.csv
+```
+
+2. Review the generated CSV (`sku,canonical_product_sku,notes`).
+
+3. Apply mappings into `product_aliases`:
+
+```powershell
+node scripts/import-old-erp-sku-mapping-from-backlog.mjs --input imports/backlog/manual-import.json --csv-out tmp/azure-previous-sku-mapping.csv --apply
+```
+
+Behavior notes:
+
+- Uses `itemCode -> matchedItemCode` pairs from the backlog payload.
+- Skips alias rows where one alias maps to conflicting canonical SKUs.
+- Resolves canonical products by `products.sku` (with compact SKU fallback).
+
 ## Risk
 
 Medium.

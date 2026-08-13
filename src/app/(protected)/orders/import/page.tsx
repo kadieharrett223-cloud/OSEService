@@ -150,6 +150,13 @@ export default async function OrderImportPage({
         <p className="mt-1 text-sm text-[#5a5a5a]">
           Use the JSON array shape from OLD_ERP queue exports. You can upload a JSON file or paste raw JSON directly.
         </p>
+        <div className="mt-3 rounded-lg border border-[#dbe3ee] bg-[#f8fafc] p-3 text-sm text-[#334155]">
+          <p className="font-medium text-[#111827]">What this import includes</p>
+          <p className="mt-1">
+            Only approved, open demand is imported. Denied, removed, fulfilled, shipped, or otherwise closed rows stay out of the apply set.
+            Preview and apply use the same filter, and the report shows what was included, excluded, and left unmapped.
+          </p>
+        </div>
         <form action={bulkImportOrdersAction} className="mt-4 space-y-4">
           <div className="grid gap-4 xl:grid-cols-[1fr_1.4fr]">
             <div className="space-y-2">
@@ -214,7 +221,7 @@ export default async function OrderImportPage({
                           {duplicate.existingOrders.map((existingOrder) => (
                             <div key={existingOrder.id} className="rounded-md border border-[#ececec] bg-[#fafbfc] p-2">
                               <Link href={`/orders/${existingOrder.id}`} className="font-semibold text-[#b20610] hover:underline">
-                                Open existing order
+                                Open existing order {existingOrder.orderNumber ? `#${existingOrder.orderNumber}` : ""}
                               </Link>
                               <p className="mt-1 text-xs text-[#5a5a5a]">
                                 Customer: {existingOrder.customerName ?? "Unknown"} • Review: {existingOrder.reviewStatus ?? "-"}
@@ -240,6 +247,27 @@ export default async function OrderImportPage({
 
       {report ? (
         <div className="space-y-4">
+          <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <article className="card p-3">
+              <p className="text-xs text-[#6b7280]">Imported Orders</p>
+              <p className="mt-1 text-3xl font-semibold text-[#111827]">{formatCount(report.results?.ordersUpserted ?? report.preview.eligibleOrderCount)}</p>
+            </article>
+            <article className="card p-3">
+              <p className="text-xs text-[#6b7280]">Imported Lines</p>
+              <p className="mt-1 text-3xl font-semibold text-[#111827]">{formatCount(report.results?.linesUpserted ?? report.preview.eligibleLineCount)}</p>
+            </article>
+            <article className="card p-3">
+              <p className="text-xs text-[#6b7280]">Excluded Rows</p>
+              <p className="mt-1 text-3xl font-semibold text-[#111827]">
+                {formatCount(Object.values(report.preview.excluded).reduce((sum, value) => sum + value, 0))}
+              </p>
+            </article>
+            <article className="card p-3">
+              <p className="text-xs text-[#6b7280]">Unmapped SKUs</p>
+              <p className="mt-1 text-3xl font-semibold text-[#111827]">{formatCount(report.preview.unmappedSkuCount)}</p>
+            </article>
+          </section>
+
           <section className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
             <article className="card p-3">
               <p className="text-xs text-[#6b7280]">Source Records</p>
@@ -252,10 +280,6 @@ export default async function OrderImportPage({
             <article className="card p-3">
               <p className="text-xs text-[#6b7280]">Eligible Lines</p>
               <p className="mt-1 text-3xl font-semibold text-[#111827]">{formatCount(report.preview.eligibleLineCount)}</p>
-            </article>
-            <article className="card p-3">
-              <p className="text-xs text-[#6b7280]">Unmapped SKUs</p>
-              <p className="mt-1 text-3xl font-semibold text-[#111827]">{formatCount(report.preview.unmappedSkuCount)}</p>
             </article>
             <article className="card p-3">
               <p className="text-xs text-[#6b7280]">Suggested Container</p>
@@ -271,6 +295,13 @@ export default async function OrderImportPage({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl font-semibold text-[#121826]">Latest Report</h2>
               <p className="text-sm text-[#5a5a5a]">{report.mode} • {new Date(report.generatedAt).toLocaleString()}</p>
+            </div>
+            <div className="mt-3 rounded-lg border border-[#dbe3ee] bg-[#f8fafc] p-3 text-sm text-[#334155]">
+              <p className="font-medium text-[#111827]">Apply scope</p>
+              <p className="mt-1">
+                Eligible records are grouped into orders, then written to shipping orders and shipping order lines. These counts show what was imported,
+                what was excluded, and what still needs SKU mapping review.
+              </p>
             </div>
             <div className="mt-4 grid gap-4 xl:grid-cols-2">
               <div>

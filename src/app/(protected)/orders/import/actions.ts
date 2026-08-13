@@ -119,11 +119,38 @@ function normalizeInvoiceNumber(value: unknown) {
   return text.length > 0 ? text : null;
 }
 
-async function detectExistingInvoiceDuplicates(payloadText: string) {
-  const parsed = JSON.parse(payloadText);
-  if (!Array.isArray(parsed)) {
-    redirect("/orders/import?error=Bulk+upload+JSON+must+be+an+array+of+records");
+function parseImportPayload(payloadText: string) {
+  const cleanedText = payloadText.replace(/^\uFEFF/, "").trim();
+  const parsed = JSON.parse(cleanedText);
+  const normalized = typeof parsed === "string"
+    ? JSON.parse(parsed.replace(/^\uFEFF/, "").trim())
+    : parsed;
+
+  if (Array.isArray(normalized)) {
+    return normalized;
   }
+
+  if (normalized && typeof normalized === "object") {
+    const records = (normalized as { records?: unknown; items?: unknown }).records;
+    if (Array.isArray(records)) {
+      return records;
+    }
+
+    const items = (normalized as { records?: unknown; items?: unknown }).items;
+    if (Array.isArray(items)) {
+      return items;
+    }
+  }
+
+  redirect("/orders/import?error=Bulk+upload+JSON+must+be+an+array+of+records");
+}
+
+function normalizeImportPayloadText(payloadText: string) {
+  return `${JSON.stringify(parseImportPayload(payloadText), null, 2)}\n`;
+}
+
+async function detectExistingInvoiceDuplicates(payloadText: string) {
+  const parsed = parseImportPayload(payloadText);
 
   const invoiceMap = new Map<string, Set<string>>();
   for (const record of parsed) {
@@ -203,14 +230,11 @@ async function loadPendingImportSession(token: string) {
 
 async function filterPayloadBySkippedInvoices(stagedPath: string, skippedInvoices: string[]) {
   const raw = await fs.readFile(stagedPath, "utf8");
-  const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed)) {
-    redirect("/orders/import?error=Pending+payload+is+not+a+JSON+array");
-  }
+  const parsed = parseImportPayload(raw);
 
   const skipSet = new Set(skippedInvoices.map((invoiceNumber) => invoiceNumber.trim()).filter(Boolean));
   if (skipSet.size === 0) {
-    return raw;
+    return normalizeImportPayloadText(raw);
   }
 
   const filtered = parsed.filter((record) => {
@@ -285,16 +309,17 @@ export async function bulkImportOrdersAction(formData: FormData) {
 
   const { payloadText, sourceLabel } = await resolvePayloadText(formData);
 
+  let normalizedPayloadText: string;
   try {
-    JSON.parse(payloadText);
+    normalizedPayloadText = normalizeImportPayloadText(payloadText);
   } catch {
     redirect("/orders/import?error=Uploaded+content+is+not+valid+JSON");
   }
 
   if (mode === "apply") {
-    const duplicates = await detectExistingInvoiceDuplicates(payloadText);
+    const duplicates = await detectExistingInvoiceDuplicates(normalizedPayloadText);
     if (duplicates.length > 0) {
-      const stagedPathForReview = await stagePayload(sourceLabel, payloadText);
+      const stagedPathForReview = await stagePayload(sourceLabel, normalizedPayloadText);
       const pendingTokenValue = await writePendingImportSession({
         stagedPath: stagedPathForReview,
         mode,
@@ -304,7 +329,7 @@ export async function bulkImportOrdersAction(formData: FormData) {
     }
   }
 
-  const stagedPath = await stagePayload(sourceLabel, payloadText);
+  const stagedPath = await stagePayload(sourceLabel, normalizedPayloadText);
   const reportName = await runImporter({ stagedPath, mode });
 
   revalidatePath("/orders");

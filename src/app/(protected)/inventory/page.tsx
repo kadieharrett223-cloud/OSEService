@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
 import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
+import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -344,43 +345,12 @@ export default async function InventoryPage({
                     <td className="px-2 py-3">{formatNumber(row.incoming)}</td>
                     <td className="px-2 py-3">{row.nextEta}</td>
                     <td className="px-2 py-3">
-                      <details className="relative">
-                        <summary className="cursor-pointer list-none text-sm font-semibold text-[#2563eb] hover:underline">
-                          Customer List ({row.customerQueue.length})
-                        </summary>
-                        <div className="mt-2 w-[min(760px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-[#dbe3ee] bg-white p-4 shadow-lg ring-1 ring-[#0f172a]/5">
-                          <div className="flex items-start justify-between gap-4 border-b border-[#e2e8f0] pb-3">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Open customer demand</p>
-                              <h3 className="mt-1 line-clamp-2 max-w-[480px] break-words text-base font-semibold leading-5 text-[#0f172a]" title={row.productName}>{row.productName}</h3>
-                              <p className="mt-1 text-xs text-[#64748b]">SKU {row.sku} · {row.customerQueue.length} customer{row.customerQueue.length === 1 ? "" : "s"}</p>
-                            </div>
-                            <div className="text-right text-xs text-[#64748b]">
-                              <p>Open quantity</p>
-                              <p className="mt-1 text-lg font-semibold text-[#0f172a]">{formatNumber(row.soldOpenDemand)}</p>
-                            </div>
-                          </div>
-                          {row.customerQueue.length === 0 ? (
-                            <p className="px-2 py-2 text-xs text-[#64748b]">No approved open queue for this SKU.</p>
-                          ) : (
-                            <div className="mt-3 max-h-[min(420px,60vh)] space-y-2 overflow-y-auto pr-1">
-                              {row.customerQueue.map((item, idx) => (
-                                <div key={`${item.orderId}-${item.invoice}-${idx}`} className="grid gap-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs sm:grid-cols-[minmax(0,1.4fr)_minmax(150px,1fr)_auto] sm:items-center">
-                                  <div className="min-w-0">
-                                    <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
-                                    <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
-                                  </div>
-                                  <div className="text-[#475569]">
-                                    <div>Qty <span className="font-semibold text-[#1e293b]">{formatNumber(item.qty)}</span> · {item.status}</div>
-                                    <div className="mt-1 truncate text-[#64748b]">{item.assignedTo}</div>
-                                  </div>
-                                  {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </details>
+                      <CustomerDemandDropdown
+                        productName={row.productName}
+                        sku={row.sku}
+                        openQuantity={formatNumber(row.soldOpenDemand)}
+                        customerQueue={row.customerQueue}
+                      />
                     </td>
                   </tr>
                 ))

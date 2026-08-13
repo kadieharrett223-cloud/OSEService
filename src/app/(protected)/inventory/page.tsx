@@ -289,16 +289,19 @@ export default async function InventoryPage({
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <form className="space-y-3">
-          <label htmlFor="inventory-search" className="text-sm font-semibold text-[#334155]">Search SKU / Product</label>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Product lookup</p>
+            <label htmlFor="inventory-search" className="mt-1 block text-sm font-semibold text-[#334155]">Find an item by name or SKU</label>
+          </div>
           <div className="flex flex-wrap gap-2">
             <input
               id="inventory-search"
               name="q"
               defaultValue={params.q ?? ""}
-              placeholder="Type SKU or product name..."
+              placeholder="Search item name or SKU..."
               className="input min-w-[260px] flex-1 text-base"
             />
-            <button className="btn-secondary" type="submit">Search</button>
+            <button className="btn-primary" type="submit">Lookup</button>
             <Link className="btn-ghost" href="/inventory">Clear</Link>
           </div>
         </form>
@@ -330,8 +333,8 @@ export default async function InventoryPage({
                 rows.map((row) => (
                   <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
-                      <div className="font-semibold text-[#1d4ed8]">{row.sku}</div>
-                      <div className="text-xs text-[#64748b]">{row.productName}</div>
+                      <div className="font-semibold text-[#111827]">{row.productName}</div>
+                      <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
                     </td>
                     <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
                     <td className="px-2 py-3">{formatNumber(row.soldOpenDemand)}</td>

@@ -112,6 +112,15 @@ Latest apply result:
 - Repeat preview: `1,017` already imported, `0` new orders
 - QBO exceptions: `3,352` invoices with no mapped product line
 
+New/Review order handling:
+
+- New/Review cards now include `Accept Order`.
+- Accepting an order approves each pending line, sets approved quantity to ordered quantity, moves the line to `READY_TO_SHIP`, and marks the order `APPROVED`.
+- Accepting an order does not create inventory allocations or change inventory quantities.
+- Existing line-level review remains available for partial/exception handling.
+
+SKU mapping remains review-gated. The remaining seven OLD_ERP values and QBO invoices with unmapped lines are not silently assigned to products because a guessed mapping would change operational inventory and queue meaning.
+
 ## Final Dry-Run Status (2026-08-13)
 
 The latest complete reconciliation is:

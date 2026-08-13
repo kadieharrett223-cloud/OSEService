@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { updateDeniedArchiveReasonAction } from "./actions";
+import { acceptNewOrderAction, updateDeniedArchiveReasonAction } from "./actions";
 
 type OrderSummary = {
   id: string;
@@ -344,6 +344,12 @@ export default async function OrdersPage({
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex">Open order</Link>
+                    {activeTab === "review" ? (
+                      <form action={acceptNewOrderAction}>
+                        <input type="hidden" name="orderId" value={order.id} />
+                        <button type="submit" className="btn-primary inline-flex">Accept Order</button>
+                      </form>
+                    ) : null}
                   </div>
                 </div>
               );

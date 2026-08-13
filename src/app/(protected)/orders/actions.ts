@@ -199,6 +199,71 @@ export async function updateOrderLineStatusAction(formData: FormData) {
   redirect(`/orders/${orderId}`);
 }
 
+export async function acceptNewOrderAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  if (!orderId) {
+    redirect("/orders?error=Missing+order+reference");
+  }
+
+  const adminClient = getSupabaseAdmin();
+  const { data: lines, error: linesError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, ordered_qty, approval_status, fulfillment_status")
+    .eq("shipping_order_id", orderId);
+
+  if (linesError) {
+    redirect(`/orders?error=${encodeURIComponent(linesError.message)}`);
+  }
+
+  const pendingLines = (lines ?? []).filter((line) => line.approval_status === "PENDING_REVIEW");
+  if (pendingLines.length === 0) {
+    redirect("/orders?message=Order+has+no+pending+review+lines");
+  }
+
+  for (const line of pendingLines) {
+    const { error: lineUpdateError } = await adminClient
+      .from("shipping_order_lines")
+      .update({
+        approved_qty: Number(line.ordered_qty ?? 0),
+        approval_status: "APPROVED",
+        warehouse_status: "READY_TO_SHIP",
+        fulfillment_status: "PENDING",
+        approved_at: new Date().toISOString(),
+      })
+      .eq("id", line.id);
+
+    if (lineUpdateError) {
+      redirect(`/orders?error=${encodeURIComponent(lineUpdateError.message)}`);
+    }
+  }
+
+  const { error: orderUpdateError } = await adminClient
+    .from("shipping_orders")
+    .update({
+      review_status: "APPROVED",
+      fulfillment_status: "PENDING",
+    })
+    .eq("id", orderId);
+
+  if (orderUpdateError) {
+    redirect(`/orders?error=${encodeURIComponent(orderUpdateError.message)}`);
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_ACCEPTED", {
+    action: "accept_order",
+    accepted_line_count: pendingLines.length,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/shipping-review");
+  revalidatePath("/order-queue");
+  revalidatePath("/inventory");
+  redirect("/orders?message=Order+accepted");
+}
+
 export async function updateOrderScheduleAction(formData: FormData) {
   await requireUser();
 

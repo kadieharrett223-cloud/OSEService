@@ -93,12 +93,29 @@ function toIsoTimestamp(value) {
   return parsed.toISOString();
 }
 
+function resolveReasonCategory(rawReasonCategory, reason) {
+  const normalizedCategory = normalizeText(rawReasonCategory);
+  if (normalizedCategory === "setup_rollback" || normalizedCategory === "cancel_deny_rollback") {
+    return normalizedCategory;
+  }
+
+  const normalizedReason = String(reason ?? "").toLowerCase();
+  if (normalizedReason.startsWith("queue item removal rollback:")) {
+    return "cancel_deny_rollback";
+  }
+  if (normalizedReason.startsWith("rollback prior setup invoice import")) {
+    return "setup_rollback";
+  }
+
+  return null;
+}
+
 function assertRequiredSchema(record) {
   const sourceId = normalizeText(record?.id);
   const invoiceNumber = normalizeText(record?.invoiceNumber);
   const itemCode = normalizeText(record?.itemCode);
-  const reasonCategory = normalizeText(record?.reasonCategory);
   const reason = normalizeText(record?.reason);
+  const reasonCategory = resolveReasonCategory(record?.reasonCategory, reason);
 
   if (!sourceId || !invoiceNumber || !itemCode || !reasonCategory || !reason) {
     return null;

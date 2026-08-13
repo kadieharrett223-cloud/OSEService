@@ -206,3 +206,32 @@ Dry-run report includes:
 - records with inventoryRolledBack=true
 - unknown/unclassified reasons
 - up to 10 representative examples per classification
+
+## Azure Cosmos Read-Only Export
+
+This repo now supports direct read-only export from the legacy Azure Cosmos DB account into local JSON files.
+
+- Script: `scripts/export-azure-cosmos.mjs`
+- NPM command: `npm run azure:export -- <ContainerName>`
+
+Supported examples:
+
+- `npm run azure:export -- InvoiceQueueItems`
+- `npm run azure:export -- ContainerDrafts`
+- `npm run azure:export -- InventoryAdjustments`
+- `npm run azure:export -- Products`
+- `npm run azure:export -- WarehouseInvoices`
+
+Credential requirements are server-only and must not be committed:
+
+- `OLD_ERP_COSMOS_DATABASE`
+- either `OLD_ERP_COSMOS_CONNECTION_STRING`
+- or both `OLD_ERP_COSMOS_ENDPOINT` and `OLD_ERP_COSMOS_KEY`
+
+Behavior guarantees:
+
+- Uses `SELECT * FROM c` by default.
+- Reads all result pages automatically.
+- Saves raw Azure payload unchanged to `tmp/exports/azure-<container>-<timestamp>.json`.
+- Writes an export report with total records and pages fetched to `tmp/import-reports/`.
+- Performs no updates, inserts, deletes, or stored procedure execution against Cosmos.

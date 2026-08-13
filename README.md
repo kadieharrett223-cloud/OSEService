@@ -39,6 +39,24 @@ Simple internal web app for customer service case tracking.
 2. Fill in Supabase URL, anon key, service role key, app session secret, and shared access code
 3. Keep QuickBooks values empty or sandbox-only until Phase 2
 
+### Optional OLD ERP Azure Cosmos Read-Only Export
+
+For raw export access to the legacy Cosmos DB, set server-only variables in `.env.local`:
+
+- `OLD_ERP_COSMOS_DATABASE=<database-name>`
+- `OLD_ERP_COSMOS_CONNECTION_STRING=<read-only-connection-string>`
+
+Or, instead of a connection string:
+
+- `OLD_ERP_COSMOS_ENDPOINT=<https://...documents.azure.com:443/>`
+- `OLD_ERP_COSMOS_KEY=<read-only-key>`
+
+Example export command:
+
+`npm run azure:export -- InvoiceQueueItems`
+
+This reads all pages for `SELECT * FROM c` and saves a timestamped raw JSON export under `tmp/exports/` plus a report under `tmp/import-reports/`.
+
 ## Local Setup
 
 1. Install dependencies

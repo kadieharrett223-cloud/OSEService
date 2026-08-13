@@ -147,6 +147,21 @@ export default async function OrdersPage({
 
   const allOrders = (orders ?? []) as OrderSummary[];
 
+  const deniedCustomerByInvoice = new Map<string, string>();
+  for (const order of allOrders) {
+    const customerName = order.customers?.company_name
+      ?? order.customers?.full_name
+      ?? order.legacy_customer_name
+      ?? null;
+
+    if (!customerName) continue;
+
+    const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? null;
+    if (!invoiceNumber) continue;
+
+    deniedCustomerByInvoice.set(invoiceNumber.toUpperCase(), customerName);
+  }
+
   function matchesTab(order: OrderSummary, tabId: string) {
     const lines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
@@ -338,37 +353,42 @@ export default async function OrdersPage({
 
         {activeTab === "denied" && !deniedRollupError && deniedSummaries.length > 0 ? (
           <div className="space-y-3">
-            {deniedSummaries.map((entry) => (
-              <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-[#111827]">Invoice #{entry.canonical_invoice_number}</p>
-                    <p className="mt-1 text-sm text-[#374151]">Item {entry.canonical_item_code}</p>
-                    <p className="mt-1 text-sm text-[#5a5a5a]">Occurrences {entry.occurrence_count}</p>
-                    <p className="mt-1 text-xs text-[#6b7280]">First seen {formatDate(entry.first_seen_at)} • Last seen {formatDate(entry.last_seen_at)}</p>
-                  </div>
-                  <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">Denied</span>
-                </div>
+            {deniedSummaries.map((entry) => {
+              const customerName = deniedCustomerByInvoice.get(entry.canonical_invoice_number.toUpperCase()) ?? "Customer not available";
 
-                <form action={updateDeniedArchiveReasonAction} className="mt-4 space-y-2">
-                  <input type="hidden" name="rollup_id" value={entry.id} />
-                  <input type="hidden" name="return_path" value={searchText ? `/orders?tab=denied&q=${encodeURIComponent(searchText)}` : "/orders?tab=denied"} />
-                  <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]" htmlFor={`reason-${entry.id}`}>
-                    Denied reason (editable)
-                  </label>
-                  <textarea
-                    id={`reason-${entry.id}`}
-                    name="canonical_reason"
-                    defaultValue={entry.canonical_reason}
-                    className="w-full rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#111827] focus:border-[#111827] focus:outline-none"
-                    rows={2}
-                  />
-                  <div className="flex flex-wrap gap-2">
-                    <button type="submit" className="btn-secondary">Save reason</button>
+              return (
+                <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-[#111827]">Invoice #{entry.canonical_invoice_number}</p>
+                      <p className="mt-1 text-sm text-[#374151]">{customerName}</p>
+                      <p className="mt-1 text-sm text-[#374151]">Item {entry.canonical_item_code}</p>
+                      <p className="mt-1 text-sm text-[#5a5a5a]">Occurrences {entry.occurrence_count}</p>
+                      <p className="mt-1 text-xs text-[#6b7280]">First seen {formatDate(entry.first_seen_at)} • Last seen {formatDate(entry.last_seen_at)}</p>
+                    </div>
+                    <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">Denied</span>
                   </div>
-                </form>
-              </div>
-            ))}
+
+                  <form action={updateDeniedArchiveReasonAction} className="mt-4 space-y-2">
+                    <input type="hidden" name="rollup_id" value={entry.id} />
+                    <input type="hidden" name="return_path" value={searchText ? `/orders?tab=denied&q=${encodeURIComponent(searchText)}` : "/orders?tab=denied"} />
+                    <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]" htmlFor={`reason-${entry.id}`}>
+                      Denied reason (editable)
+                    </label>
+                    <textarea
+                      id={`reason-${entry.id}`}
+                      name="canonical_reason"
+                      defaultValue={entry.canonical_reason}
+                      className="w-full rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#111827] focus:border-[#111827] focus:outline-none"
+                      rows={2}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button type="submit" className="btn-secondary">Save reason</button>
+                    </div>
+                  </form>
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </div>

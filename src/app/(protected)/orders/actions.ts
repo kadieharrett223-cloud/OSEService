@@ -644,7 +644,7 @@ export async function updateDeniedArchiveReasonAction(formData: FormData) {
 
   const { error: rollupUpdateError } = await adminClient
     .from("order_history_reason_rollups")
-    .update({ canonical_reason: nextReason })
+    .update({ canonical_reason: nextReason } as never)
     .eq("id", rollup.id);
 
   if (rollupUpdateError) {
@@ -653,7 +653,7 @@ export async function updateDeniedArchiveReasonAction(formData: FormData) {
 
   const { error: rawUpdateError } = await adminClient
     .from("order_history_reason_events_raw")
-    .update({ reason: nextReason })
+    .update({ reason: nextReason } as never)
     .eq("reason_category", rollup.reason_category)
     .eq("invoice_number_normalized", rollup.invoice_number_normalized)
     .eq("item_code_normalized", rollup.item_code_normalized)

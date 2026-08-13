@@ -315,7 +315,7 @@ export default async function InventoryPage({
           <table className="w-full min-w-[980px] text-left text-sm">
             <thead>
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                <th className="px-2 py-2">SKU</th>
+                <th className="w-[280px] max-w-[280px] px-2 py-2">Item</th>
                 <th className="px-2 py-2">On Floor</th>
                 <th className="px-2 py-2">Sold / Open Demand</th>
                 <th className="px-2 py-2">Available Now</th>
@@ -332,8 +332,8 @@ export default async function InventoryPage({
               ) : (
                 rows.map((row) => (
                   <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
-                    <td className="px-2 py-3">
-                      <div className="font-semibold text-[#111827]">{row.productName}</div>
+                    <td className="w-[280px] max-w-[280px] px-2 py-3">
+                      <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
                       <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
                     </td>
                     <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
@@ -352,7 +352,7 @@ export default async function InventoryPage({
                           <div className="flex items-start justify-between gap-4 border-b border-[#e2e8f0] pb-3">
                             <div>
                               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Open customer demand</p>
-                              <h3 className="mt-1 text-base font-semibold text-[#0f172a]">{row.productName}</h3>
+                              <h3 className="mt-1 line-clamp-2 max-w-[480px] break-words text-base font-semibold leading-5 text-[#0f172a]" title={row.productName}>{row.productName}</h3>
                               <p className="mt-1 text-xs text-[#64748b]">SKU {row.sku} · {row.customerQueue.length} customer{row.customerQueue.length === 1 ? "" : "s"}</p>
                             </div>
                             <div className="text-right text-xs text-[#64748b]">
@@ -374,7 +374,7 @@ export default async function InventoryPage({
                                     <div>Qty <span className="font-semibold text-[#1e293b]">{formatNumber(item.qty)}</span> · {item.status}</div>
                                     <div className="mt-1 truncate text-[#64748b]">{item.assignedTo}</div>
                                   </div>
-                                  {item.orderId ? <Link href={`/orders/${item.orderId}`} className="font-semibold text-[#2563eb] hover:underline">Open order</Link> : <span>—</span>}
+                                  {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
                                 </div>
                               ))}
                             </div>

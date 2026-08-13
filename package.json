@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "import:denied-cancelled-history": "node scripts/import-old-erp-denied-cancelled-history.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

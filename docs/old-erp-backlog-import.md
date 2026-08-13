@@ -93,3 +93,83 @@ Medium.
 - Safe for existing order rows because the schema change is additive.
 - Import behavior changes for all future Azure backlog runs.
 - Existing manually confirmed allocations remain the live source of truth.
+
+## Historical Denied And Cancelled Migration (Archive-Only)
+
+This is a separate workflow from active backlog import.
+
+It ingests historical rollback events from the authoritative categorized export and stores them in archive-only tables.
+
+Required source categories and expected counts:
+
+- `setup_rollback`: `353` rows (forensic-only)
+- `cancel_deny_rollback`: `88` rows (business denied/cancelled history)
+
+### Destination Tables
+
+- Raw forensic/event storage: `order_history_reason_events_raw`
+- Grouped read model for archive UI: `order_history_reason_rollups`
+
+Both tables are isolated from active order and inventory workflow tables.
+
+### Fields Stored
+
+Raw table (`order_history_reason_events_raw`) stores full row fidelity:
+
+- source identity: `source_system`, `source_container`, `source_id`
+- business keys: `invoice_number`, `invoice_number_normalized`, `item_code`, `item_code_normalized`
+- reason fields: `reason_category`, `reason`, `reason_normalized`
+- metadata: `actor`, `adjusted_at`, `created_at`, `import_batch_id`, `imported_at`
+- full payload: `raw_payload` (`jsonb`)
+
+Rollup table (`order_history_reason_rollups`) stores grouped archive records:
+
+- grouping keys: `reason_category`, `invoice_number_normalized`, `item_code_normalized`, `reason_normalized`
+- display fields: `canonical_invoice_number`, `canonical_item_code`, `canonical_reason`
+- history fields: `first_seen_at`, `last_seen_at`, `occurrence_count`, `actors`
+
+### Import Behavior
+
+- Import script: `scripts/import-old-erp-denied-cancelled-history.mjs`
+- NPM command: `npm run import:denied-cancelled-history -- --input <path-to-categorized-export.json>`
+
+Behavior guarantees:
+
+- Raw ingestion performs no dedupe and preserves every valid source row.
+- `setup_rollback` rows are imported but treated as forensic-only.
+- `cancel_deny_rollback` rows are imported and shown in business denied/cancelled archive history.
+- Rollups are rebuilt with:
+	- `firstSeenAt` = earliest event timestamp per group
+	- `lastSeenAt` = latest event timestamp per group
+	- `occurrenceCount` = total rows per group
+
+### UI Appearance
+
+`/order-archive` now includes a dedicated **Denied & Cancelled History** section driven by `order_history_reason_rollups` filtered to `reason_category = cancel_deny_rollback`.
+
+It displays:
+
+- invoice number
+- item code
+- reason
+- occurrence count
+- first seen / last seen dates
+- actors (if present)
+
+### Safety And Non-Impact Guarantee
+
+This migration path does not write to or mutate:
+
+- `shipping_orders`
+- `shipping_order_lines`
+- `inventory_allocations`
+- inventory container/floor stock tables
+- any active Service Tracker demand/order state
+
+It is archive-only storage and read-model generation for historical visibility.
+
+### Schema And Route Ownership
+
+- Migration: `supabase/migrations/202608130001_historical_denied_cancelled_archive.sql`
+- Import script: `scripts/import-old-erp-denied-cancelled-history.mjs`
+- Archive UI route: `src/app/(protected)/order-archive/page.tsx`

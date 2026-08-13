@@ -99,6 +99,8 @@ The latest complete reconciliation is:
 
 These exceptions are intentionally not auto-resolved. The remaining SKU values include deleted/variant/description-style legacy codes, and the customer groups have conflicting identity evidence. They require explicit mapping decisions before a clean rebuild can be considered complete.
 
+The scoped reset preview now includes the complete raw archive. The latest preview identifies `20,337` OLD_ERP-derived rows across `13` tables, including `18,136` rows in `old_erp_source_records`. This is a preview count only; no reset or delete was executed.
+
 The legacy alias recovery pass found five deterministic mappings, applied one new alias, and left existing aliases unchanged. The importer uses insert-only behavior because the current `product_aliases` update trigger references a missing `updated_at` column; this avoids mutating existing mappings while that schema defect is addressed.
 
 ## Data Flow

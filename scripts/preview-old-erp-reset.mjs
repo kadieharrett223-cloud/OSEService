@@ -310,6 +310,14 @@ export async function buildResetPreview() {
     warnings,
   });
 
+  const oldSourceArchiveIds = await safelyResolveIds({
+    table: "old_erp_source_records",
+    resolver: () => fetchIdsByEq(supabase, "old_erp_source_records", "source_system", OLD_ERP_ARCHIVE_SOURCE_SYSTEM),
+    missingTables,
+    optionalMissingTables,
+    warnings,
+  });
+
   const tables = [
     tableCountEntry("order_attachments", oldOrderAttachmentIds),
     tableCountEntry("fulfillments", oldFulfillmentIds),
@@ -321,6 +329,7 @@ export async function buildResetPreview() {
     tableCountEntry("containers", oldContainerIds),
     tableCountEntry("order_history_reason_rollups", oldArchiveRollupIds),
     tableCountEntry("order_history_reason_events_raw", oldArchiveRawIds),
+    tableCountEntry("old_erp_source_records", oldSourceArchiveIds),
     tableCountEntry("product_aliases", oldAliasIds),
     tableCountEntry("products", oldProductIds),
   ];

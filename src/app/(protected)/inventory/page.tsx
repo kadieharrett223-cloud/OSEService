@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
 import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
 import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
+import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -20,12 +21,20 @@ type InventoryTransactionRow = {
 type ContainerLineRow = {
   product_id: string | null;
   on_order_qty: number | null;
+  received_qty: number | null;
   container_id: string | null;
   containers?: {
     container_number: string | null;
+    lifecycle_status: string | null;
     eta_confirmed_date: string | null;
     eta_estimated_date: string | null;
+    port_date: string | null;
   } | null;
+};
+
+type ProductAliasRow = {
+  product_id: string | null;
+  alias: string | null;
 };
 
 type QueueLine = {
@@ -34,6 +43,7 @@ type QueueLine = {
   approved_qty: number | null;
   fulfilled_qty: number | null;
   approval_status: string | null;
+  priority: string | null;
   warehouse_status: string | null;
   queue_position_start: number | null;
   shipping_orders?: {
@@ -50,6 +60,8 @@ type QueueLine = {
   inventory_allocations?: Array<{
     source_type: string | null;
     container_id: string | null;
+    quantity: number | null;
+    allocation_status: string | null;
     containers?: {
       container_number: string | null;
       lifecycle_status: string | null;
@@ -64,16 +76,30 @@ type InventoryViewRow = {
   sku: string;
   productName: string;
   onFloor: number;
-  soldOpenDemand: number;
+  openDemand: number;
+  floorCommitted: number;
   availableNow: number;
   incoming: number;
+  availableAfterIncoming: number;
+  backorderedAfterIncoming: number;
   nextEta: string;
+  incomingContainers: Array<{
+    containerNumber: string;
+    qty: number;
+    committed: number;
+    available: number;
+    eta: string;
+    etaSort: string;
+    status: string;
+  }>;
   customerQueue: Array<{
     position: string;
     invoice: string;
     customer: string;
     qty: number;
+    priority: string;
     assignedTo: string;
+    expectedAvailability: string;
     status: string;
     orderId: string;
   }>;
@@ -95,6 +121,14 @@ function formatShortDate(value: string | null | undefined) {
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatPriority(value: string | null | undefined) {
+  return formatStatus(value ?? "NORMAL");
+}
+
+function isActiveIncomingContainer(status: string | null | undefined) {
+  return ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(status ?? "").trim().toUpperCase());
 }
 
 function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: (row: T) => number) {
@@ -141,15 +175,17 @@ export default async function InventoryPage({
 
   const [
     { data: products },
+    { data: aliases },
     { data: transactions },
     { data: containerLines },
     { data: queueLines },
   ] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true }),
+    supabase.from("product_aliases").select("product_id, alias"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase
       .from("container_lines")
-      .select("product_id, on_order_qty, container_id, containers (container_number, eta_confirmed_date, eta_estimated_date)"),
+      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date)"),
     supabase
       .from("shipping_order_lines")
       .select(`
@@ -158,6 +194,7 @@ export default async function InventoryPage({
         approved_qty,
         fulfilled_qty,
         approval_status,
+        priority,
         warehouse_status,
         queue_position_start,
         shipping_orders (
@@ -171,6 +208,8 @@ export default async function InventoryPage({
         inventory_allocations (
           source_type,
           container_id,
+          quantity,
+          allocation_status,
           containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
         )
       `)
@@ -180,9 +219,18 @@ export default async function InventoryPage({
   ]);
 
   const productRows = (products ?? []) as ProductRow[];
+  const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
+
+  const operationalSkuByProduct = new Map<string, string>();
+  for (const alias of productAliasRows) {
+    if (!alias.product_id || !alias.alias) continue;
+    const candidate = alias.alias.trim().toUpperCase();
+    if (!candidate || /^\d+$/.test(candidate)) continue;
+    if (!operationalSkuByProduct.has(alias.product_id)) operationalSkuByProduct.set(alias.product_id, candidate);
+  }
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -190,35 +238,57 @@ export default async function InventoryPage({
     (row) => Number(row.delta ?? 0),
   );
 
-  const soldByProduct = toRecordMap(
+  const openDemandByProduct = toRecordMap(
     queueLineRows,
     (row) => row.product_id,
     (row) => Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0)),
   );
 
   const incomingByProduct = toRecordMap(
-    containerLineRows,
+    containerLineRows.filter((row) => isActiveIncomingContainer(row.containers?.lifecycle_status)),
     (row) => row.product_id,
-    (row) => Number(row.on_order_qty ?? 0),
+    (row) => Math.max(0, Number(row.on_order_qty ?? 0) - Number(row.received_qty ?? 0)),
   );
 
-  const nextEtaByProduct = new Map<string, string>();
-  const containerLabelByProduct = new Map<string, string>();
+  const floorCommittedByProduct = new Map<string, number>();
+  const committedByProductContainer = new Map<string, number>();
+  for (const line of queueLineRows) {
+    for (const allocation of line.inventory_allocations ?? []) {
+      if (allocation.allocation_status === "RELEASED") continue;
+      const quantity = Number(allocation.quantity ?? 0);
+      if (!line.product_id || quantity <= 0) continue;
+      if (allocation.source_type === "FLOOR") {
+        floorCommittedByProduct.set(line.product_id, (floorCommittedByProduct.get(line.product_id) ?? 0) + quantity);
+      }
+      if (allocation.source_type === "CONTAINER" && allocation.container_id) {
+        const key = `${line.product_id}|${allocation.container_id}`;
+        committedByProductContainer.set(key, (committedByProductContainer.get(key) ?? 0) + quantity);
+      }
+    }
+  }
+
+  const incomingContainersByProduct = new Map<string, InventoryViewRow["incomingContainers"]>();
 
   for (const line of containerLineRows) {
-    if (!line.product_id) continue;
-    const eta = line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date;
+    if (!line.product_id || !isActiveIncomingContainer(line.containers?.lifecycle_status)) continue;
+    const qty = Math.max(0, Number(line.on_order_qty ?? 0) - Number(line.received_qty ?? 0));
+    if (qty <= 0) continue;
+    const eta = line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date ?? line.containers?.port_date;
     const number = line.containers?.container_number;
 
     if (!number) continue;
-
-    const etaLabel = formatShortDate(eta);
-    const currentEta = nextEtaByProduct.get(line.product_id);
-
-    if (!currentEta || etaLabel < currentEta) {
-      nextEtaByProduct.set(line.product_id, etaLabel);
-      containerLabelByProduct.set(line.product_id, `${number} · ${etaLabel}`);
-    }
+    const committed = committedByProductContainer.get(`${line.product_id}|${line.container_id}`) ?? 0;
+    const rows = incomingContainersByProduct.get(line.product_id) ?? [];
+    rows.push({
+      containerNumber: number,
+      qty,
+      committed,
+      available: Math.max(0, qty - committed),
+      eta: formatShortDate(eta),
+      etaSort: eta ? new Date(eta).toISOString() : "9999-12-31",
+      status: formatStatus(line.containers?.lifecycle_status),
+    });
+    incomingContainersByProduct.set(line.product_id, rows);
   }
 
   const queueByProduct = new Map<string, InventoryViewRow["customerQueue"]>();
@@ -240,7 +310,13 @@ export default async function InventoryPage({
       invoice,
       customer,
       qty,
+      priority: formatPriority(line.priority),
       assignedTo: getAssignmentLabel(line),
+      expectedAvailability: line.inventory_allocations?.some((allocation) => allocation.source_type === "FLOOR")
+        ? "Available now"
+        : line.inventory_allocations?.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number
+          ? `Container ${line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number} · ETA ${formatShortDate(line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_confirmed_date ?? line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_estimated_date)}`
+          : "Waiting for inventory",
       status: formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
     };
@@ -250,22 +326,44 @@ export default async function InventoryPage({
     queueByProduct.set(line.product_id, arr);
   }
 
+  for (const queue of queueByProduct.values()) {
+    queue.sort((a, b) => {
+      const priorityRank: Record<string, number> = { Critical: 0, High: 1, Normal: 2, Low: 3 };
+      const priorityDifference = (priorityRank[a.priority] ?? 2) - (priorityRank[b.priority] ?? 2);
+      if (priorityDifference !== 0) return priorityDifference;
+      const left = a.position === "—" ? Number.MAX_SAFE_INTEGER : Number(a.position);
+      const right = b.position === "—" ? Number.MAX_SAFE_INTEGER : Number(b.position);
+      return left - right;
+    });
+    queue.forEach((item, index) => {
+      if (item.position === "—") item.position = String(index + 1);
+    });
+  }
+
   const rows: InventoryViewRow[] = productRows
     .map((product) => {
       const onFloor = onFloorByProduct.get(product.id) ?? 0;
-      const soldOpenDemand = soldByProduct.get(product.id) ?? 0;
+      const openDemand = openDemandByProduct.get(product.id) ?? 0;
+      const floorCommitted = floorCommittedByProduct.get(product.id) ?? 0;
       const incoming = incomingByProduct.get(product.id) ?? 0;
-      const availableNow = onFloor - soldOpenDemand;
+      const availableNow = Math.max(0, onFloor - floorCommitted);
+      const availableAfterIncoming = Math.max(0, onFloor + incoming - openDemand);
+      const backorderedAfterIncoming = Math.max(0, openDemand - onFloor - incoming);
+      const incomingContainers = (incomingContainersByProduct.get(product.id) ?? []).sort((a, b) => a.etaSort.localeCompare(b.etaSort));
 
       return {
         productId: product.id,
-        sku: product.sku ?? "—",
+        sku: operationalSkuByProduct.get(product.id) ?? product.sku ?? "—",
         productName: product.canonical_name ?? "Unnamed Product",
         onFloor,
-        soldOpenDemand,
+        openDemand,
+        floorCommitted,
         availableNow,
         incoming,
-        nextEta: containerLabelByProduct.get(product.id) ?? "—",
+        availableAfterIncoming,
+        backorderedAfterIncoming,
+        nextEta: incomingContainers[0] ? `${incomingContainers[0].containerNumber} · ${incomingContainers[0].eta}` : "—",
+        incomingContainers,
         customerQueue: queueByProduct.get(product.id) ?? [],
       };
     })
@@ -318,17 +416,18 @@ export default async function InventoryPage({
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
                 <th className="w-[280px] max-w-[280px] px-2 py-2">Item</th>
                 <th className="px-2 py-2">On Floor</th>
-                <th className="px-2 py-2">Sold / Open Demand</th>
+                <th className="px-2 py-2">Open Orders</th>
                 <th className="px-2 py-2">Available Now</th>
                 <th className="px-2 py-2">Incoming</th>
-                <th className="px-2 py-2">Next ETA</th>
+                <th className="px-2 py-2">Available After Incoming</th>
+                <th className="px-2 py-2">Next Arrival</th>
                 <th className="px-2 py-2">Customer List</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
+                  <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
                 rows.map((row) => (
@@ -338,17 +437,28 @@ export default async function InventoryPage({
                       <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
                     </td>
                     <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
-                    <td className="px-2 py-3">{formatNumber(row.soldOpenDemand)}</td>
-                    <td className={`px-2 py-3 font-semibold ${row.availableNow < 0 ? "text-[#dc2626]" : "text-[#111827]"}`}>
+                    <td className="px-2 py-3">{formatNumber(row.openDemand)}</td>
+                    <td className="px-2 py-3 font-semibold text-[#111827]">
                       {formatNumber(row.availableNow)}
                     </td>
-                    <td className="px-2 py-3">{formatNumber(row.incoming)}</td>
+                    <td className="px-2 py-3">
+                      <IncomingDropdown
+                        total={formatNumber(row.incoming)}
+                        containers={row.incomingContainers}
+                      />
+                    </td>
+                    <td className="px-2 py-3">
+                      <div className="font-semibold text-[#111827]">{formatNumber(row.availableAfterIncoming)}</div>
+                      {row.backorderedAfterIncoming > 0 ? (
+                        <div className="mt-1 text-xs font-semibold text-[#b45309]">Backordered {formatNumber(row.backorderedAfterIncoming)}</div>
+                      ) : null}
+                    </td>
                     <td className="px-2 py-3">{row.nextEta}</td>
                     <td className="px-2 py-3">
                       <CustomerDemandDropdown
                         productName={row.productName}
                         sku={row.sku}
-                        openQuantity={formatNumber(row.soldOpenDemand)}
+                        openQuantity={formatNumber(row.openDemand)}
                         customerQueue={row.customerQueue}
                       />
                     </td>

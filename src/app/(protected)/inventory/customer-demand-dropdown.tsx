@@ -8,7 +8,9 @@ type CustomerQueueItem = {
   invoice: string;
   customer: string;
   qty: number;
+  priority: string;
   assignedTo: string;
+  expectedAvailability: string;
   status: string;
   orderId: string;
 };
@@ -110,8 +112,9 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                   </div>
                   <div className="text-[#475569]">
-                    <div>Qty <span className="font-semibold text-[#1e293b]">{item.qty}</span> · {item.status}</div>
-                    <div className="mt-1 truncate text-[#64748b]">{item.assignedTo}</div>
+                    <div>Qty <span className="font-semibold text-[#1e293b]">{item.qty}</span> · {item.priority}</div>
+                    <div className="mt-1 truncate text-[#64748b]">{item.assignedTo} · {item.status}</div>
+                    <div className="mt-1 truncate font-medium text-[#475569]">{item.expectedAvailability}</div>
                   </div>
                   {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
                 </div>

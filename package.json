@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "import:denied-cancelled-history": "node scripts/import-old-erp-denied-cancelled-history.mjs"
+    "import:denied-cancelled-history": "node scripts/import-old-erp-denied-cancelled-history.mjs",
+    "report:old-erp-history-dry-run": "node scripts/classify-old-erp-history-dry-run.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.4",

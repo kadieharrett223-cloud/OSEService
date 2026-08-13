@@ -173,3 +173,36 @@ It is archive-only storage and read-model generation for historical visibility.
 - Migration: `supabase/migrations/202608130001_historical_denied_cancelled_archive.sql`
 - Import script: `scripts/import-old-erp-denied-cancelled-history.mjs`
 - Archive UI route: `src/app/(protected)/order-archive/page.tsx`
+
+## Full InvoiceQueueItems Historical Dry-Run Classifier
+
+Before importing full OLD ERP historical data, run a dry-run classifier against the full Cosmos InvoiceQueueItems export.
+
+- Script: `scripts/classify-old-erp-history-dry-run.mjs`
+- NPM command: `npm run report:old-erp-history-dry-run -- --input <full-invoice-queue-items-export.json>`
+
+This dry-run does not write to Supabase. It only produces a JSON report under `tmp/import-reports/`.
+
+Classification intent:
+
+- Preserve DENIED events and denial reasons.
+- Treat manual REMOVED reasons like `duplicate`, `dont need`, `fake`, `not a part` as historical outcomes.
+- Treat `Replaced by updated QuickBooks invoice` as `SUPERSEDED` (not customer-cancelled).
+- Treat `Cleared by invoice CSV import...` or `auditLog.source = invoice-csv-import-replace` as migration artifacts (not customer-cancelled).
+- Preserve multi-state history per record by retaining chronological audit events.
+
+Dry-run report includes:
+
+- total raw records
+- unique invoices
+- denied count
+- genuine manual cancellation/removal count
+- fulfilled count
+- duplicate count
+- superseded-by-QBO count
+- CSV migration artifact count
+- invalid/test/not-a-part count
+- records with notes
+- records with inventoryRolledBack=true
+- unknown/unclassified reasons
+- up to 10 representative examples per classification

@@ -1,7 +1,6 @@
 import Link from "next/link";
-import fs from "node:fs";
-import path from "node:path";
-import { createProductAliasAction, seedProductCatalogAction } from "@/app/(protected)/inventory/actions";
+import { createProductAction } from "@/app/(protected)/inventory/actions";
+import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -97,37 +96,6 @@ function formatStatus(value: string | null | undefined) {
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function normalizeSku(value: string | null | undefined) {
-  return String(value ?? "").trim().toUpperCase();
-}
-
-function readLatestBacklogUnmappedSkus() {
-  const reportPath = path.join(process.cwd(), "tmp", "import-reports", "backlog-import-preview-latest.json");
-  if (!fs.existsSync(reportPath)) {
-    return [] as string[];
-  }
-
-  try {
-    const raw = fs.readFileSync(reportPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      preview?: {
-        unmappedSkus?: unknown;
-      };
-    };
-
-    const list = parsed.preview?.unmappedSkus;
-    if (!Array.isArray(list)) {
-      return [] as string[];
-    }
-
-    return list
-      .map((value) => normalizeSku(typeof value === "string" ? value : null))
-      .filter((value) => value.length > 0);
-  } catch {
-    return [] as string[];
-  }
-}
-
 function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: (row: T) => number) {
   const map = new Map<string, number>();
   for (const row of rows) {
@@ -214,9 +182,6 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-
-  const backlogUnmappedFromReport = readLatestBacklogUnmappedSkus();
-  const backlogUnmappedSkus = Array.from(new Set(backlogUnmappedFromReport)).sort((a, b) => a.localeCompare(b));
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -312,9 +277,14 @@ export default async function InventoryPage({
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Inventory</p>
-        <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Lift Availability</h1>
-        <p className="mt-2 text-sm text-[#5a5a5a]">Search product availability, incoming containers/ETA, and approved customer queue by SKU.</p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Inventory</p>
+            <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Lift Availability</h1>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Search product availability, incoming containers/ETA, and approved customer queue by SKU.</p>
+          </div>
+          <AddProductModal createAction={createProductAction} />
+        </div>
       </div>
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
@@ -334,105 +304,8 @@ export default async function InventoryPage({
         </form>
       </section>
 
-      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">SKU Mapping</p>
-            <h2 className="mt-1 text-xl font-semibold text-[#0f172a]">Map Unmapped SKUs</h2>
-            <p className="mt-1 text-sm text-[#5a5a5a]">
-              Add product aliases from this page. All current products are available below as canonical targets.
-            </p>
-          </div>
-          <p className="rounded-md border border-[#dbeafe] bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">
-            Current products: {productRows.length}
-          </p>
-        </div>
-
-        {mapError ? (
-          <p className="mt-3 rounded-md border border-[#fecaca] bg-[#fff1f2] p-2 text-sm text-[#991b1b]">{mapError}</p>
-        ) : null}
-
-        {mapMessage ? (
-          <p className="mt-3 rounded-md border border-[#bbf7d0] bg-[#f0fdf4] p-2 text-sm text-[#166534]">{mapMessage}</p>
-        ) : null}
-
-        <div className="mt-3">
-          <p className="text-sm font-semibold text-[#334155]">Unmapped backlog SKUs</p>
-          {backlogUnmappedSkus.length === 0 ? (
-            <p className="mt-1 text-sm text-[#64748b]">None detected from latest backlog preview report.</p>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {backlogUnmappedSkus.map((sku) => (
-                <span key={sku} className="rounded-md border border-[#fed7aa] bg-[#fff7ed] px-2 py-1 text-xs font-semibold text-[#9a3412]">
-                  {sku}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form action={createProductAliasAction} className="mt-4 grid gap-3 md:grid-cols-[minmax(220px,1fr)_minmax(260px,1.5fr)_auto]">
-          <div>
-            <label htmlFor="alias_sku" className="text-sm font-semibold text-[#334155]">Alias SKU (unmapped)</label>
-            <input
-              id="alias_sku"
-              name="alias_sku"
-              list="inventory-unmapped-skus"
-              className="input mt-1"
-              placeholder="e.g. 4PHR-9"
-              required
-            />
-            <datalist id="inventory-unmapped-skus">
-              {backlogUnmappedSkus.map((sku) => (
-                <option key={sku} value={sku} />
-              ))}
-            </datalist>
-          </div>
-
-          <div>
-            <label htmlFor="product_id" className="text-sm font-semibold text-[#334155]">Canonical Product (all current products)</label>
-            <select id="product_id" name="product_id" className="input mt-1" required defaultValue="">
-              <option value="" disabled>Select product...</option>
-              {productRows.map((product) => {
-                const sku = product.sku ?? "(missing sku)";
-                const name = product.canonical_name ?? "Unnamed Product";
-                return (
-                  <option key={product.id} value={product.id}>{sku} - {name}</option>
-                );
-              })}
-            </select>
-          </div>
-
-          <div className="flex items-end">
-            <button type="submit" className="btn-primary w-full md:w-auto">Save Alias</button>
-          </div>
-        </form>
-      </section>
-
-      <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Catalog Seed</p>
-          <h2 className="mt-1 text-xl font-semibold text-[#0f172a]">Bulk Add Products From CSV</h2>
-          <p className="mt-1 text-sm text-[#5a5a5a]">
-            Paste rows in the same format as the backlog worklist to create missing products and aliases inside the app.
-          </p>
-        </div>
-
-        <form action={seedProductCatalogAction} className="mt-3 space-y-3">
-          <label htmlFor="catalog_csv" className="text-sm font-semibold text-[#334155]">CSV rows</label>
-          <textarea
-            id="catalog_csv"
-            name="catalog_csv"
-            className="input min-h-[180px] w-full font-mono text-xs leading-5"
-            placeholder="sku,total_qty,line_count,containers,description_sample,canonical_product_sku,notes"
-            required
-          />
-          <p className="text-xs text-[#64748b]">
-            Required column: <span className="font-semibold">sku</span>. Optional columns: <span className="font-semibold">canonical_product_sku</span>, <span className="font-semibold">canonical_name</span>, <span className="font-semibold">description_sample</span>, <span className="font-semibold">notes</span>.
-          </p>
-          <button type="submit" className="btn-primary">Seed Catalog</button>
-        </form>
-      </section>
+      {mapError ? <p className="rounded-md border border-[#fecaca] bg-[#fff1f2] p-3 text-sm text-[#991b1b]">{mapError}</p> : null}
+      {mapMessage ? <p className="rounded-md border border-[#bbf7d0] bg-[#f0fdf4] p-3 text-sm text-[#166534]">{mapMessage}</p> : null}
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="max-w-full overflow-x-auto">
@@ -472,40 +345,22 @@ export default async function InventoryPage({
                         <summary className="cursor-pointer text-sm font-semibold text-[#2563eb] hover:underline">
                           Customer List ({row.customerQueue.length})
                         </summary>
-                        <div className="mt-2 max-w-full overflow-x-auto rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-2">
+                        <div className="mt-2 max-w-full rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-2">
                           {row.customerQueue.length === 0 ? (
                             <p className="px-2 py-2 text-xs text-[#64748b]">No approved open queue for this SKU.</p>
                           ) : (
-                            <table className="w-full min-w-[760px] text-xs">
-                              <thead>
-                                <tr className="border-b border-[#d8dee8] text-[#64748b]">
-                                  <th className="px-2 py-1 text-left">Position</th>
-                                  <th className="px-2 py-1 text-left">Invoice</th>
-                                  <th className="px-2 py-1 text-left">Customer</th>
-                                  <th className="px-2 py-1 text-left">Qty</th>
-                                  <th className="px-2 py-1 text-left">Assigned To</th>
-                                  <th className="px-2 py-1 text-left">Status</th>
-                                  <th className="px-2 py-1 text-left">Open</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {row.customerQueue.map((item, idx) => (
-                                  <tr key={`${item.orderId}-${item.invoice}-${idx}`} className="border-b border-[#edf2f7]">
-                                    <td className="px-2 py-1">{item.position}</td>
-                                    <td className="px-2 py-1">{item.invoice}</td>
-                                    <td className="px-2 py-1">{item.customer}</td>
-                                    <td className="px-2 py-1">{formatNumber(item.qty)}</td>
-                                    <td className="px-2 py-1">{item.assignedTo}</td>
-                                    <td className="px-2 py-1">{item.status}</td>
-                                    <td className="px-2 py-1">
-                                      {item.orderId ? (
-                                        <Link href={`/orders/${item.orderId}`} className="text-[#2563eb] hover:underline">Invoice</Link>
-                                      ) : "—"}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            <div className="space-y-2">
+                              {row.customerQueue.map((item, idx) => (
+                                <div key={`${item.orderId}-${item.invoice}-${idx}`} className="grid gap-2 border-b border-[#e2e8f0] pb-2 text-xs last:border-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                                  <div className="min-w-0">
+                                    <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
+                                    <div className="truncate text-[#64748b]">Invoice {item.invoice} · {item.assignedTo}</div>
+                                  </div>
+                                  <div className="text-[#475569]">Qty {formatNumber(item.qty)} · {item.status}</div>
+                                  {item.orderId ? <Link href={`/orders/${item.orderId}`} className="font-semibold text-[#2563eb] hover:underline">Open</Link> : <span>—</span>}
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </details>

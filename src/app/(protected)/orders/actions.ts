@@ -59,6 +59,10 @@ function getFileExtension(fileName: string) {
   return fileName.split(".").pop()?.toLowerCase() ?? "";
 }
 
+function normalizeReasonForStorage(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
 function isAllowedAttachment(file: File) {
   const extension = getFileExtension(file.name);
   return ALLOWED_ATTACHMENT_EXTENSIONS.has(extension);
@@ -601,4 +605,65 @@ export async function deleteOrderAttachmentAction(formData: FormData) {
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
+}
+
+export async function updateDeniedArchiveReasonAction(formData: FormData) {
+  await requireUser();
+
+  const rollupId = getString(formData, "rollup_id");
+  const nextReasonRaw = getString(formData, "canonical_reason");
+  const returnPath = getString(formData, "return_path") ?? "/orders?tab=denied";
+  const adminClient = getSupabaseAdmin();
+
+  if (!rollupId || !nextReasonRaw) {
+    redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=Missing+archive+edit+payload`);
+  }
+
+  const nextReason = normalizeReasonForStorage(nextReasonRaw);
+  if (!nextReason) {
+    redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=Reason+cannot+be+empty`);
+  }
+
+  const { data: rollupRow, error: rollupLookupError } = await adminClient
+    .from("order_history_reason_rollups")
+    .select("id, reason_category, invoice_number_normalized, item_code_normalized, reason_normalized")
+    .eq("id", rollupId)
+    .maybeSingle();
+
+  const rollup = rollupRow as {
+    id: string;
+    reason_category: string;
+    invoice_number_normalized: string;
+    item_code_normalized: string;
+    reason_normalized: string;
+  } | null;
+
+  if (rollupLookupError || !rollup) {
+    redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=${encodeURIComponent(rollupLookupError?.message ?? "Denied archive row not found")}`);
+  }
+
+  const { error: rollupUpdateError } = await adminClient
+    .from("order_history_reason_rollups")
+    .update({ canonical_reason: nextReason })
+    .eq("id", rollup.id);
+
+  if (rollupUpdateError) {
+    redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=${encodeURIComponent(rollupUpdateError.message)}`);
+  }
+
+  const { error: rawUpdateError } = await adminClient
+    .from("order_history_reason_events_raw")
+    .update({ reason: nextReason })
+    .eq("reason_category", rollup.reason_category)
+    .eq("invoice_number_normalized", rollup.invoice_number_normalized)
+    .eq("item_code_normalized", rollup.item_code_normalized)
+    .eq("reason_normalized", rollup.reason_normalized);
+
+  if (rawUpdateError) {
+    redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=${encodeURIComponent(rawUpdateError.message)}`);
+  }
+
+  revalidatePath("/orders");
+  revalidatePath("/order-archive");
+  redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}message=Denied+invoice+reason+updated`);
 }

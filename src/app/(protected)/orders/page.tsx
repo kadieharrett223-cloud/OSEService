@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { updateDeniedArchiveReasonAction } from "./actions";
 
 type OrderSummary = {
   id: string;
@@ -34,10 +35,16 @@ type OrderSummary = {
   }>;
 };
 
-function formatStatus(value: string | null | undefined) {
-  if (!value) return "Pending";
-  return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
-}
+type DeniedInvoiceRollup = {
+  id: string;
+  reason_category: "cancel_deny_rollback" | "setup_rollback";
+  canonical_invoice_number: string;
+  canonical_item_code: string;
+  canonical_reason: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrence_count: number;
+};
 
 function statusBadgeClass(status: string | null | undefined) {
   if (status === "APPROVED" || status === "FULFILLED") return "bg-[#e7f7ed] text-[#1b7a43]";
@@ -53,12 +60,66 @@ function parseSalesperson(rawPayload: unknown) {
   return typeof salesrep?.name === "string" ? salesrep.name : null;
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+function formatDate(value: string | null | undefined) {
+  if (!value) return "Unknown";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Unknown";
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export default async function OrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; q?: string; message?: string; error?: string }>;
+}) {
   await requireUser();
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const activeTab = params.tab ?? "review";
-  const searchText = String((params as { q?: string }).q ?? "").trim().toLowerCase();
+  const searchText = String(params.q ?? "").trim().toLowerCase();
+
+  const { count: deniedCountRaw } = await supabase
+    .from("order_history_reason_rollups")
+    .select("id", { count: "exact", head: true })
+    .eq("reason_category", "cancel_deny_rollback");
+
+  const deniedCount = Number(deniedCountRaw ?? 0);
+
+  const { data: deniedRollupRows, error: deniedRollupError } = activeTab === "denied"
+    ? await supabase
+        .from("order_history_reason_rollups")
+        .select(`
+          id,
+          reason_category,
+          canonical_invoice_number,
+          canonical_item_code,
+          canonical_reason,
+          first_seen_at,
+          last_seen_at,
+          occurrence_count
+        `)
+        .eq("reason_category", "cancel_deny_rollback")
+        .order("last_seen_at", { ascending: false })
+    : { data: [], error: null };
+
+  const deniedSummaries = ((deniedRollupRows ?? []) as DeniedInvoiceRollup[]).filter((entry) => {
+    if (!searchText) return true;
+
+    const searchable = [
+      entry.canonical_invoice_number,
+      entry.canonical_item_code,
+      entry.canonical_reason,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return searchable.includes(searchText);
+  });
 
   const { data: orders, error } = await supabase
     .from("shipping_orders")
@@ -136,6 +197,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
     shipped: allOrders.filter((order) => matchesTab(order, "shipped")).length,
     fulfilled: allOrders.filter((order) => matchesTab(order, "fulfilled")).length,
+    denied: deniedCount,
   };
 
   const tabs = [
@@ -144,6 +206,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     { id: "warehouse", label: "In Warehouse" },
     { id: "shipped", label: "Shipped" },
     { id: "fulfilled", label: "Fulfilled" },
+    { id: "denied", label: "Denied" },
   ];
 
   return (
@@ -193,7 +256,31 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        {orderSummaries.length === 0 ? (
+        {params.message ? (
+          <div className="mb-4 rounded-lg border border-[#b7e4c7] bg-[#ecfdf3] p-3 text-sm text-[#166534]">
+            {params.message}
+          </div>
+        ) : null}
+
+        {params.error ? (
+          <div className="mb-4 rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
+            {params.error}
+          </div>
+        ) : null}
+
+        {activeTab !== "denied" && error ? (
+          <div className="mb-4 rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
+            Unable to load orders right now.
+          </div>
+        ) : null}
+
+        {activeTab === "denied" && deniedRollupError ? (
+          <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
+            Unable to load denied archive rows right now.
+          </div>
+        ) : null}
+
+        {activeTab !== "denied" && orderSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             <p>{searchText ? "No orders match that filter in this status." : "No orders match this status yet."}</p>
             {activeTab === "review" && tabCounts.accepted > 0 ? (
@@ -205,13 +292,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           </div>
         ) : null}
 
-        {orderSummaries.length > 0 ? (
+        {activeTab === "denied" && !deniedRollupError && deniedSummaries.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
+            <p>{searchText ? "No denied invoices match that filter." : "No denied invoices are archived yet."}</p>
+          </div>
+        ) : null}
+
+        {activeTab !== "denied" && orderSummaries.length > 0 ? (
           <div className="space-y-3">
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
               const salesperson = parseSalesperson(order.qbo_invoices?.raw_payload);
-              const firstLine = order.shipping_order_lines?.[0];
               const openLineCount = (order.shipping_order_lines ?? []).filter((line) => (line.fulfillment_status ?? "PENDING") !== "FULFILLED").length;
               return (
                 <div key={order.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
@@ -241,6 +333,42 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </div>
               );
             })}
+          </div>
+        ) : null}
+
+        {activeTab === "denied" && !deniedRollupError && deniedSummaries.length > 0 ? (
+          <div className="space-y-3">
+            {deniedSummaries.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-[#111827]">Invoice #{entry.canonical_invoice_number}</p>
+                    <p className="mt-1 text-sm text-[#374151]">Item {entry.canonical_item_code}</p>
+                    <p className="mt-1 text-sm text-[#5a5a5a]">Occurrences {entry.occurrence_count}</p>
+                    <p className="mt-1 text-xs text-[#6b7280]">First seen {formatDate(entry.first_seen_at)} • Last seen {formatDate(entry.last_seen_at)}</p>
+                  </div>
+                  <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">Denied</span>
+                </div>
+
+                <form action={updateDeniedArchiveReasonAction} className="mt-4 space-y-2">
+                  <input type="hidden" name="rollup_id" value={entry.id} />
+                  <input type="hidden" name="return_path" value={searchText ? `/orders?tab=denied&q=${encodeURIComponent(searchText)}` : "/orders?tab=denied"} />
+                  <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]" htmlFor={`reason-${entry.id}`}>
+                    Denied reason (editable)
+                  </label>
+                  <textarea
+                    id={`reason-${entry.id}`}
+                    name="canonical_reason"
+                    defaultValue={entry.canonical_reason}
+                    className="w-full rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#111827] focus:border-[#111827] focus:outline-none"
+                    rows={2}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="submit" className="btn-secondary">Save reason</button>
+                  </div>
+                </form>
+              </div>
+            ))}
           </div>
         ) : null}
       </div>

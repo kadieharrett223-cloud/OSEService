@@ -187,7 +187,8 @@ async function applyPlan(supabase, plan) {
   for (const customer of plan.customerPlans) {
     const { data: existing } = await supabase.from("customers").select("id").or(`full_name.ilike.${customer.full_name},company_name.ilike.${customer.company_name ?? customer.full_name}`).limit(1).maybeSingle();
     if (existing?.id) { customerByKey.set(customer.full_name, existing.id); customerResults.matched += 1; continue; }
-    const { planKey: _planKey, ...customerPayload } = customer;
+    const customerPayload = { ...customer };
+    delete customerPayload.planKey;
     const { data, error } = await supabase.from("customers").insert(customerPayload).select("id").single();
     if (error) fail(`Could not insert warehouse customer ${customer.full_name}: ${error.message}`);
     customerByKey.set(customer.planKey, data.id);

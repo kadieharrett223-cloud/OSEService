@@ -88,6 +88,19 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
 - `npm run import:old-erp-warehouse:preview`
 - `npm run import:old-erp-warehouse:apply`
 
+## Final Dry-Run Status (2026-08-13)
+
+The latest complete reconciliation is:
+
+- Readiness: `BLOCKED`
+- Unmapped SKUs: `16`
+- Ambiguous customer groups: `24`
+- Order lines without deterministic customer resolution: `52`
+
+These exceptions are intentionally not auto-resolved. The remaining SKU values include deleted/variant/description-style legacy codes, and the customer groups have conflicting identity evidence. They require explicit mapping decisions before a clean rebuild can be considered complete.
+
+The legacy alias recovery pass found five deterministic mappings, applied one new alias, and left existing aliases unchanged. The importer uses insert-only behavior because the current `product_aliases` update trigger references a missing `updated_at` column; this avoids mutating existing mappings while that schema defect is addressed.
+
 ## Data Flow
 
 1. Cosmos exports are read from `tmp/exports` (or freshly exported with `azure:export`).

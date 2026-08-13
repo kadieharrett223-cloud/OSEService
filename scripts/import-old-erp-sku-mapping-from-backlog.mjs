@@ -234,15 +234,30 @@ async function applyAliases(rows) {
     fail("No alias upserts prepared after canonical product resolution.");
   }
 
-  const { error } = await supabase.from("product_aliases").upsert(upserts, {
-    onConflict: "product_id,alias,source_type",
-  });
+  const { data: existingAliases, error: existingError } = await supabase
+    .from("product_aliases")
+    .select("product_id, alias, source_type")
+    .eq("source_type", "import");
+
+  if (existingError) {
+    fail(`Could not read existing aliases before insert: ${existingError.message}`);
+  }
+
+  const existingKeys = new Set((existingAliases ?? []).map((row) => `${row.product_id}|${String(row.alias ?? "").trim().toUpperCase()}|${row.source_type}`));
+  const inserts = upserts.filter((row) => !existingKeys.has(`${row.product_id}|${row.alias}|${row.source_type}`));
+
+  if (inserts.length === 0) {
+    console.log("No new aliases required; existing mappings were left unchanged.");
+    return;
+  }
+
+  const { error } = await supabase.from("product_aliases").insert(inserts);
 
   if (error) {
     fail(`Alias upsert failed: ${error.message}`);
   }
 
-  console.log(`Applied ${upserts.length} product_aliases upserts.`);
+  console.log(`Applied ${inserts.length} new product_aliases rows; existing mappings left unchanged.`);
 }
 
 async function main() {

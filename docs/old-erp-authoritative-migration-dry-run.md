@@ -88,6 +88,30 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
 - `npm run import:old-erp-warehouse:preview`
 - `npm run import:old-erp-warehouse:apply`
 
+## Paid QuickBooks Order Bridge
+
+The QuickBooks snapshot sync stores customers, invoices, and invoice lines, but those rows do not automatically become shipping review orders. The bridge is:
+
+- `scripts/import-paid-quickbooks-orders.mjs`
+- `npm run import:paid-qbo-orders:preview`
+- `npm run import:paid-qbo-orders:apply`
+
+Behavior:
+
+- Includes only `Paid` and `Partially Paid` invoices.
+- Skips invoices already represented by a `shipping_orders.source_invoice_id`.
+- Resolves QBO line SKUs through `products.sku` and `product_aliases.alias`.
+- Creates new shipping orders and mapped lines in `PENDING_REVIEW`.
+- Does not approve lines, allocate inventory, or change inventory quantities.
+- Leaves invoices with unmapped lines in the exception report.
+
+Latest apply result:
+
+- New paid/partially paid orders: `1,017`
+- New mapped review lines: `1,641`
+- Repeat preview: `1,017` already imported, `0` new orders
+- QBO exceptions: `3,352` invoices with no mapped product line
+
 ## Final Dry-Run Status (2026-08-13)
 
 The latest complete reconciliation is:

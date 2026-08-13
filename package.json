@@ -22,7 +22,9 @@
     "import:old-erp-warehouse:preview": "node --env-file=.env.local scripts/import-old-erp-warehouse-fulfillments.mjs",
     "import:old-erp-warehouse:apply": "node --env-file=.env.local scripts/import-old-erp-warehouse-fulfillments.mjs --apply",
     "archive:old-erp-source:preview": "node scripts/archive-old-erp-source-records.mjs",
-    "archive:old-erp-source:apply": "node --env-file=.env.local scripts/archive-old-erp-source-records.mjs --apply"
+    "archive:old-erp-source:apply": "node --env-file=.env.local scripts/archive-old-erp-source-records.mjs --apply",
+    "import:paid-qbo-orders:preview": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs",
+    "import:paid-qbo-orders:apply": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs --apply"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

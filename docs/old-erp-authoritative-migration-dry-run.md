@@ -56,6 +56,16 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
   - Dry-run only in this version.
   - Executes validation/reconciliation pipeline and emits readiness status.
 
+- `scripts/import-old-erp-products-and-aliases.mjs`
+  - Imports OLD_ERP products from Cosmos `Products` export.
+  - Sets `products.source_system/source_record_id/source_key` for inserted rows.
+  - Upserts `product_aliases` from legacy aliases with `source_ref=OLD_ERP_PRODUCTS_EXPORT`.
+  - Existing matching products are not retro-labeled.
+
+- `scripts/apply-old-erp-customers-deterministic.mjs`
+  - Inserts only deterministic `CREATE_NEW` customer groups from active OLD_ERP demand.
+  - Leaves ambiguous customer groups untouched and reports them for manual review.
+
 ## NPM Commands
 
 - `npm run preview:old-erp-reset`
@@ -63,6 +73,10 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
 - `npm run preview:old-erp-customers`
 - `npm run report:old-erp-master-reconciliation`
 - `npm run orchestrate:old-erp-dry-run`
+- `npm run import:old-erp-products-aliases:preview`
+- `npm run import:old-erp-products-aliases:apply`
+- `npm run import:old-erp-customers:preview`
+- `npm run import:old-erp-customers:apply`
 
 ## Data Flow
 

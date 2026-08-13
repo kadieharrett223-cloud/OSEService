@@ -2,6 +2,7 @@
 
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import {
   OLD_ERP_ARCHIVE_SOURCE_SYSTEM,
   OLD_ERP_SOURCE_SYSTEM,
@@ -13,6 +14,7 @@ import {
 } from "./old-erp-migration-utils.mjs";
 
 const CANCEL_DENY_CATEGORIES = ["setup_rollback", "cancel_deny_rollback"];
+const OPTIONAL_RESET_TABLES = new Set(["order_attachments"]);
 
 function parseArgs(argv) {
   const args = {
@@ -158,14 +160,19 @@ function isMissingColumnError(errorMessage) {
   return message.includes("column") && message.includes("does not exist");
 }
 
-async function safelyResolveIds({ table, resolver, missingTables, warnings }) {
+async function safelyResolveIds({ table, resolver, missingTables, optionalMissingTables, warnings }) {
   try {
     return await resolver();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (isMissingTableError(message)) {
-      missingTables.add(table);
-      warnings.push(`Table unavailable in current schema cache: ${table}`);
+      if (OPTIONAL_RESET_TABLES.has(table)) {
+        optionalMissingTables.add(table);
+        warnings.push(`Optional table unavailable in current schema cache: ${table}`);
+      } else {
+        missingTables.add(table);
+        warnings.push(`Table unavailable in current schema cache: ${table}`);
+      }
       return [];
     }
     if (isMissingColumnError(message)) {
@@ -179,24 +186,28 @@ async function safelyResolveIds({ table, resolver, missingTables, warnings }) {
 export async function buildResetPreview() {
   const supabase = createSupabaseAdminClient();
   const missingTables = new Set();
+  const optionalMissingTables = new Set();
   const warnings = [];
 
   const oldOrderIds = await safelyResolveIds({
     table: "shipping_orders",
     resolver: () => fetchIdsByEq(supabase, "shipping_orders", "source_system", OLD_ERP_SOURCE_SYSTEM),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldLineIdsBySource = await safelyResolveIds({
     table: "shipping_order_lines",
     resolver: () => fetchIdsByEq(supabase, "shipping_order_lines", "source_system", OLD_ERP_SOURCE_SYSTEM),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldLineIdsByOrders = await safelyResolveIds({
     table: "shipping_order_lines",
     resolver: () => fetchIdsByIn(supabase, "shipping_order_lines", "shipping_order_id", oldOrderIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldLineIds = Array.from(new Set([...oldLineIdsBySource, ...oldLineIdsByOrders]));
@@ -205,12 +216,14 @@ export async function buildResetPreview() {
     table: "containers",
     resolver: () => fetchIdsByEq(supabase, "containers", "source_system", OLD_ERP_SOURCE_SYSTEM),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldContainerLineIds = await safelyResolveIds({
     table: "container_lines",
     resolver: () => fetchIdsByIn(supabase, "container_lines", "container_id", oldContainerIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
 
@@ -218,18 +231,21 @@ export async function buildResetPreview() {
     table: "order_attachments",
     resolver: () => fetchIdsByIn(supabase, "order_attachments", "shipping_order_id", oldOrderIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldFulfillmentIds = await safelyResolveIds({
     table: "fulfillments",
     resolver: () => fetchIdsByIn(supabase, "fulfillments", "shipping_order_line_id", oldLineIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldAllocationIds = await safelyResolveIds({
     table: "inventory_allocations",
     resolver: () => fetchIdsByIn(supabase, "inventory_allocations", "shipping_order_line_id", oldLineIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
 
@@ -237,18 +253,21 @@ export async function buildResetPreview() {
     table: "inventory_transactions",
     resolver: () => fetchIdsByIn(supabase, "inventory_transactions", "shipping_order_line_id", oldLineIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const inventoryTxByContainer = await safelyResolveIds({
     table: "inventory_transactions",
     resolver: () => fetchIdsByIn(supabase, "inventory_transactions", "container_id", oldContainerIds),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const inventoryTxBySourceKey = await safelyResolveIds({
     table: "inventory_transactions",
     resolver: () => fetchIdsByIlike(supabase, "inventory_transactions", "source_event_key", "OLD_ERP%"),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldInventoryTransactionIds = Array.from(
@@ -259,12 +278,14 @@ export async function buildResetPreview() {
     table: "product_aliases",
     resolver: () => fetchIdsByIlike(supabase, "product_aliases", "source_ref", "OLD_ERP%"),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
   const oldProductIds = await safelyResolveIds({
     table: "products",
     resolver: () => fetchIdsByEq(supabase, "products", "source_system", OLD_ERP_SOURCE_SYSTEM),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
 
@@ -277,6 +298,7 @@ export async function buildResetPreview() {
       OLD_ERP_ARCHIVE_SOURCE_SYSTEM,
     ),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
 
@@ -284,6 +306,7 @@ export async function buildResetPreview() {
     table: "order_history_reason_rollups",
     resolver: () => fetchRollupIdsByCategories(supabase, CANCEL_DENY_CATEGORIES),
     missingTables,
+    optionalMissingTables,
     warnings,
   });
 
@@ -316,6 +339,7 @@ export async function buildResetPreview() {
       rowCount: tables.reduce((sum, entry) => sum + Number(entry.count), 0),
     },
     missingTables: Array.from(missingTables),
+    optionalMissingTables: Array.from(optionalMissingTables),
     warnings,
     notes: [
       "No delete statements were executed.",
@@ -345,6 +369,12 @@ async function main() {
   console.log(`Report: ${resolvedPath}`);
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.message : "Unknown failure");
-});
+const isDirectExecution = process.argv[1]
+  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+
+if (isDirectExecution) {
+  main().catch((error) => {
+    fail(error instanceof Error ? error.message : "Unknown failure");
+  });
+}

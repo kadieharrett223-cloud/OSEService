@@ -2,6 +2,7 @@
 
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { calculateOpeningStateFromSources } from "./calculate-old-erp-opening-state.mjs";
 import {
   createSupabaseAdminClient,
@@ -371,6 +372,12 @@ async function main() {
   console.log(`Report: ${resolvedPath}`);
 }
 
-main().catch((error) => {
-  fail(error instanceof Error ? error.message : "Unknown failure");
-});
+const isDirectExecution = process.argv[1]
+  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+
+if (isDirectExecution) {
+  main().catch((error) => {
+    fail(error instanceof Error ? error.message : "Unknown failure");
+  });
+}

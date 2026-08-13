@@ -14,7 +14,11 @@
     "report:old-erp-opening-state": "node scripts/calculate-old-erp-opening-state.mjs",
     "preview:old-erp-customers": "node --env-file=.env.local scripts/preview-old-erp-customer-resolution.mjs",
     "report:old-erp-master-reconciliation": "node --env-file=.env.local scripts/report-old-erp-master-reconciliation.mjs",
-    "orchestrate:old-erp-dry-run": "node --env-file=.env.local scripts/run-old-erp-migration-orchestrator.mjs --dry-run"
+    "orchestrate:old-erp-dry-run": "node --env-file=.env.local scripts/run-old-erp-migration-orchestrator.mjs --dry-run",
+    "import:old-erp-products-aliases:preview": "node --env-file=.env.local scripts/import-old-erp-products-and-aliases.mjs",
+    "import:old-erp-products-aliases:apply": "node --env-file=.env.local scripts/import-old-erp-products-and-aliases.mjs --apply",
+    "import:old-erp-customers:preview": "node --env-file=.env.local scripts/apply-old-erp-customers-deterministic.mjs",
+    "import:old-erp-customers:apply": "node --env-file=.env.local scripts/apply-old-erp-customers-deterministic.mjs --apply"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

@@ -66,6 +66,14 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
   - Inserts only deterministic `CREATE_NEW` customer groups from active OLD_ERP demand.
   - Leaves ambiguous customer groups untouched and reports them for manual review.
 
+- `scripts/import-old-erp-warehouse-fulfillments.mjs`
+  - Reads the `WarehouseInvoices` Cosmos export.
+  - Links or creates deterministic warehouse customers only when an OLD_ERP order already exists in the target.
+  - Records shipped/completed warehouse evidence in `fulfillments`.
+  - Does not create `inventory_allocations`.
+  - Does not replay `InventoryAdjustments` or write historical adjustment transactions.
+  - Leaves unmatched historical warehouse invoices and lines in the exception report.
+
 ## NPM Commands
 
 - `npm run preview:old-erp-reset`
@@ -77,6 +85,8 @@ This document describes the new preparation pipeline for a full OLD_ERP -> new E
 - `npm run import:old-erp-products-aliases:apply`
 - `npm run import:old-erp-customers:preview`
 - `npm run import:old-erp-customers:apply`
+- `npm run import:old-erp-warehouse:preview`
+- `npm run import:old-erp-warehouse:apply`
 
 ## Data Flow
 

@@ -20,7 +20,9 @@
     "import:old-erp-customers:preview": "node --env-file=.env.local scripts/apply-old-erp-customers-deterministic.mjs",
     "import:old-erp-customers:apply": "node --env-file=.env.local scripts/apply-old-erp-customers-deterministic.mjs --apply",
     "import:old-erp-warehouse:preview": "node --env-file=.env.local scripts/import-old-erp-warehouse-fulfillments.mjs",
-    "import:old-erp-warehouse:apply": "node --env-file=.env.local scripts/import-old-erp-warehouse-fulfillments.mjs --apply"
+    "import:old-erp-warehouse:apply": "node --env-file=.env.local scripts/import-old-erp-warehouse-fulfillments.mjs --apply",
+    "archive:old-erp-source:preview": "node scripts/archive-old-erp-source-records.mjs",
+    "archive:old-erp-source:apply": "node --env-file=.env.local scripts/archive-old-erp-source-records.mjs --apply"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

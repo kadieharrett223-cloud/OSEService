@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { recalculateProductQueues } from "@/lib/product-queue";
 
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -191,6 +192,8 @@ export async function updateOrderLineStatusAction(formData: FormData) {
   const { error } = await adminClient.from("shipping_order_lines").update(payload).eq("id", lineId);
 
   if (!error) {
+    const { data: changedLine } = await adminClient.from("shipping_order_lines").select("product_id").eq("id", lineId).maybeSingle();
+    if (changedLine?.product_id) await recalculateProductQueues([changedLine.product_id]);
     await writeOrderActivity(adminClient, orderId, auditAction, auditDetails);
   }
 
@@ -210,7 +213,7 @@ export async function acceptNewOrderAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, ordered_qty, approval_status, fulfillment_status")
+    .select("id, product_id, ordered_qty, approval_status, fulfillment_status")
     .eq("shipping_order_id", orderId);
 
   if (linesError) {
@@ -251,6 +254,8 @@ export async function acceptNewOrderAction(formData: FormData) {
     redirect(`/orders?error=${encodeURIComponent(orderUpdateError.message)}`);
   }
 
+  await recalculateProductQueues(pendingLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+
   await writeOrderActivity(adminClient, orderId, "ORDER_ACCEPTED", {
     action: "accept_order",
     accepted_line_count: pendingLines.length,
@@ -262,6 +267,51 @@ export async function acceptNewOrderAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath("/inventory");
   redirect("/orders?message=Order+accepted");
+}
+
+export async function overrideProductQueuePositionAction(formData: FormData) {
+  await requireUser();
+
+  const lineId = getString(formData, "lineId");
+  const rawPosition = Number(getString(formData, "queue_position") ?? 0);
+  const reason = normalizeReasonForStorage(getString(formData, "queue_position_reason") ?? "");
+  if (!lineId || !Number.isInteger(rawPosition) || rawPosition < 1 || !reason) {
+    redirect("/orders?error=Queue+position+and+reason+are+required");
+  }
+
+  const adminClient = getSupabaseAdmin();
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, shipping_order_id")
+    .eq("id", lineId)
+    .maybeSingle();
+  if (lineError || !line?.product_id) {
+    redirect(`/orders?error=${encodeURIComponent(lineError?.message ?? "Queue line not found")}`);
+  }
+
+  const overridePayload = {
+    queue_position_override: rawPosition,
+    queue_position_override_reason: reason,
+    queue_position_override_at: new Date().toISOString(),
+  } as never;
+
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update(overridePayload)
+    .eq("id", lineId);
+  if (updateError) redirect(`/orders?error=${encodeURIComponent(updateError.message)}`);
+
+  await recalculateProductQueues([line.product_id]);
+  await writeOrderActivity(adminClient, line.shipping_order_id, "PRODUCT_QUEUE_POSITION_OVERRIDDEN", {
+    line_id: lineId,
+    requested_position: rawPosition,
+    reason,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${line.shipping_order_id}`);
+  revalidatePath("/inventory");
+  redirect(`/orders/${line.shipping_order_id}?message=Product+queue+reordered`);
 }
 
 export async function updateOrderScheduleAction(formData: FormData) {

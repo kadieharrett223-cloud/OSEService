@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { recalculateProductQueues } from "@/lib/product-queue";
 
 async function ensureProductForLine(supabase: Awaited<ReturnType<typeof createClient>>, line: { qbo_sku: string | null; source_description: string | null; product_id: string | null }) {
   if (line.product_id) {
@@ -127,6 +128,8 @@ export async function approveReviewLineAction(formData: FormData) {
     fulfillment_status: "PENDING",
   }).eq("id", line.id);
 
+  await recalculateProductQueues([productId]);
+
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");
   revalidatePath("/product-queue");
@@ -140,11 +143,24 @@ export async function holdReviewLineAction(formData: FormData) {
   const lineId = String(formData.get("lineId") ?? "").trim();
   if (!lineId) return;
 
+  const { data: line } = await supabase
+    .from("qbo_invoice_lines")
+    .select("product_id")
+    .eq("id", lineId)
+    .maybeSingle();
+
   await supabase.from("qbo_invoice_lines").update({
     approval_status: "HOLD",
     warehouse_status: "HOLD",
     fulfillment_status: "PENDING",
   }).eq("id", lineId);
+
+  if (line?.product_id) await recalculateProductQueues([line.product_id]);
+
+  revalidatePath("/shipping-review");
+  revalidatePath("/order-queue");
+  revalidatePath("/product-queue");
+  revalidatePath("/inventory");
 
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");

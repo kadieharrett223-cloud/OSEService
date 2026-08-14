@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { recalculateProductQueues } from "@/lib/product-queue";
 
 type QueueLineRow = {
   id: string;
+  product_id: string | null;
   approved_qty: number | null;
   fulfilled_qty: number | null;
 };
@@ -19,7 +21,7 @@ export async function fulfillQueueLineAction(formData: FormData) {
 
   const { data: line } = await supabase
     .from("shipping_order_lines")
-    .select("id, approved_qty, fulfilled_qty")
+    .select("id, product_id, approved_qty, fulfilled_qty")
     .eq("id", lineId)
     .maybeSingle();
 
@@ -45,6 +47,8 @@ export async function fulfillQueueLineAction(formData: FormData) {
     shipment_number: `SHIP-${Date.now()}`,
     source_event_key: `fulfill-${typedLine.id}-${Date.now()}`,
   });
+
+  if (typedLine.product_id) await recalculateProductQueues([typedLine.product_id]);
 
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");

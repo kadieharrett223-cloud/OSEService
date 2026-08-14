@@ -13,6 +13,7 @@ import {
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
+  overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
 } from "../actions";
 
@@ -49,6 +50,9 @@ type OrderDetailRow = {
     allocation_status: string | null;
     priority: string | null;
     queue_position_start: number | null;
+    queue_position_count: number | null;
+    queue_position_override: number | null;
+    queue_position_override_reason: string | null;
     legacy_container_assignment: string | null;
     suggested_assignment_source: string | null;
     suggested_container_id: string | null;
@@ -534,6 +538,9 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
       allocation_status,
       priority,
       queue_position_start,
+      queue_position_count,
+      queue_position_override,
+      queue_position_override_reason,
       legacy_container_assignment,
       suggested_assignment_source,
       suggested_container_id,
@@ -1313,6 +1320,18 @@ export default async function OrderDetailPage({
                               <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />
                               <button className="btn-secondary" type="submit">Save Note</button>
                             </form>
+                            <div className="mt-5 border-t border-[#eef2f7] pt-4">
+                              <h3 className="text-sm font-semibold text-[#111827]">Product Queue Position</h3>
+                              <p className="mt-1 text-xs text-[#64748b]">Automatic position: {line.queue_position_start ?? "—"} · Units: {line.queue_position_count ?? 0}</p>
+                              <form action={overrideProductQueuePositionAction} className="mt-3 grid gap-2">
+                                <input type="hidden" name="lineId" value={line.id} />
+                                <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Override position</label>
+                                <input name="queue_position" type="number" min="1" defaultValue={line.queue_position_override ?? line.queue_position_start ?? ""} className="input" required />
+                                <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Reason</label>
+                                <input name="queue_position_reason" defaultValue={line.queue_position_override_reason ?? ""} className="input" placeholder="Customer was promised priority" required />
+                                <button className="btn-secondary" type="submit">Reorder Product Queue</button>
+                              </form>
+                            </div>
                             <p className="mt-3 text-xs text-[#64748b]">Line activity events: {lineHistoryCount}</p>
                           </div>
                         </div> : null}

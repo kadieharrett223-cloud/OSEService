@@ -946,7 +946,9 @@ export default async function OrderDetailPage({
     isNonInventory: false,
   }))).map((item, index) => {
     const skuKey = normalizeSkuKey(item.sku);
-    const shippingLine = skuKey ? shippingLineBySkuKey.get(skuKey) ?? null : orderLines[index] ?? null;
+    const shippingLine = skuKey
+      ? shippingLineBySkuKey.get(skuKey) ?? orderLines[index] ?? null
+      : orderLines[index] ?? null;
     const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
     return {
       key: `${skuKey ?? "line"}-${index}`,

@@ -438,7 +438,7 @@ export default async function InventoryPage({
                     </td>
                     <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
                     <td className="px-2 py-3">{formatNumber(row.openDemand)}</td>
-                    <td className="px-2 py-3 font-semibold text-[#166534]">
+                    <td className="px-2 py-3 font-semibold text-[#16a34a]">
                       {formatNumber(row.availableNow)}
                     </td>
                     <td className="px-2 py-3">

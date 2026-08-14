@@ -207,6 +207,35 @@ The first apply transferred `617` deterministic customer groups and matched `445
 
 The follow-up preview found `407` source groups still needing identity deduplication and `7` ambiguous groups. No second apply was performed because those groups need stronger identity matching before they can be safely merged or created. The apply report is `tmp/import-reports/old-erp-accepted-customers-2026-08-14T16-36-12-255Z.json`.
 
+## Warehouse Order State Transfer
+
+The old warehouse-page state is synchronized with:
+
+- `scripts/sync-old-erp-order-operational-state.mjs`
+- `npm run sync:old-erp-order-state:preview`
+- `npm run sync:old-erp-order-state:apply`
+
+For matched live OLD_ERP lines, the sync transfers:
+
+- approval status
+- warehouse status (`IN_WAREHOUSE`, `PICKED`, `READY_TO_SHIP`, `FULFILLED`, and other supported states)
+- fulfillment status
+- priority
+- queue position
+- expected date
+- fulfillment method/shipping method
+- floor/container assignment evidence
+- legacy status fields used for audit
+
+It then recomputes the parent order status and priority. It does not create allocations or replay inventory adjustments.
+
+Latest result:
+
+- Matched live lines updated: `893`
+- Parent orders recomputed: `414`
+- Repeat preview pending changes: `0`
+- Historical source rows intentionally not live: `5,122`
+
 ## Data Flow
 
 1. Cosmos exports are read from `tmp/exports` (or freshly exported with `azure:export`).

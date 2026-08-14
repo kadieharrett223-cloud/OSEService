@@ -32,7 +32,9 @@
     "report:old-erp-order-parity": "node --env-file=.env.local scripts/report-old-erp-order-parity.mjs",
     "sync:old-erp-order-priorities": "node --env-file=.env.local scripts/sync-old-erp-order-priorities.mjs"
     ,"transfer:old-erp-accepted-customers:preview": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs"
-    ,"transfer:old-erp-accepted-customers:apply": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs --apply"
+    ,"transfer:old-erp-accepted-customers:apply": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs --apply",
+    "sync:old-erp-order-state:preview": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs",
+    "sync:old-erp-order-state:apply": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs --apply"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

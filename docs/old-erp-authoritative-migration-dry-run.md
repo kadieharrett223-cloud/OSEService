@@ -176,6 +176,25 @@ It uses the latest OLD_ERP `Products.onFloor`/`onHand` values as the validated o
 
 The latest conflict-aware preview matches OLD_ERP and Supabase at `530,335` floor units across `244` unambiguous canonical products with zero remaining delta. It intentionally excludes `18` canonical targets where multiple legacy operational item codes resolve to one target product; those conflicts represent `574` source units and require explicit product identity decisions before complete inventory parity can be claimed.
 
+## Order Parity Report
+
+The read-only order parity command is:
+
+- `scripts/report-old-erp-order-parity.mjs`
+- `npm run report:old-erp-order-parity`
+
+Latest result across all `6,015` OLD_ERP InvoiceQueueItems rows:
+
+- History rows: `6,015`
+- Live shipping lines: `2,534`
+- Fully matched source/history/live rows: `892`
+- Expected history-only rows: `5,109`
+- Live-only QuickBooks rows: `1,641`
+- Missing live lines: `13`, all tied to unresolved SKU mappings
+- Remaining field mismatch: `1` customer name variant (`Shrewsbury` versus `Russell Shrewsbury`)
+
+The 204 directly evidenced priority mismatches were synchronized from OLD_ERP into matched live lines. The parity report does not mutate data; it distinguishes expected historical absence from actual missing operational order data.
+
 ## Data Flow
 
 1. Cosmos exports are read from `tmp/exports` (or freshly exported with `azure:export`).

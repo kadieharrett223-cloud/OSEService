@@ -28,7 +28,9 @@
     "import:old-erp-order-history:preview": "node scripts/import-old-erp-order-status-history.mjs",
     "import:old-erp-order-history:apply": "node --env-file=.env.local scripts/import-old-erp-order-status-history.mjs --apply",
     "sync:old-erp-opening-inventory:preview": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs",
-    "sync:old-erp-opening-inventory:apply": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs --apply"
+    "sync:old-erp-opening-inventory:apply": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs --apply",
+    "report:old-erp-order-parity": "node --env-file=.env.local scripts/report-old-erp-order-parity.mjs",
+    "sync:old-erp-order-priorities": "node --env-file=.env.local scripts/sync-old-erp-order-priorities.mjs"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

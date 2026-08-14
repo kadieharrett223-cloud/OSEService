@@ -127,6 +127,10 @@ function formatPriority(value: string | null | undefined) {
   return formatStatus(value ?? "NORMAL");
 }
 
+function normalizeSkuKey(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
 function isActiveIncomingContainer(status: string | null | undefined) {
   return ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(status ?? "").trim().toUpperCase());
 }
@@ -244,12 +248,6 @@ export default async function InventoryPage({
     (row) => Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0)),
   );
 
-  const incomingByProduct = toRecordMap(
-    containerLineRows.filter((row) => isActiveIncomingContainer(row.containers?.lifecycle_status)),
-    (row) => row.product_id,
-    (row) => Math.max(0, Number(row.on_order_qty ?? 0) - Number(row.received_qty ?? 0)),
-  );
-
   const floorCommittedByProduct = new Map<string, number>();
   const committedByProductContainer = new Map<string, number>();
   for (const line of queueLineRows) {
@@ -344,73 +342,86 @@ export default async function InventoryPage({
     });
   }
 
-  const rows: InventoryViewRow[] = productRows
-    .map((product) => {
-      const onFloor = onFloorByProduct.get(product.id) ?? 0;
-      const openDemand = openDemandByProduct.get(product.id) ?? 0;
-      const floorCommitted = floorCommittedByProduct.get(product.id) ?? 0;
-      const incoming = incomingByProduct.get(product.id) ?? 0;
-      const availableNow = Math.max(0, onFloor - openDemand);
-      const availableAfterIncoming = Math.max(0, onFloor + incoming - openDemand);
-      const backorderedAfterIncoming = Math.max(0, openDemand - onFloor - incoming);
-      const incomingContainers = (incomingContainersByProduct.get(product.id) ?? []).sort((a, b) => a.etaSort.localeCompare(b.etaSort));
+  const canonicalGroups = new Map<string, InventoryViewRow>();
+  for (const product of productRows) {
+    const displaySku = operationalSkuByProduct.get(product.id) ?? product.sku ?? "—";
+    const canonicalKey = normalizeSkuKey(displaySku) || normalizeSkuKey(product.sku) || product.id;
 
-      return {
-        productId: product.id,
-        sku: operationalSkuByProduct.get(product.id) ?? product.sku ?? "—",
-        productName: product.canonical_name ?? "Unnamed Product",
-        onFloor,
-        openDemand,
-        floorCommitted,
-        availableNow,
-        incoming,
-        availableAfterIncoming,
-        backorderedAfterIncoming,
-        nextEta: incomingContainers[0] ? `${incomingContainers[0].containerNumber} · ${incomingContainers[0].eta}` : "—",
-        incomingContainers,
-        customerQueue: queueByProduct.get(product.id) ?? [],
-      };
-    })
-    .filter((row) => {
-      if (!q) return true;
-      const searchable = `${row.sku} ${row.productName}`.toLowerCase();
-      return searchable.includes(q);
-    });
+    const group = canonicalGroups.get(canonicalKey) ?? {
+      productId: product.id,
+      sku: displaySku,
+      productName: product.canonical_name ?? "Unnamed Product",
+      onFloor: 0,
+      openDemand: 0,
+      floorCommitted: 0,
+      availableNow: 0,
+      incoming: 0,
+      availableAfterIncoming: 0,
+      backorderedAfterIncoming: 0,
+      nextEta: "—",
+      incomingContainers: [],
+      customerQueue: [],
+    };
 
-  const groupedRows = new Map<string, InventoryViewRow>();
-  for (const row of rows) {
-    const groupKey = row.sku.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-    const existing = groupedRows.get(groupKey);
-    if (!existing) {
-      groupedRows.set(groupKey, { ...row, incomingContainers: row.incomingContainers.map((container) => ({ ...container })) });
-      continue;
-    }
+    group.onFloor += onFloorByProduct.get(product.id) ?? 0;
+    group.openDemand += openDemandByProduct.get(product.id) ?? 0;
+    group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
+    group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];
 
-    const containersByNumber = new Map(existing.incomingContainers.map((container) => [container.containerNumber, container]));
-    for (const container of row.incomingContainers) {
-      const current = containersByNumber.get(container.containerNumber);
-      if (current) {
-        current.qty += container.qty;
-        current.committed += container.committed;
-        current.available += container.available;
+    // Container supply is recorded per part number, so it belongs to the canonical SKU, not to a
+    // single product id. Duplicate legacy identities carry the same container line, so merge by
+    // container number taking the largest quantity instead of summing (which would double count).
+    const containersByNumber = new Map(group.incomingContainers.map((container) => [container.containerNumber, container]));
+    for (const container of incomingContainersByProduct.get(product.id) ?? []) {
+      const existing = containersByNumber.get(container.containerNumber);
+      if (existing) {
+        existing.qty = Math.max(existing.qty, container.qty);
+        existing.committed = Math.max(existing.committed, container.committed);
+        existing.available = Math.max(0, existing.qty - existing.committed);
       } else {
         containersByNumber.set(container.containerNumber, { ...container });
       }
     }
+    group.incomingContainers = Array.from(containersByNumber.values());
+    group.incoming = group.incomingContainers.reduce((sum, container) => sum + container.qty, 0);
 
-    existing.onFloor += row.onFloor;
-    existing.openDemand += row.openDemand;
-    existing.floorCommitted += row.floorCommitted;
-    existing.incoming += row.incoming;
-    existing.availableNow = Math.max(0, existing.onFloor - existing.openDemand);
-    existing.availableAfterIncoming = Math.max(0, existing.onFloor + existing.incoming - existing.openDemand);
-    existing.backorderedAfterIncoming = Math.max(0, existing.openDemand - existing.onFloor - existing.incoming);
-    existing.incomingContainers = Array.from(containersByNumber.values()).sort((left, right) => left.etaSort.localeCompare(right.etaSort));
-    existing.nextEta = existing.incomingContainers[0] ? `${existing.incomingContainers[0].containerNumber} · ${existing.incomingContainers[0].eta}` : "—";
-    existing.customerQueue = [...existing.customerQueue, ...row.customerQueue];
+    canonicalGroups.set(canonicalKey, group);
   }
 
-  const displayRows = Array.from(groupedRows.values());
+  const displayRows = Array.from(canonicalGroups.values())
+    .map((group) => {
+      // Unallocated open demand still consumes floor stock, matching the OLD_ERP Available = On Floor - Sold rule.
+      const committedFloor = Math.max(group.floorCommitted, Math.min(group.openDemand, group.onFloor));
+      const incomingContainers = group.incomingContainers
+        .slice()
+        .sort((left, right) => left.etaSort.localeCompare(right.etaSort));
+      const customerQueue = group.customerQueue
+        .slice()
+        .sort((left, right) => {
+          const priorityRank: Record<string, number> = { Critical: 0, High: 1, Normal: 2, Low: 3 };
+          const priorityDifference = (priorityRank[left.priority] ?? 2) - (priorityRank[right.priority] ?? 2);
+          if (priorityDifference !== 0) return priorityDifference;
+          const leftPosition = left.position === "—" ? Number.MAX_SAFE_INTEGER : Number(left.position);
+          const rightPosition = right.position === "—" ? Number.MAX_SAFE_INTEGER : Number(right.position);
+          return leftPosition - rightPosition;
+        })
+        .map((item, index) => ({ ...item, position: String(index + 1) }));
+
+      return {
+        ...group,
+        incomingContainers,
+        customerQueue,
+        availableNow: Math.max(0, group.onFloor - committedFloor),
+        availableAfterIncoming: Math.max(0, group.onFloor + group.incoming - group.openDemand),
+        backorderedAfterIncoming: Math.max(0, group.openDemand - group.onFloor - group.incoming),
+        nextEta: incomingContainers[0] ? `${incomingContainers[0].containerNumber} · ${incomingContainers[0].eta}` : "—",
+      };
+    })
+    .filter((row) => {
+      if (!q) return true;
+      return `${row.sku} ${row.productName}`.toLowerCase().includes(q);
+    })
+    .sort((left, right) => left.sku.localeCompare(right.sku, undefined, { numeric: true }));
 
   return (
     <div className="space-y-5">

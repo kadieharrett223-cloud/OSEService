@@ -119,6 +119,14 @@ New/Review order handling:
 - Accepting an order does not create inventory allocations or change inventory quantities.
 - Existing line-level review remains available for partial/exception handling.
 
+Recent customer/order tracking rule:
+
+- New/Review and the dashboard New Orders metric include only QuickBooks invoices with `Paid` or `Partially Paid` status and an `invoice_date` within the last three months.
+- On 2026-08-14 the cutoff is 2026-05-14.
+- Older imported QBO/OLD_ERP records remain preserved and available in their historical/accepted views; they are not deleted.
+- The latest preview found 370 recent paid/partially paid invoices, 293 already represented in the ERP, and no new mapped orders in the current snapshot.
+- 77 recent invoices remain exceptions because their lines still lack product mappings.
+
 SKU mapping remains review-gated. The remaining seven OLD_ERP values and QBO invoices with unmapped lines are not silently assigned to products because a guessed mapping would change operational inventory and queue meaning.
 
 ## Final Dry-Run Status (2026-08-13)

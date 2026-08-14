@@ -12,6 +12,7 @@ import {
 
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
 const SOURCE_TYPE = "QBO_INVOICE";
+const RECENT_MONTH_WINDOW = 3;
 
 function parseArgs(argv) {
   const args = { apply: false, reportOut: "" };
@@ -21,6 +22,19 @@ function parseArgs(argv) {
     if (token === "--report-out") { args.reportOut = String(argv[i + 1] ?? "").trim(); i += 1; }
   }
   return args;
+}
+
+function getRecentInvoiceCutoff() {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setMonth(cutoff.getMonth() - RECENT_MONTH_WINDOW);
+  return cutoff;
+}
+
+function isRecentInvoice(invoiceDate, cutoff) {
+  if (!invoiceDate) return false;
+  const parsed = new Date(`${invoiceDate}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed >= cutoff;
 }
 
 async function loadAll(supabase, table, select) {
@@ -61,7 +75,7 @@ function buildProductMap(products, aliases) {
   return map;
 }
 
-function planOrders(invoices, invoiceLines, existingOrders, productMap) {
+function planOrders(invoices, invoiceLines, existingOrders, productMap, cutoff) {
   const existingByInvoiceId = new Set(
     existingOrders
       .filter((row) => row.source_type === SOURCE_TYPE && row.source_invoice_id)
@@ -74,7 +88,8 @@ function planOrders(invoices, invoiceLines, existingOrders, productMap) {
     linesByInvoice.set(line.qbo_invoice_id, rows);
   }
 
-  const eligible = invoices.filter((invoice) => PAID_STATUSES.has(invoice.payment_status));
+  const paidInvoices = invoices.filter((invoice) => PAID_STATUSES.has(invoice.payment_status));
+  const eligible = paidInvoices.filter((invoice) => isRecentInvoice(invoice.invoice_date, cutoff));
   const plans = [];
   const exceptions = [];
 
@@ -118,7 +133,10 @@ function planOrders(invoices, invoiceLines, existingOrders, productMap) {
     exceptions,
     summary: {
       qboInvoiceCount: invoices.length,
-      paidOrPartiallyPaidCount: eligible.length,
+      paidOrPartiallyPaidCount: paidInvoices.length,
+      recentCutoff: cutoff.toISOString().slice(0, 10),
+      recentPaidOrPartiallyPaidCount: eligible.length,
+      olderPaidOrPartiallyPaidExcludedCount: paidInvoices.length - eligible.length,
       alreadyImportedCount: eligible.length - plans.length - exceptions.length,
       newOrderCount: plans.length,
       newMappedLineCount: plans.reduce((sum, plan) => sum + plan.mappedLines.length, 0),
@@ -193,7 +211,8 @@ async function main() {
     loadAll(supabase, "products", "id, sku"),
     loadAll(supabase, "product_aliases", "product_id, alias"),
   ]);
-  const plan = planOrders(invoices, invoiceLines, existingOrders, buildProductMap(products, aliases));
+  const cutoff = getRecentInvoiceCutoff();
+  const plan = planOrders(invoices, invoiceLines, existingOrders, buildProductMap(products, aliases), cutoff);
   const [orderColumns, lineColumns] = await Promise.all([
     loadColumnSet(supabase, "shipping_orders", ["customer_id", "source_invoice_id", "order_number", "source_type", "review_status", "fulfillment_status", "priority", "notes"]),
     loadColumnSet(supabase, "shipping_order_lines", ["shipping_order_id", "qbo_invoice_line_id", "product_id", "ordered_qty", "approved_qty", "fulfilled_qty", "cancelled_qty", "approval_status", "warehouse_status", "allocation_status", "fulfillment_status", "priority", "source_event_key"]),
@@ -202,6 +221,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     mode: args.apply ? "apply" : "preview",
     paymentStatusesIncluded: Array.from(PAID_STATUSES),
+    recentMonthWindow: RECENT_MONTH_WINDOW,
     summary: plan.summary,
     exceptions: plan.exceptions.slice(0, 500),
     plannedOrders: plan.plans.map((item) => ({

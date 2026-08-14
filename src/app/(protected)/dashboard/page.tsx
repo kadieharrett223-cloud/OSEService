@@ -34,6 +34,7 @@ type OrderRow = {
   review_status: string | null;
   qbo_invoices?: {
     payment_status: string | null;
+    invoice_date: string | null;
   } | null;
   shipping_order_lines?: Array<{
     approval_status: string | null;
@@ -149,7 +150,7 @@ export default async function DashboardPage() {
       .select(`
         id,
         review_status,
-        qbo_invoices (payment_status),
+        qbo_invoices (payment_status, invoice_date),
         shipping_order_lines (approval_status, warehouse_status, fulfillment_status)
       `)
       .order("created_at", { ascending: false })
@@ -201,8 +202,16 @@ export default async function DashboardPage() {
   }, 0);
 
   const newOrders = orderRows.filter((order) => {
-    const paid = order.qbo_invoices?.payment_status === "Paid";
-    return paid && order.review_status === "PENDING_REVIEW";
+    const paid = order.qbo_invoices?.payment_status === "Paid" || order.qbo_invoices?.payment_status === "Partially Paid";
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setMonth(cutoff.getMonth() - 3);
+    const invoiceDate = order.qbo_invoices?.invoice_date
+      ? new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`)
+      : null;
+    return paid
+      && order.review_status === "PENDING_REVIEW"
+      && Boolean(invoiceDate && !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff);
   }).length;
 
   const openQueuedOrders = orderRows.filter((order) => {
@@ -362,7 +371,7 @@ export default async function DashboardPage() {
             <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#047857]">📋 Orders</p>
               <div className="mt-3 flex-1 space-y-2 text-sm">
-                <Link href="/orders?tab=new" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>New Orders (Review)</span><span className="font-semibold text-[#047857]">{formatNumber(newOrders)}</span></Link>
+                <Link href="/orders?tab=review" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>New Orders (Review)</span><span className="font-semibold text-[#047857]">{formatNumber(newOrders)}</span></Link>
                 <Link href="/orders?tab=accepted" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Open / Queued</span><span className="font-semibold text-[#047857]">{formatNumber(openQueuedOrders)}</span></Link>
                 <Link href="/orders?tab=warehouse" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>In Warehouse</span><span className="font-semibold text-[#d97706]">{formatNumber(inWarehouse)}</span></Link>
                 <Link href="/orders?tab=shipped" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Shipped / In Transit</span><span className="font-semibold text-[#2563eb]">{formatNumber(shippedInTransit)}</span></Link>

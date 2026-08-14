@@ -71,6 +71,19 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
+function isRecentPaidQuickbooksReviewOrder(order: OrderSummary) {
+  const paymentStatus = order.qbo_invoices?.payment_status;
+  if (paymentStatus !== "Paid" && paymentStatus !== "Partially Paid") return false;
+  if (!order.qbo_invoices?.invoice_date) return false;
+
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setMonth(cutoff.getMonth() - 3);
+
+  const invoiceDate = new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`);
+  return !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff;
+}
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -173,7 +186,8 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "review":
-        return order.review_status === "PENDING_REVIEW" || !hasLines || anyReview;
+        return isRecentPaidQuickbooksReviewOrder(order)
+          && (order.review_status === "PENDING_REVIEW" || !hasLines || anyReview);
       case "accepted":
         return anyApproved && !anyWarehouse && !anyShipped && !allFulfilled;
       case "warehouse":

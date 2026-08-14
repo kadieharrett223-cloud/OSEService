@@ -18,19 +18,10 @@ type IncomingDropdownProps = {
 
 export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   function toggleDropdown() {
-    if (!open && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const panelWidth = Math.min(520, window.innerWidth - 32);
-      setPosition({
-        top: Math.min(rect.bottom + 8, window.innerHeight - 24),
-        left: Math.min(Math.max(16, rect.right - panelWidth), window.innerWidth - panelWidth - 16),
-      });
-    }
     setOpen((value) => !value);
   }
 
@@ -42,8 +33,16 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
       if (!panelRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
     }
 
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+
     document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open]);
 
   return (
@@ -52,7 +51,13 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
         {total}
       </button>
       {open ? (
-        <div ref={panelRef} className="fixed z-[60] w-[min(520px,calc(100vw-2rem))] rounded-xl border border-[#dbe3ee] bg-white p-4 text-left shadow-2xl ring-1 ring-[#0f172a]/10" style={{ top: position.top, left: position.left }}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4 sm:p-6">
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-[#dbe3ee] bg-white p-5 text-left shadow-2xl"
+          >
           <div className="flex items-center justify-between border-b border-[#e2e8f0] pb-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Incoming inventory</p>
@@ -63,7 +68,7 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
           {containers.length === 0 ? (
             <p className="mt-3 text-xs text-[#64748b]">No active incoming containers.</p>
           ) : (
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
               {containers.map((container) => (
                 <div key={container.containerNumber} className="grid gap-2 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
                   <div>
@@ -76,6 +81,7 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
               ))}
             </div>
           )}
+          </div>
         </div>
       ) : null}
     </div>

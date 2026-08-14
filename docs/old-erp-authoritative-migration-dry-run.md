@@ -129,6 +129,26 @@ Recent customer/order tracking rule:
 
 SKU mapping remains review-gated. The remaining seven OLD_ERP values and QBO invoices with unmapped lines are not silently assigned to products because a guessed mapping would change operational inventory and queue meaning.
 
+## Historical OLD_ERP Order Status Archive
+
+Historical InvoiceQueueItems outcomes are imported separately from live shipping demand with:
+
+- `supabase/migrations/202608140001_old_erp_order_status_history.sql`
+- `scripts/import-old-erp-order-status-history.mjs`
+- `npm run import:old-erp-order-history:preview`
+- `npm run import:old-erp-order-history:apply`
+
+The preview against the current 6,015-row Cosmos export classified:
+
+- `FULFILLED`: 1,974
+- `SHIPPED`: 304
+- `REMOVED`: 3,600
+- `CANCELLED`: 89
+- `DENIED`: 29
+- `ACCEPTED`: 19
+
+These rows are archive/history only. They do not reopen customers, create active demand, create allocations, or replay inventory adjustments. Apply was attempted and correctly stopped because the remote Supabase schema does not yet contain `old_erp_order_status_history`; apply migration `202608140001_old_erp_order_status_history.sql` first, then rerun the apply command.
+
 ## Final Dry-Run Status (2026-08-13)
 
 The latest complete reconciliation is:

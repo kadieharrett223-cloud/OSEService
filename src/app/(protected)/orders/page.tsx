@@ -46,6 +46,17 @@ type DeniedInvoiceRollup = {
   occurrence_count: number;
 };
 
+type HistoricalStatusRow = {
+  id: string;
+  invoice_number: string | null;
+  customer_name: string | null;
+  item_code: string | null;
+  quantity: number | null;
+  historical_status: string;
+  occurred_at: string | null;
+  notes: string | null;
+};
+
 function statusBadgeClass(status: string | null | undefined) {
   if (status === "APPROVED" || status === "FULFILLED") return "bg-[#e7f7ed] text-[#1b7a43]";
   if (status === "HOLD") return "bg-[#fee2e2] text-[#b91c1c]";
@@ -95,12 +106,31 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "review";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  const { count: deniedCountRaw } = await supabase
-    .from("order_history_reason_rollups")
-    .select("id", { count: "exact", head: true })
-    .eq("reason_category", "cancel_deny_rollback");
+  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }] = await Promise.all([
+    supabase
+      .from("order_history_reason_rollups")
+      .select("id", { count: "exact", head: true })
+      .eq("reason_category", "cancel_deny_rollback"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "CANCELLED"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "REMOVED"),
+  ]);
 
   const deniedCount = Number(deniedCountRaw ?? 0);
+
+  const historicalStatus = activeTab === "denied" ? "DENIED" : activeTab === "cancelled" ? "CANCELLED" : activeTab === "removed" ? "REMOVED" : null;
+  const { data: historicalStatusRows, error: historicalStatusError } = historicalStatus
+    ? await supabase
+        .from("old_erp_order_status_history")
+        .select("id, invoice_number, customer_name, item_code, quantity, historical_status, occurred_at, notes")
+        .eq("historical_status", historicalStatus)
+        .order("occurred_at", { ascending: false })
+    : { data: [], error: null };
 
   const { data: deniedRollupRows, error: deniedRollupError } = activeTab === "denied"
     ? await supabase
@@ -132,6 +162,15 @@ export default async function OrdersPage({
       .toLowerCase();
 
     return searchable.includes(searchText);
+  });
+
+  const historicalStatusSummaries = ((historicalStatusRows ?? []) as HistoricalStatusRow[]).filter((entry) => {
+    if (!searchText) return true;
+    return [entry.invoice_number, entry.customer_name, entry.item_code, entry.notes]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(searchText);
   });
 
   const { data: orders, error } = await supabase
@@ -227,6 +266,8 @@ export default async function OrdersPage({
     shipped: allOrders.filter((order) => matchesTab(order, "shipped")).length,
     fulfilled: allOrders.filter((order) => matchesTab(order, "fulfilled")).length,
     denied: deniedCount,
+    cancelled: Number(cancelledCountRaw ?? 0),
+    removed: Number(removedCountRaw ?? 0),
   };
 
   const tabs = [
@@ -236,6 +277,8 @@ export default async function OrdersPage({
     { id: "shipped", label: "Shipped" },
     { id: "fulfilled", label: "Fulfilled" },
     { id: "denied", label: "Denied" },
+    { id: "cancelled", label: "Cancelled" },
+    { id: "removed", label: "Removed" },
   ];
 
   return (
@@ -303,7 +346,7 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab === "denied" && deniedRollupError ? (
+        {historicalStatus && historicalStatusError ? (
           <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
             Unable to load denied archive rows right now.
           </div>
@@ -321,9 +364,9 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab === "denied" && !deniedRollupError && deniedSummaries.length === 0 ? (
+        {historicalStatus && !historicalStatusError && historicalStatusSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
-            <p>{searchText ? "No denied invoices match that filter." : "No denied invoices are archived yet."}</p>
+            <p>{searchText ? `No ${activeTab} invoices match that filter.` : `No ${activeTab} invoices are archived yet.`}</p>
           </div>
         ) : null}
 
@@ -409,6 +452,25 @@ export default async function OrdersPage({
                 </div>
               );
             })}
+          </div>
+        ) : null}
+
+        {activeTab !== "denied" && historicalStatus && !historicalStatusError && historicalStatusSummaries.length > 0 ? (
+          <div className="space-y-3">
+            {historicalStatusSummaries.map((entry) => (
+              <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-[#111827]">Invoice #{entry.invoice_number ?? "—"}</p>
+                    <p className="mt-1 text-sm text-[#374151]">{entry.customer_name ?? "Customer not available"}</p>
+                    <p className="mt-1 text-sm text-[#374151]">Item {entry.item_code ?? "—"} · Qty {entry.quantity ?? 0}</p>
+                    {entry.notes ? <p className="mt-1 text-sm text-[#5a5a5a]">{entry.notes}</p> : null}
+                    <p className="mt-1 text-xs text-[#6b7280]">{formatDate(entry.occurred_at)}</p>
+                  </div>
+                  <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">{entry.historical_status}</span>
+                </div>
+              </div>
+            ))}
           </div>
         ) : null}
       </div>

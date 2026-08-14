@@ -346,7 +346,7 @@ export default async function InventoryPage({
       const openDemand = openDemandByProduct.get(product.id) ?? 0;
       const floorCommitted = floorCommittedByProduct.get(product.id) ?? 0;
       const incoming = incomingByProduct.get(product.id) ?? 0;
-      const availableNow = Math.max(0, onFloor - floorCommitted);
+      const availableNow = Math.max(0, onFloor - openDemand);
       const availableAfterIncoming = Math.max(0, onFloor + incoming - openDemand);
       const backorderedAfterIncoming = Math.max(0, openDemand - onFloor - incoming);
       const incomingContainers = (incomingContainersByProduct.get(product.id) ?? []).sort((a, b) => a.etaSort.localeCompare(b.etaSort));

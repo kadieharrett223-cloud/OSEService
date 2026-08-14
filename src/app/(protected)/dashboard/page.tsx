@@ -205,7 +205,7 @@ export default async function DashboardPage() {
     const paid = order.qbo_invoices?.payment_status === "Paid" || order.qbo_invoices?.payment_status === "Partially Paid";
     const cutoff = new Date();
     cutoff.setHours(0, 0, 0, 0);
-    cutoff.setMonth(cutoff.getMonth() - 3);
+    cutoff.setMonth(cutoff.getMonth() - 1);
     const invoiceDate = order.qbo_invoices?.invoice_date
       ? new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`)
       : null;

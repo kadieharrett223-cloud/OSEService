@@ -89,7 +89,7 @@ function isRecentPaidQuickbooksReviewOrder(order: OrderSummary) {
 
   const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
-  cutoff.setMonth(cutoff.getMonth() - 3);
+  cutoff.setMonth(cutoff.getMonth() - 1);
 
   const invoiceDate = new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`);
   return !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff;

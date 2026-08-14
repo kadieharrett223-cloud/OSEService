@@ -12,7 +12,7 @@ import {
 
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
 const SOURCE_TYPE = "QBO_INVOICE";
-const RECENT_MONTH_WINDOW = 3;
+const RECENT_MONTH_WINDOW = 1;
 
 function parseArgs(argv) {
   const args = { apply: false, reportOut: "" };

@@ -53,6 +53,8 @@ type OrderDetailRow = {
     queue_position_count: number | null;
     queue_position_override: number | null;
     queue_position_override_reason: string | null;
+    legacy_item_code: string | null;
+    legacy_matched_item_code: string | null;
     legacy_container_assignment: string | null;
     suggested_assignment_source: string | null;
     suggested_container_id: string | null;
@@ -548,6 +550,8 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
       queue_position_count,
       queue_position_override,
       queue_position_override_reason,
+      legacy_item_code,
+      legacy_matched_item_code,
       legacy_container_assignment,
       suggested_assignment_source,
       suggested_container_id,
@@ -766,13 +770,9 @@ export default async function OrderDetailPage({
 
   const orderNotes = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED");
 
-  const allProductRows = parsedInvoiceItems.length > 0
-    ? Array.from(new Set(parsedInvoiceItems.map((item) => item.sku).filter(Boolean)))
-    : [];
-
-  const { data: productRows } = allProductRows.length
-    ? await supabase.from("products").select("id, sku, canonical_name").in("sku", allProductRows as string[])
-    : { data: [] };
+  const { data: productRows } = await supabase
+    .from("products")
+    .select("id, sku, canonical_name");
 
   const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
   for (const product of productRows ?? []) {
@@ -780,9 +780,9 @@ export default async function OrderDetailPage({
     if (skuKey) productMap.set(skuKey, product);
   }
 
-  const { data: aliasRows } = allProductRows.length
-    ? await supabase.from("product_aliases").select("product_id, alias, products (id, sku, canonical_name)")
-    : { data: [] };
+  const { data: aliasRows } = await supabase
+    .from("product_aliases")
+    .select("product_id, alias, products (id, sku, canonical_name)");
 
   for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
     const aliasKey = normalizeSkuKey(alias.alias);
@@ -926,6 +926,8 @@ export default async function OrderDetailPage({
   for (const line of orderLines) {
     const keys = [
       normalizeSkuKey(line.products?.sku),
+      normalizeSkuKey(line.legacy_item_code),
+      normalizeSkuKey(line.legacy_matched_item_code),
       normalizeSkuKey(line.legacy_container_assignment),
     ].filter(Boolean) as string[];
     if ((line as { legacy_item_code?: string | null }).legacy_item_code) {

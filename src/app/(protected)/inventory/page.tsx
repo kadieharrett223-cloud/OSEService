@@ -6,6 +6,7 @@ import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-dem
 import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-button";
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
+import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ProductRow = {
@@ -80,6 +81,7 @@ type InventoryViewRow = {
   productIds: string[];
   sku: string;
   productName: string;
+  manufacturer: string | null;
   group: string;
   groupSort: number;
   sortOrder: number;
@@ -382,12 +384,14 @@ export default async function InventoryPage({
   for (const product of productRows) {
     const displaySku = operationalSkuByProduct.get(product.id) ?? product.sku ?? "—";
     const canonicalKey = normalizeSkuKey(displaySku) || normalizeSkuKey(product.sku) || product.id;
+    const { manufacturer, title } = splitProductTitle(product.canonical_name);
 
     const group = canonicalGroups.get(canonicalKey) ?? {
       productId: product.id,
       productIds: [],
       sku: displaySku,
-      productName: product.canonical_name ?? "Unnamed Product",
+      productName: title || "Unnamed Product",
+      manufacturer,
       group: UNSORTED_GROUP,
       groupSort: UNSORTED_GROUP_SORT,
       sortOrder: Number.MAX_SAFE_INTEGER,
@@ -567,7 +571,14 @@ export default async function InventoryPage({
                       <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
-                      <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
+                      <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#64748b]">
+                        {row.manufacturer ? (
+                          <span className="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[#475569]">
+                            {row.manufacturer}
+                          </span>
+                        ) : null}
+                        <span>SKU {row.sku}</span>
+                      </div>
                       <DisplayOrderButton
                         productIds={row.productIds}
                         productName={row.productName}

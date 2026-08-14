@@ -25,6 +25,13 @@ type CustomerDemandDropdownProps = {
   adminMode?: boolean;
 };
 
+/** Spreadsheets execute cells beginning with = + - @, so those are neutralised before quoting. */
+function toCsvCell(value: string) {
+  const raw = String(value ?? "");
+  const guarded = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${guarded.replace(/"/g, '""')}"`;
+}
+
 export function CustomerDemandDropdown({
   productName,
   sku,
@@ -38,6 +45,39 @@ export function CustomerDemandDropdown({
 
   function toggleDropdown() {
     setOpen((current) => !current);
+  }
+
+  function downloadReport() {
+    const headers = ["Position", "Customer", "Invoice", "Qty", "Priority", "Assignment", "Expected Availability", "Status"];
+    const rows = customerQueue.map((item) => [
+      item.position,
+      item.customer,
+      item.invoice,
+      String(item.qty),
+      item.priority,
+      item.assignedTo,
+      item.expectedAvailability,
+      item.status,
+    ]);
+
+    const csv = [
+      [`Customer list for ${sku} - ${productName}`],
+      [`Open quantity: ${openQuantity}`, `Generated: ${new Date().toLocaleString("en-US")}`],
+      [],
+      headers,
+      ...rows,
+    ]
+      .map((row) => row.map(toCsvCell).join(","))
+      .join("\r\n");
+
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `customer-list-${sku.replace(/[^A-Za-z0-9._-]+/g, "-")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
@@ -92,6 +132,14 @@ export function CustomerDemandDropdown({
               <p>Open quantity</p>
               <p className="mt-1 text-lg font-semibold text-[#0f172a]">{openQuantity}</p>
             </div>
+            <button
+              type="button"
+              onClick={downloadReport}
+              disabled={customerQueue.length === 0}
+              className="shrink-0 rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1 text-xs font-semibold text-[#1d4ed8] transition hover:border-[#93c5fd] hover:bg-[#eff6ff] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Download report
+            </button>
             <button
               type="button"
               onClick={() => setOpen(false)}

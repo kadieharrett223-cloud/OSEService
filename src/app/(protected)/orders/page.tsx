@@ -64,13 +64,6 @@ function statusBadgeClass(status: string | null | undefined) {
   return "bg-[#eef2f7] text-[#334155]";
 }
 
-function parseSalesperson(rawPayload: unknown) {
-  if (!rawPayload || typeof rawPayload !== "object") return null;
-  const payload = rawPayload as Record<string, unknown>;
-  const salesrep = payload.SalesRepRef as { name?: unknown } | undefined;
-  return typeof salesrep?.name === "string" ? salesrep.name : null;
-}
-
 function formatDate(value: string | null | undefined) {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -333,6 +326,21 @@ export default async function OrdersPage({
         </div>
       </div>
 
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          ["Total Orders", allOrders.length, "bg-[#eff6ff] text-[#2563eb]"],
+          ["Accepted", tabCounts.accepted, "bg-[#ecfdf5] text-[#15803d]"],
+          ["In Warehouse", tabCounts.warehouse, "bg-[#fff7ed] text-[#c2410c]"],
+          ["Fulfilled", tabCounts.fulfilled, "bg-[#eff6ff] text-[#1d4ed8]"],
+          ["Cancelled", tabCounts.cancelled, "bg-[#fff1f2] text-[#be123c]"],
+        ].map(([label, value, color]) => (
+          <div key={String(label)} className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+            <div className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ${color}`}>{label}</div>
+            <p className="mt-2 text-2xl font-bold text-[#111827]">{value}</p>
+          </div>
+        ))}
+      </section>
+
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <form method="GET" className="mb-4 flex flex-wrap gap-2">
           <input type="hidden" name="tab" value={activeTab} />
@@ -405,46 +413,60 @@ export default async function OrdersPage({
         ) : null}
 
         {(!historicalStatus || activeTab === "warehouse") && activeTab !== "denied" && orderSummaries.length > 0 ? (
-          <div className="space-y-3">
+          <div className="overflow-x-auto rounded-xl border border-[#e5e7eb]">
+            <table className="w-full min-w-[1040px] text-left text-sm">
+              <thead className="bg-[#f8fafc]">
+                <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
+                  <th className="px-3 py-3">Order / Customer</th>
+                  <th className="px-3 py-3">Status / Priority</th>
+                  <th className="px-3 py-3">Total Items</th>
+                  <th className="px-3 py-3">Approved</th>
+                  <th className="px-3 py-3">In Warehouse</th>
+                  <th className="px-3 py-3">In Transit</th>
+                  <th className="px-3 py-3">Order Date</th>
+                  <th className="px-3 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
-              const salesperson = parseSalesperson(order.qbo_invoices?.raw_payload);
-              const openLineCount = (order.shipping_order_lines ?? []).filter((line) => (line.fulfillment_status ?? "PENDING") !== "FULFILLED").length;
+              const lines = order.shipping_order_lines ?? [];
+              const totalQty = lines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
+              const approvedQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
+              const warehouseQty = lines.filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "FULFILLED"].includes(String(line.warehouse_status ?? ""))).reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
+              const inTransitQty = Math.max(0, approvedQty - warehouseQty);
               return (
-                <div key={order.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-[#111827]">{customerName}</p>
-                      <p className="mt-1 text-sm text-[#5a5a5a]">Invoice #{invoiceNumber}</p>
-                      {salesperson ? <p className="mt-1 text-sm text-[#5a5a5a]">Salesperson {salesperson}</p> : null}
-                    </div>
-                    <div className="text-sm text-[#374151]">
-                      <p>{order.qbo_invoices?.payment_status ?? "Pending"}</p>
-                      <p className="mt-1">{openLineCount} open line{openLineCount === 1 ? "" : "s"}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {(order.shipping_order_lines ?? []).slice(0, 3).map((line) => (
-                      <span key={line.id} className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusBadgeClass(line.approval_status)}`}>
-                        {line.products?.sku ?? "SKU"}: {line.approval_status ?? "PENDING"}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex">Open order</Link>
+                <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
+                  <td className="px-3 py-3">
+                    <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{invoiceNumber}</Link>
+                    <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusBadgeClass(order.review_status)}`}>{order.review_status ?? "PENDING_REVIEW"}</span>
+                    <div className="mt-1 text-xs text-[#64748b]">Priority {lines[0]?.priority ?? "NORMAL"}</div>
+                  </td>
+                  <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
+                  <td className="px-3 py-3 font-semibold text-[#15803d]">{approvedQty} / {totalQty}</td>
+                  <td className="px-3 py-3 font-semibold text-[#c2410c]">{warehouseQty} / {approvedQty}</td>
+                  <td className="px-3 py-3 text-[#2563eb]">{inTransitQty}</td>
+                  <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
                     {activeTab === "review" ? (
                       <form action={acceptNewOrderAction}>
                         <input type="hidden" name="orderId" value={order.id} />
-                        <button type="submit" className="btn-primary inline-flex">Accept Order</button>
+                        <button type="submit" className="btn-primary inline-flex text-xs">Accept</button>
                       </form>
                     ) : null}
-                  </div>
-                </div>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
+              </tbody>
+            </table>
           </div>
         ) : null}
 

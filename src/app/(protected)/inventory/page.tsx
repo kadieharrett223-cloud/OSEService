@@ -149,6 +149,19 @@ function normalizeSkuKey(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+const MANUFACTURER_PREFIX = /^(HL|HK|FB|YZ)-/i;
+
+/** Legacy data reuses AR-1 for two different ramps, so that code must not collapse. */
+const PREFIX_MERGE_EXCEPTIONS = new Set(["AR1"]);
+
+/** The manufacturer code is not part of the product identity, so 4PC-6 and HK-4PC-6 are one row. */
+function canonicalSkuKey(value: string | null | undefined) {
+  const full = normalizeSkuKey(value);
+  const stripped = normalizeSkuKey(String(value ?? "").replace(MANUFACTURER_PREFIX, ""));
+  if (!stripped || PREFIX_MERGE_EXCEPTIONS.has(stripped)) return full;
+  return stripped;
+}
+
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
 
@@ -219,6 +232,7 @@ export default async function InventoryPage({
     supabase
       .from("products")
       .select("id, sku, canonical_name, inventory_group, inventory_sort_order")
+      .neq("status", "Inactive")
       .order("sku", { ascending: true }),
     supabase.from("product_aliases").select("product_id, alias"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
@@ -260,7 +274,7 @@ export default async function InventoryPage({
   // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
   let products = productsResult.data as unknown as ProductRow[] | null;
   if (productsResult.error) {
-    const fallback = await supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true });
+    const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
     products = fallback.data as unknown as ProductRow[] | null;
   }
 
@@ -402,7 +416,7 @@ export default async function InventoryPage({
   const canonicalGroups = new Map<string, InventoryViewRow>();
   for (const product of productRows) {
     const displaySku = operationalSkuByProduct.get(product.id) ?? product.sku ?? "—";
-    const canonicalKey = normalizeSkuKey(displaySku) || normalizeSkuKey(product.sku) || product.id;
+    const canonicalKey = canonicalSkuKey(displaySku) || canonicalSkuKey(product.sku) || product.id;
     const { manufacturer, title } = splitProductTitle(product.canonical_name);
 
     const group = canonicalGroups.get(canonicalKey) ?? {

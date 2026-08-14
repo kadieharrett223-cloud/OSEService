@@ -195,6 +195,18 @@ Latest result across all `6,015` OLD_ERP InvoiceQueueItems rows:
 
 The 204 directly evidenced priority mismatches were synchronized from OLD_ERP into matched live lines. The parity report does not mutate data; it distinguishes expected historical absence from actual missing operational order data.
 
+## Accepted Customer Transfer
+
+Customers attached to accepted/approved or warehouse-state OLD_ERP rows can be transferred with:
+
+- `scripts/transfer-old-erp-accepted-customers.mjs`
+- `npm run transfer:old-erp-accepted-customers:preview`
+- `npm run transfer:old-erp-accepted-customers:apply`
+
+The first apply transferred `617` deterministic customer groups and matched `445` existing customers from `4,158` accepted/warehouse source lines. Denied/removed-only records were excluded.
+
+The follow-up preview found `407` source groups still needing identity deduplication and `7` ambiguous groups. No second apply was performed because those groups need stronger identity matching before they can be safely merged or created. The apply report is `tmp/import-reports/old-erp-accepted-customers-2026-08-14T16-36-12-255Z.json`.
+
 ## Data Flow
 
 1. Cosmos exports are read from `tmp/exports` (or freshly exported with `azure:export`).

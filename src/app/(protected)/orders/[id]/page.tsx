@@ -1189,17 +1189,25 @@ export default async function OrderDetailPage({
         <div className="rounded-lg border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</div>
       ) : null}
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Order / Invoice</p>
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</h1>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d50917]">Working Order</p>
+            <h1 className="mt-1 truncate text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"} <span className="font-normal text-[#64748b]">— Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span></h1>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
+              <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+              <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">Priority: {highestPriority(orderLines.map((line) => line.priority))}</span>
+              <span className="text-[#64748b]">Order date {formatDate(orderRecord.created_at)}</span>
             </div>
-            <p className="mt-2 text-sm text-[#5a5a5a]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"} · Order date {formatDate(orderRecord.created_at)} · Priority {highestPriority(orderLines.map((line) => line.priority))}</p>
-            <p className="mt-1 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</p>
+            <p className="mt-2 truncate text-sm text-[#64748b]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
+          </div>
+          <div className="flex shrink-0 items-center gap-4">
+            <div className="text-right">
+              <p className="text-4xl font-bold leading-none text-[#16a34a]">{totalUnitsInStock} / {totalUnitsNeeded}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">In Stock</p>
+              <p className="mt-1 text-xs font-medium text-[#b45309]">{Math.max(0, totalUnitsNeeded - totalUnitsInStock - totalUnitsShipped)} still waiting</p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
@@ -1218,19 +1226,6 @@ export default async function OrderDetailPage({
           </div>
         </div>
       </div>
-
-      <section className="rounded-2xl border border-[#dbe5f0] bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Stock summary</p>
-            <p className="mt-1 text-sm text-[#475569]">Available warehouse units for this order</p>
-          </div>
-          <div className="text-right">
-            <p className="text-4xl font-bold text-[#16a34a]">{totalUnitsInStock} / {totalUnitsNeeded}</p>
-            <p className="mt-1 text-sm font-semibold text-[#475569]">in stock</p>
-          </div>
-        </div>
-      </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
         <div className="space-y-6">

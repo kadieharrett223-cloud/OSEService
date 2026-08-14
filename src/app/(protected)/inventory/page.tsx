@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { Fragment } from "react";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
 import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
 import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
+import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-button";
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -10,6 +12,8 @@ type ProductRow = {
   id: string;
   sku: string | null;
   canonical_name: string | null;
+  inventory_group?: string | null;
+  inventory_sort_order?: number | null;
 };
 
 type InventoryTransactionRow = {
@@ -73,8 +77,12 @@ type QueueLine = {
 
 type InventoryViewRow = {
   productId: string;
+  productIds: string[];
   sku: string;
   productName: string;
+  group: string;
+  groupSort: number;
+  sortOrder: number;
   onFloor: number;
   openDemand: number;
   floorCommitted: number;
@@ -131,6 +139,9 @@ function normalizeSkuKey(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+const UNSORTED_GROUP = "Other / Unsorted";
+const UNSORTED_GROUP_SORT = 9990;
+
 function isActiveIncomingContainer(status: string | null | undefined) {
   return ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(status ?? "").trim().toUpperCase());
 }
@@ -178,13 +189,16 @@ export default async function InventoryPage({
   const mapMessage = String(params.mapMessage ?? "").trim();
 
   const [
-    { data: products },
+    productsResult,
     { data: aliases },
     { data: transactions },
     { data: containerLines },
     { data: queueLines },
   ] = await Promise.all([
-    supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true }),
+    supabase
+      .from("products")
+      .select("id, sku, canonical_name, inventory_group, inventory_sort_order")
+      .order("sku", { ascending: true }),
     supabase.from("product_aliases").select("product_id, alias"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase
@@ -221,6 +235,28 @@ export default async function InventoryPage({
       .neq("fulfillment_status", "CANCELLED")
       .order("queue_position_start", { ascending: true, nullsFirst: false }),
   ]);
+
+  // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
+  let products = productsResult.data as unknown as ProductRow[] | null;
+  if (productsResult.error) {
+    const fallback = await supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true });
+    products = fallback.data as unknown as ProductRow[] | null;
+  }
+
+  const { data: displayGroupData } = await supabase
+    .from("inventory_display_groups")
+    .select("name, sort_order")
+    .order("sort_order", { ascending: true });
+
+  const displayGroups = displayGroupData as unknown as Array<{ name: string | null; sort_order: number | null }> | null;
+
+  const groupSortByName = new Map<string, number>();
+  for (const group of displayGroups ?? []) {
+    if (group?.name) groupSortByName.set(group.name, Number(group.sort_order ?? UNSORTED_GROUP_SORT));
+  }
+  groupSortByName.set(UNSORTED_GROUP, UNSORTED_GROUP_SORT);
+
+  const groupNames = [...groupSortByName.entries()].sort((left, right) => left[1] - right[1]).map(([name]) => name);
 
   const productRows = (products ?? []) as ProductRow[];
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
@@ -349,8 +385,12 @@ export default async function InventoryPage({
 
     const group = canonicalGroups.get(canonicalKey) ?? {
       productId: product.id,
+      productIds: [],
       sku: displaySku,
       productName: product.canonical_name ?? "Unnamed Product",
+      group: UNSORTED_GROUP,
+      groupSort: UNSORTED_GROUP_SORT,
+      sortOrder: Number.MAX_SAFE_INTEGER,
       onFloor: 0,
       openDemand: 0,
       floorCommitted: 0,
@@ -367,6 +407,19 @@ export default async function InventoryPage({
     group.openDemand += openDemandByProduct.get(product.id) ?? 0;
     group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
     group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];
+    group.productIds = [...group.productIds, product.id];
+
+    // Merged legacy identities can disagree; keep the earliest real placement.
+    const assignedGroup = product.inventory_group?.trim();
+    if (assignedGroup) {
+      const assignedGroupSort = groupSortByName.get(assignedGroup) ?? UNSORTED_GROUP_SORT - 1;
+      const assignedSortOrder = product.inventory_sort_order ?? Number.MAX_SAFE_INTEGER;
+      if (assignedGroupSort < group.groupSort || (assignedGroupSort === group.groupSort && assignedSortOrder < group.sortOrder)) {
+        group.group = assignedGroup;
+        group.groupSort = assignedGroupSort;
+        group.sortOrder = assignedSortOrder;
+      }
+    }
 
     // Container supply is recorded per part number, so it belongs to the canonical SKU, not to a
     // single product id. Duplicate legacy identities carry the same container line, so merge by
@@ -421,7 +474,19 @@ export default async function InventoryPage({
       if (!q) return true;
       return `${row.sku} ${row.productName}`.toLowerCase().includes(q);
     })
-    .sort((left, right) => left.sku.localeCompare(right.sku, undefined, { numeric: true }));
+    .sort((left, right) => {
+      if (left.groupSort !== right.groupSort) return left.groupSort - right.groupSort;
+      if (left.group !== right.group) return left.group.localeCompare(right.group);
+      if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+      return left.sku.localeCompare(right.sku, undefined, { numeric: true });
+    });
+
+  const sections: Array<{ name: string; rows: typeof displayRows }> = [];
+  for (const row of displayRows) {
+    const current = sections[sections.length - 1];
+    if (current && current.name === row.group) current.rows.push(row);
+    else sections.push({ name: row.group, rows: [row] });
+  }
 
   return (
     <div className="space-y-5">
@@ -490,11 +555,27 @@ export default async function InventoryPage({
                   <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
-                displayRows.map((row) => (
-                  <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
+                sections.map((section) => (
+                  <Fragment key={section.name}>
+                    <tr className="border-b border-[#e2e8f0] bg-[#f8fafc]">
+                      <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
+                        {section.name}
+                        <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>
+                      </th>
+                    </tr>
+                    {section.rows.map((row) => (
+                      <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
                       <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
+                      <DisplayOrderButton
+                        productIds={row.productIds}
+                        productName={row.productName}
+                        sku={row.sku}
+                        group={row.group}
+                        sortOrder={row.sortOrder === Number.MAX_SAFE_INTEGER ? null : row.sortOrder}
+                        groups={groupNames}
+                      />
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.onFloor)}</td>
                     <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.openDemand)}</td>
@@ -522,7 +603,9 @@ export default async function InventoryPage({
                         customerQueue={row.customerQueue}
                       />
                     </td>
-                  </tr>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))
               )}
             </tbody>

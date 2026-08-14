@@ -94,3 +94,40 @@ export async function createProductAction(formData: FormData) {
   revalidatePath("/inventory");
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Created ${sku}.`)}`);
 }
+
+export async function updateProductDisplayOrderAction(formData: FormData) {
+  await requireUser();
+
+  const productIds = String(formData.get("product_ids") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const group = String(formData.get("inventory_group") ?? "").trim();
+  const sortOrderRaw = String(formData.get("inventory_sort_order") ?? "").trim();
+
+  if (productIds.length === 0) {
+    redirect("/inventory?mapError=Select+a+product+to+reorder");
+  }
+
+  if (sortOrderRaw && !/^-?\d+$/.test(sortOrderRaw)) {
+    redirect("/inventory?mapError=Display+order+must+be+a+whole+number");
+  }
+
+  const supabase = await createClient();
+
+  // Supabase types are not regenerated for migration 202608140003 yet.
+  const { error } = await supabase
+    .from("products")
+    .update({
+      inventory_group: group || null,
+      inventory_sort_order: sortOrderRaw ? Number(sortOrderRaw) : null,
+    } as never)
+    .in("id", productIds);
+
+  if (error) {
+    redirect(`/inventory?mapError=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/inventory");
+  redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved to ${group || "Other / Unsorted"}.`)}`);
+}

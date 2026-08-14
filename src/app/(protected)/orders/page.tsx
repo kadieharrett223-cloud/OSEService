@@ -309,7 +309,6 @@ export default async function OrdersPage({
     { id: "review", label: "New / Review" },
     { id: "accepted", label: "Accepted" },
     { id: "warehouse", label: "In Warehouse" },
-    { id: "shipped", label: "Shipped" },
     { id: "fulfilled", label: "Fulfilled" },
     { id: "denied", label: "Denied" },
     { id: "cancelled", label: "Cancelled" },

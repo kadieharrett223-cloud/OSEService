@@ -211,6 +211,13 @@ function formatStatus(value: string | null | undefined) {
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function highestPriority(values: Array<string | null | undefined>) {
+  const rank: Record<string, number> = { CRITICAL: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
+  return values
+    .map((value) => String(value ?? "NORMAL").toUpperCase())
+    .sort((left, right) => (rank[left] ?? 2) - (rank[right] ?? 2))[0] ?? "NORMAL";
+}
+
 function parseSalesperson(rawPayload: unknown) {
   if (!rawPayload || typeof rawPayload !== "object") return null;
   const payload = rawPayload as Record<string, unknown>;
@@ -1130,6 +1137,37 @@ export default async function OrderDetailPage({
     };
   }
 
+  const itemStockSummary = visibleItems.map((item) => {
+    const supply = getItemSupplySnapshot(item);
+    const needed = Math.max(0, item.orderedQty);
+    const fulfilled = Math.min(needed, Number(item.shippingLine?.fulfilled_qty ?? 0));
+    const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
+    const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
+    const status = fulfilled >= needed
+      ? "Fulfilled"
+      : inStock >= needed
+        ? "In Stock"
+        : supply.suggestion?.source_type === "CONTAINER"
+          ? "Incoming"
+          : inStock > 0
+            ? "Partial"
+            : "Waiting";
+    return { item, supply, needed, inStock, fulfilled, status };
+  });
+
+  const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
+  const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
+  const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0
+    ? "Fulfilled"
+    : totalUnitsShipped > 0
+      ? "Partially Shipped"
+      : totalUnitsInStock >= totalUnitsNeeded && totalUnitsNeeded > 0
+        ? "Ready to Ship"
+        : totalUnitsInStock > 0
+          ? "Partial"
+          : "Waiting for Inventory";
+
   const attachmentLinks = await Promise.all(
     attachments.map(async (attachment) => {
       if (!attachment.file_path) return null;
@@ -1154,13 +1192,14 @@ export default async function OrderDetailPage({
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Order / Invoice</p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <h1 className="text-3xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"} — Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</h1>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(orderRecord.review_status)}`}>{orderRecord.review_status ?? "APPROVED"}</span>
+              <h1 className="text-3xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</h1>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
               <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
             </div>
-            <p className="mt-3 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
+            <p className="mt-2 text-sm text-[#5a5a5a]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"} · Order date {formatDate(orderRecord.created_at)} · Priority {highestPriority(orderLines.map((line) => line.priority))}</p>
+            <p className="mt-1 text-sm text-[#5a5a5a]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
@@ -1180,37 +1219,48 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
+      <section className="rounded-2xl border border-[#dbe5f0] bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">Stock summary</p>
+            <p className="mt-1 text-sm text-[#475569]">Available warehouse units for this order</p>
+          </div>
+          <div className="text-right">
+            <p className="text-4xl font-bold text-[#16a34a]">{totalUnitsInStock} / {totalUnitsNeeded}</p>
+            <p className="mt-1 text-sm font-semibold text-[#475569]">in stock</p>
+          </div>
+        </div>
+      </section>
+
       <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
         <div className="space-y-6">
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold text-[#111827]">Items & Fulfillment</h2>
-                <p className="mt-1 text-sm text-[#5a5a5a]">Each row answers: What is it, how many, where it is coming from, and what to do next.</p>
+                <h2 className="text-xl font-semibold text-[#111827]">Items</h2>
+                <p className="mt-1 text-sm text-[#5a5a5a]">What they bought, what is available, and what can ship now.</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Ordered {visibleOrderedTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Open {visibleOpenTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Shipped {visibleShippedTotal}</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">Needs Source {visibleUnallocatedCount}</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
               </div>
             </div>
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-[900px]">
-                <div className="grid grid-cols-[minmax(280px,2fr)_70px_180px_180px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
-                  <span>Qty</span>
+                  <span>Qty Needed</span>
+                  <span>In Stock</span>
                   <span>Coming From</span>
-                  <span>Availability</span>
-                  <span>Fulfillment</span>
+                  <span>ETA</span>
+                  <span>Status</span>
                   <span>Action</span>
                 </div>
                 <div>
-                  {visibleItems.map((item) => {
+                  {itemStockSummary.map(({ item, supply, needed, inStock, status }) => {
                     const line = item.shippingLine;
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
-                    const supply = getItemSupplySnapshot(item);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
                     const assignmentSourceDefault = line?.inventory_allocations?.[0]?.source_type ?? line?.suggested_assignment_source ?? "UNASSIGNED";
@@ -1219,15 +1269,16 @@ export default async function OrderDetailPage({
 
                     return (
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(280px,2fr)_70px_180px_180px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
-                          <span>{item.orderedQty}</span>
+                          <span>{needed}</span>
+                          <span className="font-semibold text-[#16a34a]">{inStock}</span>
                           <span className="font-medium text-[#111827]">{supply.comingFrom}</span>
-                          <span className="text-xs text-[#475569]">{supply.availability}</span>
-                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(supply.fulfillment)}`}>{supply.fulfillment}</span></span>
+                          <span className="text-xs text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
+                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>

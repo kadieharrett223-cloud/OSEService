@@ -428,6 +428,8 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   if (lineError || !lineRow) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
+  
+    await recalculateProductQueues([lineRow.product_id]);
 
   const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
   const assignedQty = source === "UNASSIGNED"
@@ -536,12 +538,13 @@ export async function markOrderLineShippedAction(formData: FormData) {
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, approved_qty, fulfilled_qty")
+    .select("id, product_id, approved_qty, fulfilled_qty")
     .eq("id", lineId)
     .maybeSingle();
 
   const lineRow = line as {
     id: string;
+    product_id: string | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
   } | null;
@@ -549,7 +552,6 @@ export async function markOrderLineShippedAction(formData: FormData) {
   if (lineError || !lineRow) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
-
   const approvedQty = Number(lineRow.approved_qty ?? 0);
   const fulfilledQty = Number(lineRow.fulfilled_qty ?? 0);
   const remainingQty = Math.max(0, approvedQty - fulfilledQty);
@@ -573,6 +575,8 @@ export async function markOrderLineShippedAction(formData: FormData) {
   if (updateError) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
   }
+
+  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
 
   const fulfilledAtIso = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;

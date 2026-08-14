@@ -229,6 +229,8 @@ The first apply transferred `617` deterministic customer groups and matched `445
 
 The follow-up preview found `407` source groups still needing identity deduplication and `7` ambiguous groups. No second apply was performed because those groups need stronger identity matching before they can be safely merged or created. The apply report is `tmp/import-reports/old-erp-accepted-customers-2026-08-14T16-36-12-255Z.json`.
 
+The product queue invariant is now wired through order acceptance, Shipping Review approval/hold, fulfillment, shipment, and manual inventory assignment. The remote database must have `202608140002_product_queue_position_overrides.sql` applied before the new override columns and automatic queue recalculation can run.
+
 ## Warehouse Order State Transfer
 
 The old warehouse-page state is synchronized with:

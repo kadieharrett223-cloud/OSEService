@@ -416,7 +416,7 @@ export default async function InventoryPage({
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
                 <th className="w-[280px] max-w-[280px] px-2 py-2">Item</th>
                 <th className="px-2 py-2">On Floor</th>
-                <th className="px-2 py-2">Open Orders</th>
+                <th className="px-2 py-2">Sold</th>
                 <th className="px-2 py-2">Available Now</th>
                 <th className="px-2 py-2">Incoming</th>
                 <th className="px-2 py-2">Available After Incoming</th>
@@ -438,7 +438,7 @@ export default async function InventoryPage({
                     </td>
                     <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
                     <td className="px-2 py-3">{formatNumber(row.openDemand)}</td>
-                    <td className="px-2 py-3 font-semibold text-[#111827]">
+                    <td className="px-2 py-3 font-semibold text-[#166534]">
                       {formatNumber(row.availableNow)}
                     </td>
                     <td className="px-2 py-3">

@@ -106,7 +106,7 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "review";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }] = await Promise.all([
+  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }, { count: acceptedCountRaw }, { count: warehouseCountRaw }, { count: shippedCountRaw }, { count: fulfilledCountRaw }] = await Promise.all([
     supabase
       .from("order_history_reason_rollups")
       .select("id", { count: "exact", head: true })
@@ -119,11 +119,41 @@ export default async function OrdersPage({
       .from("old_erp_order_status_history")
       .select("id", { count: "exact", head: true })
       .eq("historical_status", "REMOVED"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "ACCEPTED"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "IN_WAREHOUSE"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "SHIPPED"),
+    supabase
+      .from("old_erp_order_status_history")
+      .select("id", { count: "exact", head: true })
+      .eq("historical_status", "FULFILLED"),
   ]);
 
   const deniedCount = Number(deniedCountRaw ?? 0);
 
-  const historicalStatus = activeTab === "denied" ? "DENIED" : activeTab === "cancelled" ? "CANCELLED" : activeTab === "removed" ? "REMOVED" : null;
+  const historicalStatus = activeTab === "accepted"
+    ? "ACCEPTED"
+    : activeTab === "warehouse"
+      ? "IN_WAREHOUSE"
+      : activeTab === "shipped"
+        ? "SHIPPED"
+        : activeTab === "fulfilled"
+          ? "FULFILLED"
+          : activeTab === "denied"
+            ? "DENIED"
+            : activeTab === "cancelled"
+              ? "CANCELLED"
+              : activeTab === "removed"
+                ? "REMOVED"
+                : null;
   const { data: historicalStatusRows, error: historicalStatusError } = historicalStatus
     ? await supabase
         .from("old_erp_order_status_history")
@@ -261,10 +291,10 @@ export default async function OrdersPage({
 
   const tabCounts = {
     review: allOrders.filter((order) => matchesTab(order, "review")).length,
-    accepted: allOrders.filter((order) => matchesTab(order, "accepted")).length,
-    warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
-    shipped: allOrders.filter((order) => matchesTab(order, "shipped")).length,
-    fulfilled: allOrders.filter((order) => matchesTab(order, "fulfilled")).length,
+    accepted: Number(acceptedCountRaw ?? 0),
+    warehouse: Number(warehouseCountRaw ?? 0),
+    shipped: Number(shippedCountRaw ?? 0),
+    fulfilled: Number(fulfilledCountRaw ?? 0),
     denied: deniedCount,
     cancelled: Number(cancelledCountRaw ?? 0),
     removed: Number(removedCountRaw ?? 0),
@@ -348,11 +378,11 @@ export default async function OrdersPage({
 
         {historicalStatus && historicalStatusError ? (
           <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
-            Unable to load denied archive rows right now.
+            Unable to load historical order rows right now.
           </div>
         ) : null}
 
-        {activeTab !== "denied" && orderSummaries.length === 0 ? (
+        {!historicalStatus && activeTab !== "denied" && orderSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             <p>{searchText ? "No orders match that filter in this status." : "No orders match this status yet."}</p>
             {activeTab === "review" && tabCounts.accepted > 0 ? (
@@ -364,13 +394,13 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {historicalStatus && !historicalStatusError && historicalStatusSummaries.length === 0 ? (
+        {historicalStatus && !historicalStatusError && historicalStatusSummaries.length === 0 && (activeTab !== "warehouse" || orderSummaries.length === 0) ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             <p>{searchText ? `No ${activeTab} invoices match that filter.` : `No ${activeTab} invoices are archived yet.`}</p>
           </div>
         ) : null}
 
-        {activeTab !== "denied" && orderSummaries.length > 0 ? (
+        {(!historicalStatus || activeTab === "warehouse") && activeTab !== "denied" && orderSummaries.length > 0 ? (
           <div className="space-y-3">
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
@@ -455,7 +485,7 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab !== "denied" && historicalStatus && !historicalStatusError && historicalStatusSummaries.length > 0 ? (
+        {historicalStatus && activeTab !== "denied" && !historicalStatusError && historicalStatusSummaries.length > 0 ? (
           <div className="space-y-3">
             {historicalStatusSummaries.map((entry) => (
               <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">

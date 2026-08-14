@@ -367,3 +367,45 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
 
   redirect(`/containers/${containerId}?success=${encodeURIComponent(`Container accepted. ${lineIdsToUpdate.size} line(s) moved to In Warehouse. ${waitingLineCount} line(s) remain waiting.`)}`);
 }
+
+export async function updateContainerArrivalDatesAction(formData: FormData) {
+  await requireUser();
+  const supabase = getSupabaseAdmin();
+
+  const containerId = String(formData.get("container_id") ?? "").trim();
+  if (!isUuid(containerId)) {
+    redirect("/containers?error=Invalid+container");
+  }
+
+  const portDate = emptyToNull(formData.get("port_date"));
+  const etaConfirmedDate = emptyToNull(formData.get("eta_confirmed_date"));
+  const etaEstimatedDate = emptyToNull(formData.get("eta_estimated_date"));
+
+  for (const value of [portDate, etaConfirmedDate, etaEstimatedDate]) {
+    if (value && Number.isNaN(new Date(value).getTime())) {
+      redirect(`/containers/${containerId}?error=${encodeURIComponent("Enter a valid date.")}`);
+    }
+  }
+
+  const { error } = await supabase
+    .from("containers")
+    .update({
+      port_date: portDate,
+      eta_confirmed_date: etaConfirmedDate,
+      eta_estimated_date: etaEstimatedDate,
+    })
+    .eq("id", containerId);
+
+  if (error) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Could not update arrival dates.")}`);
+  }
+
+  revalidatePath("/containers");
+  revalidatePath(`/containers/${containerId}`);
+  revalidatePath("/inventory");
+  revalidatePath("/dashboard");
+  revalidatePath("/orders");
+
+  redirect(`/containers/${containerId}?success=${encodeURIComponent("Arrival dates updated.")}`);
+}
+

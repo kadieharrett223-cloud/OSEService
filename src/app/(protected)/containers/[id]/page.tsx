@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { updateContainerArrivalDatesAction } from "@/app/(protected)/containers/actions";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { ReceiveContainerConfirmForm } from "./receive-container-confirm-form";
@@ -86,6 +87,13 @@ function formatCurrency(value: number | string | null | undefined) {
 function formatStatus(value: string | null | undefined) {
   if (!value) return "Pending";
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function toDateInputValue(value: string | null | undefined) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
 }
 
 export default async function ContainerDetailPage({
@@ -438,6 +446,29 @@ export default async function ContainerDetailPage({
                 <dd>{container.eta_confirmed_date ? formatDate(container.eta_confirmed_date) : container.eta_estimated_date ? formatDate(container.eta_estimated_date) : "Pending"}</dd>
               </div>
             </dl>
+
+            <form action={updateContainerArrivalDatesAction} className="mt-5 border-t border-[#e5e7eb] pt-4">
+              <input type="hidden" name="container_id" value={container.id} />
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Update Arrival Dates</p>
+              <p className="mt-1 text-xs text-[#6b7280]">Drives Next Arrival on the Inventory page.</p>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="label" htmlFor="port_date">Port Date</label>
+                  <input id="port_date" name="port_date" type="date" className="input" defaultValue={toDateInputValue(container.port_date)} />
+                </div>
+                <div>
+                  <label className="label" htmlFor="eta_confirmed_date">Confirmed ETA</label>
+                  <input id="eta_confirmed_date" name="eta_confirmed_date" type="date" className="input" defaultValue={toDateInputValue(container.eta_confirmed_date)} />
+                </div>
+                <div>
+                  <label className="label" htmlFor="eta_estimated_date">Estimated ETA</label>
+                  <input id="eta_estimated_date" name="eta_estimated_date" type="date" className="input" defaultValue={toDateInputValue(container.eta_estimated_date)} />
+                </div>
+              </div>
+              <button type="submit" className="mt-4 w-full rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937]">
+                Save Dates
+              </button>
+            </form>
           </div>
 
           <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

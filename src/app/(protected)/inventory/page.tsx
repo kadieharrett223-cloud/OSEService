@@ -373,6 +373,41 @@ export default async function InventoryPage({
       return searchable.includes(q);
     });
 
+  const groupedRows = new Map<string, InventoryViewRow>();
+  for (const row of rows) {
+    const groupKey = row.sku.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+    const existing = groupedRows.get(groupKey);
+    if (!existing) {
+      groupedRows.set(groupKey, { ...row, incomingContainers: row.incomingContainers.map((container) => ({ ...container })) });
+      continue;
+    }
+
+    const containersByNumber = new Map(existing.incomingContainers.map((container) => [container.containerNumber, container]));
+    for (const container of row.incomingContainers) {
+      const current = containersByNumber.get(container.containerNumber);
+      if (current) {
+        current.qty += container.qty;
+        current.committed += container.committed;
+        current.available += container.available;
+      } else {
+        containersByNumber.set(container.containerNumber, { ...container });
+      }
+    }
+
+    existing.onFloor += row.onFloor;
+    existing.openDemand += row.openDemand;
+    existing.floorCommitted += row.floorCommitted;
+    existing.incoming += row.incoming;
+    existing.availableNow = Math.max(0, existing.onFloor - existing.openDemand);
+    existing.availableAfterIncoming = Math.max(0, existing.onFloor + existing.incoming - existing.openDemand);
+    existing.backorderedAfterIncoming = Math.max(0, existing.openDemand - existing.onFloor - existing.incoming);
+    existing.incomingContainers = Array.from(containersByNumber.values()).sort((left, right) => left.etaSort.localeCompare(right.etaSort));
+    existing.nextEta = existing.incomingContainers[0] ? `${existing.incomingContainers[0].containerNumber} · ${existing.incomingContainers[0].eta}` : "—";
+    existing.customerQueue = [...existing.customerQueue, ...row.customerQueue];
+  }
+
+  const displayRows = Array.from(groupedRows.values());
+
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -435,12 +470,12 @@ export default async function InventoryPage({
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {displayRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
-                rows.map((row) => (
+                displayRows.map((row) => (
                   <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>

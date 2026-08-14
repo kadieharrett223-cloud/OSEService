@@ -150,6 +150,16 @@ function normalizeSkuKey(value: string | null | undefined) {
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
 
+const CLOSED_QUEUE_STATES = ["FULFILLED", "SHIPPED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
+
+/** Open demand is who still needs the product, not everyone who ever ordered it. */
+function isOpenQueueLine(line: QueueLine) {
+  const remaining = Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0);
+  if (remaining <= 0) return false;
+  if (CLOSED_QUEUE_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
+  return !CLOSED_QUEUE_STATES.includes(String(line.warehouse_status ?? "").toUpperCase());
+}
+
 function isActiveIncomingContainer(status: string | null | undefined) {
   return ["ORDERED", "PRODUCTION", "INBOUND"].includes(String(status ?? "").trim().toUpperCase());
 }
@@ -288,7 +298,7 @@ export default async function InventoryPage({
   );
 
   const openDemandByProduct = toRecordMap(
-    queueLineRows,
+    queueLineRows.filter(isOpenQueueLine),
     (row) => row.product_id,
     (row) => Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0)),
   );
@@ -337,12 +347,10 @@ export default async function InventoryPage({
   const queueByProduct = new Map<string, InventoryViewRow["customerQueue"]>();
 
   for (const line of queueLineRows) {
-    if (!line.product_id) continue;
+    if (!line.product_id || !isOpenQueueLine(line)) continue;
 
     const openQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-    const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
-    const qty = openQty > 0 ? openQty : fulfilledQty;
-    if (qty <= 0) continue;
+    const qty = openQty;
 
     const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
     const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
@@ -364,9 +372,7 @@ export default async function InventoryPage({
         : line.inventory_allocations?.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number
           ? `Container ${line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number} · ETA ${formatShortDate(line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_confirmed_date ?? line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_estimated_date)}`
           : "Waiting for inventory",
-      status: fulfilledQty > 0 && openQty <= 0
-        ? "Fulfilled"
-        : formatStatus(line.warehouse_status ?? line.approval_status),
+      status: formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
     };
 

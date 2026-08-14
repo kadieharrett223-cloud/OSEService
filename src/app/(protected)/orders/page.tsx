@@ -228,6 +228,11 @@ export default async function OrdersPage({
     .order("created_at", { ascending: false });
 
   const allOrders = (orders ?? []) as OrderSummary[];
+  const liveOrderIdByInvoice = new Map<string, string>();
+  for (const order of allOrders) {
+    const invoice = order.qbo_invoices?.invoice_number ?? order.order_number;
+    if (invoice) liveOrderIdByInvoice.set(invoice.toUpperCase(), order.id);
+  }
 
   const deniedCustomerByInvoice = new Map<string, string>();
   for (const order of allOrders) {
@@ -498,6 +503,17 @@ export default async function OrdersPage({
                     <p className="mt-1 text-xs text-[#6b7280]">{formatDate(entry.occurred_at)}</p>
                   </div>
                   <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">{entry.historical_status}</span>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {liveOrderIdByInvoice.get(String(entry.invoice_number ?? "").toUpperCase()) ? (
+                    <Link href={`/orders/${liveOrderIdByInvoice.get(String(entry.invoice_number ?? "").toUpperCase())}`} className="btn-primary inline-flex">
+                      Open / Edit Invoice
+                    </Link>
+                  ) : (
+                    <Link href={`/orders?tab=${activeTab}&q=${encodeURIComponent(entry.invoice_number ?? "")}`} className="btn-secondary inline-flex">
+                      View Invoice History
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}

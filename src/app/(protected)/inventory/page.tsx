@@ -213,8 +213,8 @@ export default async function InventoryPage({
           containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
         )
       `)
-      .in("approval_status", ["APPROVED", "PARTIAL"])
-      .neq("fulfillment_status", "FULFILLED")
+      .in("approval_status", ["APPROVED", "PARTIAL", "FULFILLED"])
+      .neq("fulfillment_status", "CANCELLED")
       .order("queue_position_start", { ascending: true, nullsFirst: false }),
   ]);
 
@@ -296,7 +296,9 @@ export default async function InventoryPage({
   for (const line of queueLineRows) {
     if (!line.product_id) continue;
 
-    const qty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const openQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
+    const qty = openQty > 0 ? openQty : fulfilledQty;
     if (qty <= 0) continue;
 
     const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
@@ -317,7 +319,9 @@ export default async function InventoryPage({
         : line.inventory_allocations?.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number
           ? `Container ${line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.container_number} · ETA ${formatShortDate(line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_confirmed_date ?? line.inventory_allocations.find((allocation) => allocation.source_type === "CONTAINER")?.containers?.eta_estimated_date)}`
           : "Waiting for inventory",
-      status: formatStatus(line.warehouse_status ?? line.approval_status),
+      status: fulfilledQty > 0 && openQty <= 0
+        ? "Fulfilled"
+        : formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
     };
 

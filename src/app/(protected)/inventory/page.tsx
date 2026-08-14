@@ -411,17 +411,27 @@ export default async function InventoryPage({
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="max-w-full overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-[280px]" />
+              <col className="w-[82px]" />
+              <col className="w-[78px]" />
+              <col className="w-[108px]" />
+              <col className="w-[92px]" />
+              <col className="w-[176px]" />
+              <col className="w-[128px]" />
+              <col className="w-[156px]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                <th className="w-[280px] max-w-[280px] px-2 py-2">Item</th>
-                <th className="px-2 py-2">On Floor</th>
-                <th className="px-2 py-2">Sold</th>
-                <th className="px-2 py-2">Available Now</th>
-                <th className="px-2 py-2">Incoming</th>
-                <th className="px-2 py-2">Available After Incoming</th>
-                <th className="px-2 py-2">Next Arrival</th>
-                <th className="px-2 py-2">Customer List</th>
+                <th className="px-2 py-2.5">Item</th>
+                <th className="px-2 py-2.5">On Floor</th>
+                <th className="px-2 py-2.5">Sold</th>
+                <th className="px-2 py-2.5">Available Now</th>
+                <th className="px-2 py-2.5">Incoming</th>
+                <th className="px-2 py-2.5">Available After Incoming</th>
+                <th className="px-2 py-2.5">Next Arrival</th>
+                <th className="px-2 py-2.5">Customer List</th>
               </tr>
             </thead>
             <tbody>
@@ -432,16 +442,16 @@ export default async function InventoryPage({
               ) : (
                 rows.map((row) => (
                   <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
-                    <td className="w-[280px] max-w-[280px] px-2 py-3">
+                    <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
                       <div className="mt-1 text-xs font-medium text-[#64748b]">SKU {row.sku}</div>
                     </td>
-                    <td className="px-2 py-3">{formatNumber(row.onFloor)}</td>
-                    <td className="px-2 py-3">{formatNumber(row.openDemand)}</td>
-                    <td className="px-2 py-3 font-semibold text-[#16a34a]">
+                    <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.onFloor)}</td>
+                    <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.openDemand)}</td>
+                    <td className="whitespace-nowrap px-2 py-3 font-semibold text-[#16a34a]">
                       {formatNumber(row.availableNow)}
                     </td>
-                    <td className="px-2 py-3">
+                    <td className="whitespace-nowrap px-2 py-3">
                       <IncomingDropdown
                         total={formatNumber(row.incoming)}
                         containers={row.incomingContainers}
@@ -453,8 +463,8 @@ export default async function InventoryPage({
                         <div className="mt-1 text-xs font-semibold text-[#b45309]">Backordered {formatNumber(row.backorderedAfterIncoming)}</div>
                       ) : null}
                     </td>
-                    <td className="px-2 py-3">{row.nextEta}</td>
-                    <td className="px-2 py-3">
+                    <td className="whitespace-nowrap px-2 py-3">{row.nextEta}</td>
+                    <td className="whitespace-nowrap px-2 py-3">
                       <CustomerDemandDropdown
                         productName={row.productName}
                         sku={row.sku}

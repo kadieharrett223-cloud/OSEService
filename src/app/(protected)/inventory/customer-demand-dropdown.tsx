@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { moveCustomerQueuePositionAction } from "@/app/(protected)/inventory/actions";
 
 type CustomerQueueItem = {
   position: string;
+  lineId: string;
   invoice: string;
   customer: string;
   qty: number;
@@ -20,6 +22,7 @@ type CustomerDemandDropdownProps = {
   sku: string;
   openQuantity: string;
   customerQueue: CustomerQueueItem[];
+  adminMode?: boolean;
 };
 
 export function CustomerDemandDropdown({
@@ -27,6 +30,7 @@ export function CustomerDemandDropdown({
   sku,
   openQuantity,
   customerQueue,
+  adminMode = false,
 }: CustomerDemandDropdownProps) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -117,6 +121,30 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate font-medium text-[#475569]">{item.expectedAvailability}</div>
                   </div>
                   {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
+                  {adminMode && item.lineId ? (
+                    <form action={moveCustomerQueuePositionAction} className="flex flex-wrap items-center gap-2 sm:col-span-3">
+                      <input type="hidden" name="line_id" value={item.lineId} />
+                      <label className="text-[#64748b]" htmlFor={`pos-${item.lineId}`}>Move to</label>
+                      <input
+                        id={`pos-${item.lineId}`}
+                        name="queue_position"
+                        type="number"
+                        min="1"
+                        step="1"
+                        defaultValue={item.position}
+                        className="w-20 rounded-md border border-[#cbd5e1] px-2 py-1"
+                      />
+                      <input
+                        name="queue_position_reason"
+                        placeholder="Reason"
+                        required
+                        className="min-w-[160px] flex-1 rounded-md border border-[#cbd5e1] px-2 py-1"
+                      />
+                      <button type="submit" className="rounded-md bg-[#111827] px-3 py-1 font-semibold text-white transition hover:bg-[#1f2937]">
+                        Move
+                      </button>
+                    </form>
+                  ) : null}
                 </div>
               ))}
             </div>

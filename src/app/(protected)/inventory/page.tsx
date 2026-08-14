@@ -2,10 +2,13 @@ import Link from "next/link";
 import { Fragment } from "react";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
 import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
+import { AdminModeToggle } from "@/app/(protected)/inventory/admin-mode-toggle";
+import { AdminRowEditor } from "@/app/(protected)/inventory/admin-row-editor";
 import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
 import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-button";
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -81,6 +84,7 @@ type InventoryViewRow = {
   productIds: string[];
   sku: string;
   productName: string;
+  storedName: string;
   manufacturer: string | null;
   group: string;
   groupSort: number;
@@ -104,6 +108,7 @@ type InventoryViewRow = {
   }>;
   customerQueue: Array<{
     position: string;
+    lineId: string;
     invoice: string;
     customer: string;
     qty: number;
@@ -183,7 +188,8 @@ export default async function InventoryPage({
 }: {
   searchParams: Promise<{ q?: string; mapError?: string; mapMessage?: string }>;
 }) {
-  await requireUser();
+  const currentUser = await requireUser();
+  const adminMode = await isAdminUnlockedForUser(currentUser.id);
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const q = String(params.q ?? "").trim().toLowerCase();
@@ -345,6 +351,7 @@ export default async function InventoryPage({
 
     const row = {
       position: line.queue_position_start != null ? String(line.queue_position_start) : "—",
+      lineId: line.id,
       invoice,
       customer,
       qty,
@@ -391,6 +398,7 @@ export default async function InventoryPage({
       productIds: [],
       sku: displaySku,
       productName: title || "Unnamed Product",
+      storedName: product.canonical_name ?? "",
       manufacturer,
       group: UNSORTED_GROUP,
       groupSort: UNSORTED_GROUP_SORT,
@@ -501,7 +509,10 @@ export default async function InventoryPage({
             <h1 className="mt-1 text-3xl font-semibold text-[#111827]">Lift Availability</h1>
             <p className="mt-2 text-sm text-[#5a5a5a]">Search product availability, incoming containers/ETA, and approved customer queue by SKU.</p>
           </div>
-          <AddProductModal createAction={createProductAction} />
+          <div className="flex flex-wrap items-center gap-3">
+            <AdminModeToggle unlocked={adminMode} />
+            <AddProductModal createAction={createProductAction} />
+          </div>
         </div>
       </div>
 
@@ -579,6 +590,15 @@ export default async function InventoryPage({
                         ) : null}
                         <span>SKU {row.sku}</span>
                       </div>
+                      {adminMode ? (
+                        <AdminRowEditor
+                          productId={row.productId}
+                          sku={row.sku}
+                          productName={row.productName}
+                          storedName={row.storedName}
+                          onFloor={row.onFloor}
+                        />
+                      ) : null}
                       <DisplayOrderButton
                         productIds={row.productIds}
                         productName={row.productName}
@@ -612,6 +632,7 @@ export default async function InventoryPage({
                         sku={row.sku}
                         openQuantity={formatNumber(row.openDemand)}
                         customerQueue={row.customerQueue}
+                        adminMode={adminMode}
                       />
                     </td>
                       </tr>

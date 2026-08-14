@@ -109,6 +109,7 @@ type InventoryViewRow = {
   customerQueue: Array<{
     position: string;
     lineId: string;
+    openQty: number;
     invoice: string;
     customer: string;
     qty: number;
@@ -352,6 +353,7 @@ export default async function InventoryPage({
     const row = {
       position: line.queue_position_start != null ? String(line.queue_position_start) : "—",
       lineId: line.id,
+      openQty,
       invoice,
       customer,
       qty,
@@ -472,10 +474,50 @@ export default async function InventoryPage({
         })
         .map((item, index) => ({ ...item, position: String(index + 1) }));
 
+      // Migrated lines carry no allocation rows, so cover the queue from real stock in order.
+      let floorLeft = Math.max(0, group.onFloor - group.floorCommitted);
+      const containerPool = incomingContainers.map((container) => ({
+        containerNumber: container.containerNumber,
+        eta: container.eta,
+        left: container.available,
+      }));
+
+      const coveredQueue = customerQueue.map((item) => {
+        if (item.assignedTo !== "Unassigned" || item.openQty <= 0) return item;
+
+        let outstanding = item.openQty;
+        const fromFloor = Math.min(outstanding, floorLeft);
+        floorLeft -= fromFloor;
+        outstanding -= fromFloor;
+
+        if (outstanding <= 0) return { ...item, expectedAvailability: "Available now · on floor" };
+
+        let lastContainer: (typeof containerPool)[number] | null = null;
+        for (const container of containerPool) {
+          if (container.left <= 0) continue;
+          const taken = Math.min(outstanding, container.left);
+          container.left -= taken;
+          outstanding -= taken;
+          lastContainer = container;
+          if (outstanding <= 0) break;
+        }
+
+        if (outstanding <= 0 && lastContainer) {
+          const prefix = fromFloor > 0 ? `${fromFloor} on floor · rest ` : "";
+          return { ...item, expectedAvailability: `${prefix}Container ${lastContainer.containerNumber} · ETA ${lastContainer.eta}` };
+        }
+
+        if (fromFloor > 0 || lastContainer) {
+          return { ...item, expectedAvailability: `${item.openQty - outstanding} of ${item.openQty} covered · ${outstanding} waiting` };
+        }
+
+        return { ...item, expectedAvailability: "Waiting for inventory" };
+      });
+
       return {
         ...group,
         incomingContainers,
-        customerQueue,
+        customerQueue: coveredQueue,
         availableNow: Math.max(0, group.onFloor - committedFloor),
         availableAfterIncoming: Math.max(0, group.onFloor + group.incoming - group.openDemand),
         backorderedAfterIncoming: Math.max(0, group.openDemand - group.onFloor - group.incoming),

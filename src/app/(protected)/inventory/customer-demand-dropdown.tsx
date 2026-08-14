@@ -33,23 +33,10 @@ export function CustomerDemandDropdown({
   adminMode = false,
 }: CustomerDemandDropdownProps) {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   function toggleDropdown() {
-    if (!open && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      const panelWidth = Math.min(760, window.innerWidth - 32);
-      const left = Math.min(
-        Math.max(16, rect.right - panelWidth),
-        window.innerWidth - panelWidth - 16,
-      );
-      setPosition({
-        top: Math.min(rect.bottom + 8, window.innerHeight - 24),
-        left,
-      });
-    }
     setOpen((current) => !current);
   }
 
@@ -88,11 +75,13 @@ export function CustomerDemandDropdown({
       </button>
 
       {open ? (
-        <div
-          ref={panelRef}
-          className="fixed z-[60] w-[min(760px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-xl border border-[#dbe3ee] bg-white p-4 text-left shadow-2xl ring-1 ring-[#0f172a]/10"
-          style={{ top: position.top, left: position.left }}
-        >
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4 sm:p-6">
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-xl border border-[#dbe3ee] bg-white p-5 text-left shadow-2xl"
+          >
           <div className="flex items-start justify-between gap-4 border-b border-[#e2e8f0] pb-3">
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Open customer demand</p>
@@ -103,12 +92,20 @@ export function CustomerDemandDropdown({
               <p>Open quantity</p>
               <p className="mt-1 text-lg font-semibold text-[#0f172a]">{openQuantity}</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              aria-label="Close customer list"
+              className="shrink-0 rounded-md border border-[#d1d5db] px-2.5 py-1 text-xs font-semibold text-[#374151] transition hover:bg-[#f9fafb]"
+            >
+              Close
+            </button>
           </div>
 
           {customerQueue.length === 0 ? (
             <p className="px-2 py-2 text-xs text-[#64748b]">No approved open queue for this SKU.</p>
           ) : (
-            <div className="mt-3 max-h-[min(420px,60vh)] space-y-2 overflow-y-auto pr-1">
+            <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
               {customerQueue.map((item, index) => (
                 <div key={`${item.orderId}-${item.invoice}-${index}`} className="grid gap-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs sm:grid-cols-[minmax(0,1.4fr)_minmax(150px,1fr)_auto] sm:items-center">
                   <div className="min-w-0">
@@ -149,6 +146,7 @@ export function CustomerDemandDropdown({
               ))}
             </div>
           )}
+          </div>
         </div>
       ) : null}
     </>

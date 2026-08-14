@@ -26,7 +26,9 @@
     "import:paid-qbo-orders:preview": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs",
     "import:paid-qbo-orders:apply": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs --apply",
     "import:old-erp-order-history:preview": "node scripts/import-old-erp-order-status-history.mjs",
-    "import:old-erp-order-history:apply": "node --env-file=.env.local scripts/import-old-erp-order-status-history.mjs --apply"
+    "import:old-erp-order-history:apply": "node --env-file=.env.local scripts/import-old-erp-order-status-history.mjs --apply",
+    "sync:old-erp-opening-inventory:preview": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs",
+    "sync:old-erp-opening-inventory:apply": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs --apply"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

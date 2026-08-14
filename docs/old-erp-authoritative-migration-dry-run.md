@@ -164,6 +164,18 @@ The scoped reset preview now includes the complete raw archive. The latest previ
 
 The legacy alias recovery pass found five deterministic mappings, applied one new alias, and left existing aliases unchanged. The importer uses insert-only behavior because the current `product_aliases` update trigger references a missing `updated_at` column; this avoids mutating existing mappings while that schema defect is addressed.
 
+## Opening Inventory Synchronization
+
+The opening inventory synchronizer is:
+
+- `scripts/sync-old-erp-opening-inventory.mjs`
+- `npm run sync:old-erp-opening-inventory:preview`
+- `npm run sync:old-erp-opening-inventory:apply`
+
+It uses the latest OLD_ERP `Products.onFloor`/`onHand` values as the validated opening floor baseline and writes only idempotent `RECOUNT` rows. It does not replay `InventoryAdjustments`. Incoming inventory remains derived from active `container_lines` and containers.
+
+The latest conflict-aware preview matches OLD_ERP and Supabase at `530,335` floor units across `244` unambiguous canonical products with zero remaining delta. It intentionally excludes `18` canonical targets where multiple legacy operational item codes resolve to one target product; those conflicts represent `574` source units and require explicit product identity decisions before complete inventory parity can be claimed.
+
 ## Data Flow
 
 1. Cosmos exports are read from `tmp/exports` (or freshly exported with `azure:export`).

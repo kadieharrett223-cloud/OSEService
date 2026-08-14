@@ -106,7 +106,7 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "review";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }, { count: acceptedCountRaw }, { count: warehouseCountRaw }, { count: shippedCountRaw }, { count: fulfilledCountRaw }] = await Promise.all([
+  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }, { count: acceptedCountRaw }, { count: warehouseCountRaw }, { count: shippedCountRaw }] = await Promise.all([
     supabase
       .from("order_history_reason_rollups")
       .select("id", { count: "exact", head: true })
@@ -134,7 +134,7 @@ export default async function OrdersPage({
     supabase
       .from("old_erp_order_status_history")
       .select("id", { count: "exact", head: true })
-      .eq("historical_status", "FULFILLED"),
+      .eq("historical_status", "SHIPPED"),
   ]);
 
   const deniedCount = Number(deniedCountRaw ?? 0);
@@ -146,7 +146,7 @@ export default async function OrdersPage({
       : activeTab === "shipped"
         ? "SHIPPED"
         : activeTab === "fulfilled"
-          ? "FULFILLED"
+          ? "SHIPPED"
           : activeTab === "denied"
             ? "DENIED"
             : activeTab === "cancelled"
@@ -294,7 +294,7 @@ export default async function OrdersPage({
     accepted: Number(acceptedCountRaw ?? 0),
     warehouse: Number(warehouseCountRaw ?? 0),
     shipped: Number(shippedCountRaw ?? 0),
-    fulfilled: Number(fulfilledCountRaw ?? 0),
+    fulfilled: Number(shippedCountRaw ?? 0),
     denied: deniedCount,
     cancelled: Number(cancelledCountRaw ?? 0),
     removed: Number(removedCountRaw ?? 0),

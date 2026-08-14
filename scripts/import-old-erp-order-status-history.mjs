@@ -13,7 +13,7 @@ import {
   writeJsonFile,
 } from "./old-erp-migration-utils.mjs";
 
-const STATUS_NAMES = new Set(["ACCEPTED", "IN_WAREHOUSE", "SHIPPED", "FULFILLED", "DENIED", "CANCELLED", "REMOVED", "OTHER_CLOSED"]);
+const STATUS_NAMES = new Set(["ACCEPTED", "IN_WAREHOUSE", "SHIPPED", "DENIED", "CANCELLED", "REMOVED", "OTHER_CLOSED"]);
 
 function parseArgs(argv) {
   const args = { exportsDir: "tmp/exports", apply: false, reportOut: "" };
@@ -30,7 +30,8 @@ function classify(record) {
   const approval = String(record?.approvalStatus ?? "").trim().toUpperCase();
   const queue = String(record?.queueStatus ?? "").trim().toUpperCase();
   const warehouse = String(record?.warehouseStatus ?? "").trim().toUpperCase();
-  const completed = Boolean(record?.invoiceCompletedAt || record?.fulfilledAt || queue === "FULFILLED" || warehouse === "FULFILLED" || warehouse === "SHIPPED");
+  const shipped = Boolean(record?.fulfilledAt || record?.shippedAt || warehouse === "SHIPPED" || warehouse === "FULFILLED" || queue === "FULFILLED");
+  const completed = Boolean(record?.invoiceCompletedAt || shipped || queue === "FULFILLED" || warehouse === "COMPLETED");
   const denied = approval === "DENIED" || queue === "DENIED" || String(record?.denialReason ?? "").trim().length > 0;
   const removed = queue === "REMOVED" || Boolean(record?.removed || record?.removedAt || record?.removeReason);
   const cancelled = String(record?.removeReason ?? "").toLowerCase().includes("cancel") || queue === "CANCELLED";
@@ -38,8 +39,7 @@ function classify(record) {
   if (denied) return "DENIED";
   if (cancelled) return "CANCELLED";
   if (removed) return "REMOVED";
-  if (completed && (warehouse === "SHIPPED" || record?.shippedAt)) return "SHIPPED";
-  if (completed) return "FULFILLED";
+  if (completed) return "SHIPPED";
   if (["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED"].includes(warehouse)) return "IN_WAREHOUSE";
   if (approval === "APPROVED" || queue === "APPROVED" || warehouse === "APPROVED" || record?.approvedAt) return "ACCEPTED";
   return null;

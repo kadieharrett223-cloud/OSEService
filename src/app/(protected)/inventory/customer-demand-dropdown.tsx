@@ -10,6 +10,9 @@ type CustomerQueueItem = {
   invoice: string;
   customer: string;
   qty: number;
+  approvedQty: number;
+  shippedQty: number;
+  openQty: number;
   priority: string;
   assignedTo: string;
   expectedAvailability: string;
@@ -48,12 +51,14 @@ export function CustomerDemandDropdown({
   }
 
   function downloadReport() {
-    const headers = ["Position", "Customer", "Invoice", "Qty", "Priority", "Assignment", "Expected Availability", "Status"];
+    const headers = ["Position", "Customer", "Invoice", "Ordered", "Shipped", "Remaining", "Priority", "Assignment", "Expected Availability", "Status"];
     const rows = customerQueue.map((item) => [
       item.position,
       item.customer,
       item.invoice,
-      String(item.qty),
+      String(item.approvedQty),
+      String(item.shippedQty),
+      String(item.openQty),
       item.priority,
       item.assignedTo,
       item.expectedAvailability,
@@ -161,7 +166,16 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                   </div>
                   <div className="text-[#475569]">
-                    <div>Qty <span className="font-semibold text-[#1e293b]">{item.qty}</span> · {item.priority}</div>
+                    {item.shippedQty > 0 ? (
+                      <div>
+                        Qty <span className="font-semibold text-[#1e293b]">{item.approvedQty}</span> · {item.priority}
+                        <div className="mt-0.5 font-medium text-[#0f766e]">
+                          {item.shippedQty} shipped · {item.openQty} remaining
+                        </div>
+                      </div>
+                    ) : (
+                      <div>Qty <span className="font-semibold text-[#1e293b]">{item.qty}</span> · {item.priority}</div>
+                    )}
                     <div className="mt-1 truncate text-[#64748b]">{item.assignedTo} · {item.status}</div>
                     <div className="mt-1 truncate font-medium text-[#475569]">{item.expectedAvailability}</div>
                   </div>

@@ -422,6 +422,7 @@ export default async function OrdersPage({
                   <th className="px-3 py-3">Total Items</th>
                   <th className="px-3 py-3">Approved</th>
                   <th className="px-3 py-3">In Warehouse</th>
+                  <th className="px-3 py-3">Shipped</th>
                   <th className="px-3 py-3">In Transit</th>
                   <th className="px-3 py-3">Order Date</th>
                   <th className="px-3 py-3 text-right">Actions</th>
@@ -435,6 +436,8 @@ export default async function OrdersPage({
               const totalQty = lines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
               const approvedQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
               const warehouseQty = lines.filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "FULFILLED"].includes(String(line.warehouse_status ?? ""))).reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
+              const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
+              const remainingQty = Math.max(0, approvedQty - shippedQty);
               const inTransitQty = Math.max(0, approvedQty - warehouseQty);
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
@@ -449,6 +452,12 @@ export default async function OrdersPage({
                   <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
                   <td className="px-3 py-3 font-semibold text-[#15803d]">{approvedQty} / {totalQty}</td>
                   <td className="px-3 py-3 font-semibold text-[#c2410c]">{warehouseQty} / {approvedQty}</td>
+                  <td className="px-3 py-3">
+                    <span className="font-semibold text-[#0f766e]">{shippedQty} / {approvedQty}</span>
+                    {shippedQty > 0 && remainingQty > 0 ? (
+                      <div className="mt-1 text-xs font-semibold text-[#b45309]">{remainingQty} remaining</div>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3 text-[#2563eb]">{inTransitQty}</td>
                   <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
                   <td className="px-3 py-3 text-right">

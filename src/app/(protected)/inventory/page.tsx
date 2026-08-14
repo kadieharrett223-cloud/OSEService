@@ -110,6 +110,8 @@ type InventoryViewRow = {
     position: string;
     lineId: string;
     openQty: number;
+    approvedQty: number;
+    shippedQty: number;
     invoice: string;
     customer: string;
     qty: number;
@@ -362,6 +364,8 @@ export default async function InventoryPage({
       position: line.queue_position_start != null ? String(line.queue_position_start) : "—",
       lineId: line.id,
       openQty,
+      approvedQty: Math.max(0, Number(line.approved_qty ?? 0)),
+      shippedQty: Math.max(0, Number(line.fulfilled_qty ?? 0)),
       invoice,
       customer,
       qty,

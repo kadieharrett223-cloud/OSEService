@@ -194,6 +194,29 @@ Latest result across all `6,015` OLD_ERP InvoiceQueueItems rows:
 
 The 204 directly evidenced priority mismatches were synchronized from OLD_ERP into matched live lines. The parity report does not mutate data; it distinguishes expected historical absence from actual missing operational order data.
 
+## Current Warehouse Orders Report
+
+The read-only Cosmos warehouse report is:
+
+- `scripts/report-old-erp-current-warehouse-orders.mjs`
+- `npm run report:old-erp-current-warehouse`
+
+It includes only records with `approvalStatus=APPROVED`, `queueStatus=APPROVED`, positive quantity, no terminal/removed state, and an actual warehouse signal observed in the source: `warehouseStatus=ACTIVE` or `floorAssignment.type=floor`.
+
+Latest fresh Cosmos result:
+
+- Current warehouse orders: `26`
+- Current warehouse lines: `62`
+- Current warehouse units: `63`
+- Ambiguous approved/open records: `833`
+
+Exports:
+
+- `tmp/import-reports/old-erp-current-warehouse-orders-latest.json`
+- `tmp/import-reports/old-erp-current-warehouse-orders-latest.csv`
+
+The ambiguous set is kept separate because it is approved/open but has no `ACTIVE` warehouse status or floor assignment. It must not be silently presented as physically in warehouse.
+
 ## Accepted Customer Transfer
 
 Customers attached to accepted/approved or warehouse-state OLD_ERP rows can be transferred with:

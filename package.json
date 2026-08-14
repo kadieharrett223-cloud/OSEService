@@ -35,6 +35,7 @@
     ,"transfer:old-erp-accepted-customers:apply": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs --apply",
     "sync:old-erp-order-state:preview": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs",
     "sync:old-erp-order-state:apply": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs --apply"
+    ,"report:old-erp-current-warehouse": "node scripts/report-old-erp-current-warehouse-orders.mjs"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",

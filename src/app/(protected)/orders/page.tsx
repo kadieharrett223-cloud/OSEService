@@ -82,6 +82,17 @@ function isRecentPaidQuickbooksReviewOrder(order: OrderSummary) {
   return !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff;
 }
 
+function isWithinActiveOrderWindow(order: OrderSummary) {
+  const invoiceDate = order.qbo_invoices?.invoice_date;
+  if (!invoiceDate) return false;
+
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setMonth(cutoff.getMonth() - 1);
+  const parsedDate = new Date(`${invoiceDate}T00:00:00Z`);
+  return !Number.isNaN(parsedDate.getTime()) && parsedDate >= cutoff;
+}
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -238,6 +249,8 @@ export default async function OrdersPage({
   }
 
   function matchesTab(order: OrderSummary, tabId: string) {
+    if (!isWithinActiveOrderWindow(order)) return false;
+
     const lines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
     const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");

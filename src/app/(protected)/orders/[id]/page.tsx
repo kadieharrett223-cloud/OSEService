@@ -317,6 +317,7 @@ function parseInvoiceLineItems(rawPayload: unknown) {
       if (!line || typeof line !== "object") return null;
 
       const item = line as {
+        DetailType?: unknown;
         Description?: unknown;
         Qty?: unknown;
         Amount?: unknown;
@@ -414,6 +415,7 @@ function getQuickbooksLineDescriptions(rawPayload: unknown) {
       if (!line || typeof line !== "object") return null;
 
       const item = line as {
+        DetailType?: unknown;
         Description?: unknown;
         SalesItemLineDetail?: { ItemRef?: { name?: unknown } };
       };
@@ -442,6 +444,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       if (!line || typeof line !== "object") return null;
 
       const item = line as {
+        DetailType?: unknown;
         Description?: unknown;
         Qty?: unknown;
         Amount?: unknown;
@@ -452,9 +455,10 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       };
 
       const sku = typeof item.SalesItemLineDetail?.ItemRef?.name === "string" ? item.SalesItemLineDetail.ItemRef.name.trim() : null;
-      const description = typeof item.Description === "string" && item.Description.trim()
-        ? item.Description.trim()
-        : sku ?? "Invoice line";
+      const rawDescription = typeof item.Description === "string" ? item.Description.trim() : "";
+      const detailType = typeof item.DetailType === "string" ? item.DetailType : "";
+      if (!sku && !rawDescription && detailType !== "SalesItemLineDetail") return null;
+      const description = rawDescription || sku || "Invoice line";
 
       const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0;
       const qty = Number(qtyRaw);
@@ -947,8 +951,8 @@ export default async function OrderDetailPage({
   }))).map((item, index) => {
     const skuKey = normalizeSkuKey(item.sku);
     const shippingLine = skuKey
-      ? shippingLineBySkuKey.get(skuKey) ?? orderLines[index] ?? null
-      : orderLines[index] ?? null;
+      ? shippingLineBySkuKey.get(skuKey) ?? null
+      : item.description === "Invoice line" ? null : orderLines[index] ?? null;
     const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
     return {
       key: `${skuKey ?? "line"}-${index}`,

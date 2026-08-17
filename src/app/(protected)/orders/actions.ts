@@ -381,12 +381,15 @@ export async function addOrderNoteAction(formData: FormData) {
     redirect(`/orders/${orderId ?? ""}?error=Note+text+is+required`);
   }
 
+  const { data: accessUser } = isUuid(user.id)
+    ? await adminClient.from("access_users").select("id").eq("id", user.id).maybeSingle()
+    : { data: null };
   const savedAt = new Date().toISOString();
   const { error } = await adminClient.from("audit_log").insert({
     entity_type: "shipping_order",
     entity_id: orderId,
     action: "ORDER_NOTE_ADDED",
-    actor_id: user.id,
+    actor_id: accessUser?.id ?? null,
     details: {
       message,
       note_text: message,

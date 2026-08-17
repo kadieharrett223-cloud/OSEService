@@ -1,3 +1,4 @@
+import { getReadyToShipLineIds } from "@/lib/order-readiness";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type QueueLine = {
@@ -5,6 +6,7 @@ type QueueLine = {
   product_id: string | null;
   approved_qty: number | null;
   fulfilled_qty: number | null;
+  queue_position_start: number | null;
   approval_status: string | null;
   fulfillment_status: string | null;
   priority: string | null;
@@ -48,6 +50,37 @@ export async function recalculateProductQueues(productIds: string[]) {
     linesByProduct.set(line.product_id, rows);
   }
 
+  const { data: inventoryRows, error: inventoryError } = await supabase
+    .from("inventory_transactions")
+    .select("product_id, bucket, delta")
+    .in("product_id", uniqueProductIds)
+    .eq("bucket", "ON_FLOOR");
+
+  if (inventoryError) throw new Error(inventoryError.message);
+
+  const onFloorByProduct = new Map<string, number>();
+  for (const row of inventoryRows ?? []) {
+    const productId = String(row.product_id ?? "");
+    if (!productId) continue;
+    onFloorByProduct.set(productId, (onFloorByProduct.get(productId) ?? 0) + Number(row.delta ?? 0));
+  }
+
+  const { data: allocationRows, error: allocationError } = await supabase
+    .from("inventory_allocations")
+    .select("product_id, quantity, source_type, allocation_status")
+    .in("product_id", uniqueProductIds)
+    .eq("allocation_status", "ALLOCATED")
+    .eq("source_type", "FLOOR");
+
+  if (allocationError) throw new Error(allocationError.message);
+
+  const floorCommittedByProduct = new Map<string, number>();
+  for (const row of allocationRows ?? []) {
+    const productId = String(row.product_id ?? "");
+    if (!productId) continue;
+    floorCommittedByProduct.set(productId, (floorCommittedByProduct.get(productId) ?? 0) + Number(row.quantity ?? 0));
+  }
+
   let linesUpdated = 0;
   for (const productId of uniqueProductIds) {
     const lines = (linesByProduct.get(productId) ?? []).sort((left, right) => {
@@ -71,15 +104,40 @@ export async function recalculateProductQueues(productIds: string[]) {
       return left.id.localeCompare(right.id);
     });
 
+    const availableFloorUnits = Math.max(0, (onFloorByProduct.get(productId) ?? 0) - (floorCommittedByProduct.get(productId) ?? 0));
+    const readyLineIds = new Set(
+      getReadyToShipLineIds(
+        lines.map((line) => ({
+          id: line.id,
+          remaining_qty: Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)),
+          priority: line.priority,
+          queue_position_start: line.queue_position_start,
+          approved_at: line.shipping_orders?.created_at ?? null,
+          created_at: line.shipping_orders?.created_at ?? null,
+          has_live_allocation: false,
+        })),
+        availableFloorUnits,
+      ),
+    );
+
     let position = 1;
     for (const line of lines) {
       const units = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
       if (units <= 0) continue;
+      const nextWarehouseStatus = String(line.fulfillment_status ?? "").toUpperCase() === "FULFILLED"
+        ? "FULFILLED"
+        : String(line.approval_status ?? "").toUpperCase() === "HOLD"
+          ? "HOLD"
+          : readyLineIds.has(line.id)
+            ? "READY_TO_SHIP"
+            : "ON_FLOOR";
+
       const { error: updateError } = await supabase
         .from("shipping_order_lines")
         .update({
           queue_position_start: position,
           queue_position_count: units,
+          warehouse_status: nextWarehouseStatus,
         })
         .eq("id", line.id);
       if (updateError) throw new Error(updateError.message);

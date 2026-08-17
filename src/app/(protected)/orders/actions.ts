@@ -211,6 +211,15 @@ export async function acceptNewOrderAction(formData: FormData) {
   }
 
   const adminClient = getSupabaseAdmin();
+  const { data: orderRecord, error: orderLookupError } = await adminClient
+    .from("shipping_orders")
+    .select("id, review_status")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (orderLookupError || !orderRecord) {
+    redirect(`/orders?error=${encodeURIComponent(orderLookupError?.message ?? "Order not found")}`);
+  }
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
     .select("id, product_id, ordered_qty, approval_status, fulfillment_status")
@@ -221,11 +230,13 @@ export async function acceptNewOrderAction(formData: FormData) {
   }
 
   const pendingLines = (lines ?? []).filter((line) => line.approval_status === "PENDING_REVIEW");
-  if (pendingLines.length === 0) {
+  const openLines = (lines ?? []).filter((line) => line.approval_status !== "CANCELLED" && line.fulfillment_status !== "FULFILLED");
+  if (pendingLines.length === 0 && orderRecord.review_status !== "PENDING_REVIEW") {
     redirect("/orders?message=Order+has+no+pending+review+lines");
   }
 
-  for (const line of pendingLines) {
+  const linesToAccept = pendingLines.length > 0 ? pendingLines : openLines;
+  for (const line of linesToAccept) {
     const { error: lineUpdateError } = await adminClient
       .from("shipping_order_lines")
       .update({
@@ -256,11 +267,11 @@ export async function acceptNewOrderAction(formData: FormData) {
     redirect(`/orders?error=${encodeURIComponent(orderUpdateError.message)}`);
   }
 
-  await recalculateProductQueues(pendingLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  await recalculateProductQueues(linesToAccept.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
 
   await writeOrderActivity(adminClient, orderId, "ORDER_ACCEPTED", {
     action: "accept_order",
-    accepted_line_count: pendingLines.length,
+    accepted_line_count: linesToAccept.length,
   });
 
   revalidatePath("/orders");

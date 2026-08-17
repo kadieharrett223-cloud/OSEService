@@ -378,20 +378,28 @@ export async function addOrderNoteAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || !message) {
-    redirect(`/orders/${orderId ?? ""}`);
+    redirect(`/orders/${orderId ?? ""}?error=Note+text+is+required`);
   }
 
-  await adminClient.from("audit_log").insert({
+  const savedAt = new Date().toISOString();
+  const { error } = await adminClient.from("audit_log").insert({
     entity_type: "shipping_order",
     entity_id: orderId,
     action: "ORDER_NOTE_ADDED",
     actor_id: user.id,
     details: {
       message,
+      note_text: message,
+      author_name: user.fullName ?? "Unknown user",
+      saved_at: savedAt,
       line_id: lineId ?? null,
       sku: sku ?? null,
     },
   });
+
+  if (error) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(`Unable to save note: ${error.message}`)}`);
+  }
 
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);

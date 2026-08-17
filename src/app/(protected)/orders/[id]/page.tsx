@@ -1150,11 +1150,13 @@ export default async function OrderDetailPage({
 
   const itemStockSummary = visibleItems.map((item) => {
     const supply = getItemSupplySnapshot(item);
-    const needed = Math.max(0, item.orderedQty);
+    const needed = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
     const fulfilled = Math.min(needed, Number(item.shippingLine?.fulfilled_qty ?? 0));
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
-    const status = fulfilled >= needed
+    const status = item.isNonInventory
+      ? "N/A"
+      : fulfilled >= needed
       ? "Fulfilled"
       : inStock >= needed
         ? "In Stock"

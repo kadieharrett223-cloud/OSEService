@@ -463,7 +463,10 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0;
       const qty = Number(qtyRaw);
       const amount = Number(item.Amount ?? 0);
-      const isNonInventory = description.trim().startsWith("--") || description.toLowerCase().includes("discount");
+      const normalizedDescription = description.trim().toLowerCase();
+      const isNonInventory = detailType !== "SalesItemLineDetail"
+        || normalizedDescription.startsWith("--")
+        || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|^note$|\bservice\b/.test(normalizedDescription);
 
       return {
         sku,

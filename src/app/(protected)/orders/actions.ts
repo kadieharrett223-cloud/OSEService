@@ -500,6 +500,11 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     .from("shipping_order_lines")
     .update({
       allocation_status: assignedQty > 0 && source !== "UNASSIGNED" ? "ALLOCATED" : "UNALLOCATED",
+      warehouse_status: assignedQty > 0 && source === "FLOOR"
+        ? "READY_TO_SHIP"
+        : assignedQty > 0 && source === "CONTAINER"
+          ? "ASSIGNED_TO_INBOUND"
+          : "ON_FLOOR",
     })
     .eq("id", lineRow.id);
 

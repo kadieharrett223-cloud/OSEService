@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { fulfillQueueLineAction } from "@/app/(protected)/product-queue/actions";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -221,12 +220,7 @@ export default async function OrderQueuePage() {
                   )}
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Link href={`/orders/${line.shipping_orders?.id ?? ""}`} className="btn-secondary">Open Invoice</Link>
-                    <form action={fulfillQueueLineAction}>
-                      <input type="hidden" name="lineId" value={line.id} />
-                      <input type="hidden" name="quantity" value={Math.max(1, Math.min(Number(line.approved_qty ?? 0), Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))))} />
-                      <button type="submit" className="btn-primary">Fulfill</button>
-                    </form>
+                    <Link href={`/orders/${line.shipping_orders?.id ?? ""}`} className="btn-primary">Open Invoice to Ship</Link>
                   </div>
                 </div>
               );

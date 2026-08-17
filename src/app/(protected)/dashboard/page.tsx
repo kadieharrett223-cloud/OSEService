@@ -205,7 +205,7 @@ export default async function DashboardPage() {
     const lines = order.shipping_order_lines ?? [];
     const hasOpenLine = lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED");
     const hasWarehouseLine = lines.some((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(line.warehouse_status ?? ""));
-    const hasShippedLine = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
+    const hasShippedLine = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED" || line.fulfillment_status === "FULFILLED");
     return hasOpenLine && !hasWarehouseLine && !hasShippedLine;
   }).length;
 

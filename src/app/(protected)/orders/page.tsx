@@ -19,7 +19,6 @@ type OrderSummary = {
     invoice_number: string | null;
     payment_status: string | null;
     invoice_date: string | null;
-    raw_payload?: unknown;
   } | null;
   shipping_order_lines?: Array<{
     id: string;
@@ -132,10 +131,6 @@ export default async function OrdersPage({
       .from("old_erp_order_status_history")
       .select("id", { count: "exact", head: true })
       .eq("historical_status", "SHIPPED"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "SHIPPED"),
   ]);
 
   const deniedCount = Number(deniedCountRaw ?? 0);
@@ -213,7 +208,7 @@ export default async function OrdersPage({
       review_status,
       created_at,
       customers (company_name, full_name),
-      qbo_invoices (invoice_number, payment_status, invoice_date, raw_payload),
+      qbo_invoices (invoice_number, payment_status, invoice_date),
       shipping_order_lines (
         id,
         approval_status,

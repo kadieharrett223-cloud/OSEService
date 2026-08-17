@@ -37,28 +37,6 @@ type OrderSummary = {
   }>;
 };
 
-type DeniedInvoiceRollup = {
-  id: string;
-  reason_category: "cancel_deny_rollback" | "setup_rollback";
-  canonical_invoice_number: string;
-  canonical_item_code: string;
-  canonical_reason: string;
-  first_seen_at: string;
-  last_seen_at: string;
-  occurrence_count: number;
-};
-
-type HistoricalStatusRow = {
-  id: string;
-  invoice_number: string | null;
-  customer_name: string | null;
-  item_code: string | null;
-  quantity: number | null;
-  historical_status: string;
-  occurred_at: string | null;
-  notes: string | null;
-};
-
 function formatDate(value: string | null | undefined) {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -70,29 +48,59 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function isRecentPaidQuickbooksReviewOrder(order: OrderSummary) {
-  const paymentStatus = order.qbo_invoices?.payment_status;
-  if (paymentStatus !== "Paid" && paymentStatus !== "Partially Paid") return false;
-  if (!order.qbo_invoices?.invoice_date) return false;
+async function loadTableColumnSet(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  tableName: string,
+  candidates: string[],
+) {
+  const columns = new Set<string>();
 
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setMonth(cutoff.getMonth() - 1);
+  for (const column of candidates) {
+    const { error } = await supabase.from(tableName).select(column).limit(1);
+    if (!error) {
+      columns.add(column);
+    }
+  }
 
-  const invoiceDate = new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`);
-  return !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff;
+  return columns;
 }
 
-function isWithinActiveOrderWindow(order: OrderSummary) {
-  if (order.source_type === "QBO_INVOICE" && order.notes === "Entered from QuickBooks invoice lookup.") return true;
-  const invoiceDate = order.qbo_invoices?.invoice_date;
-  if (!invoiceDate) return false;
+function buildOrdersSelect(orderColumns: Set<string>, lineColumns: Set<string>) {
+  const orderFields = [
+    "id",
+    "order_number",
+    "source_type",
+    "legacy_customer_name",
+    "review_status",
+    "created_at",
+  ];
+  if (orderColumns.has("notes")) {
+    orderFields.push("notes");
+  }
 
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setMonth(cutoff.getMonth() - 1);
-  const parsedDate = new Date(`${invoiceDate}T00:00:00Z`);
-  return !Number.isNaN(parsedDate.getTime()) && parsedDate >= cutoff;
+  const lineFields = [
+    "id",
+    "approval_status",
+    "warehouse_status",
+    "fulfillment_status",
+    "priority",
+    "ordered_qty",
+    "approved_qty",
+    "fulfilled_qty",
+  ];
+  if (lineColumns.has("source_system")) {
+    lineFields.push("source_system");
+  }
+
+  return `
+    ${orderFields.join(",\n      ")},
+    customers (company_name, full_name),
+    qbo_invoices (invoice_number, payment_status, invoice_date),
+    shipping_order_lines (
+      ${lineFields.join(",\n      ")},
+      products (sku, canonical_name)
+    )
+  `;
 }
 
 export default async function OrdersPage({
@@ -106,34 +114,19 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
+  const [shippingOrderColumns, shippingOrderLineColumns] = await Promise.all([
+    loadTableColumnSet(supabase, "shipping_orders", ["notes"]),
+    loadTableColumnSet(supabase, "shipping_order_lines", ["source_system"]),
+  ]);
+
+  const ordersSelect = buildOrdersSelect(shippingOrderColumns, shippingOrderLineColumns);
+
   const { data: orders, error } = await supabase
     .from("shipping_orders")
-    .select(`
-      id,
-      order_number,
-      source_type,
-      notes,
-      legacy_customer_name,
-      review_status,
-      created_at,
-      customers (company_name, full_name),
-      qbo_invoices (invoice_number, payment_status, invoice_date),
-      shipping_order_lines (
-        id,
-        approval_status,
-        warehouse_status,
-        fulfillment_status,
-        priority,
-        ordered_qty,
-        approved_qty,
-        fulfilled_qty,
-        source_system,
-        products (sku, canonical_name)
-      )
-    `)
+    .select(ordersSelect)
     .order("created_at", { ascending: false });
 
-  const allOrders = (orders ?? []) as OrderSummary[];
+  const allOrders = (orders ?? []) as unknown as OrderSummary[];
   const liveOrderIdByInvoice = new Map<string, string>();
   for (const order of allOrders) {
     const invoice = order.qbo_invoices?.invoice_number ?? order.order_number;
@@ -158,13 +151,6 @@ export default async function OrdersPage({
   function matchesTab(order: OrderSummary, tabId: string) {
     const lines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
-    const hasLegacyActiveQueue = lines.some((line) =>
-      line.source_system === "OLD_ERP"
-      && (line.approval_status === "APPROVED" || line.approval_status === "PARTIAL")
-      && Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
-      && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
-      && !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"].includes(String(line.warehouse_status ?? "").toUpperCase()),
-    );
     const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");

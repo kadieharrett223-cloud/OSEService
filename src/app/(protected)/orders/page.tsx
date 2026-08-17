@@ -30,6 +30,7 @@ type OrderSummary = {
     ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
+    source_system: string | null;
     products?: {
       sku: string | null;
       canonical_name: string | null;
@@ -222,6 +223,7 @@ export default async function OrdersPage({
         ordered_qty,
         approved_qty,
         fulfilled_qty,
+        source_system,
         products (sku, canonical_name)
       )
     `)
@@ -250,10 +252,17 @@ export default async function OrdersPage({
   }
 
   function matchesTab(order: OrderSummary, tabId: string) {
-    if (!isWithinActiveOrderWindow(order)) return false;
-
     const lines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
+    const hasLegacyActiveQueue = lines.some((line) =>
+      line.source_system === "OLD_ERP"
+      && (line.approval_status === "APPROVED" || line.approval_status === "PARTIAL")
+      && Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
+      && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
+      && !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"].includes(String(line.warehouse_status ?? "").toUpperCase()),
+    );
+    if (!hasLegacyActiveQueue && !isWithinActiveOrderWindow(order)) return false;
+
     const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
     const anyApproved = lines.some((line) => line.approval_status === "APPROVED" || line.approval_status === "PARTIAL");
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");

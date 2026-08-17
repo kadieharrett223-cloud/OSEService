@@ -1290,12 +1290,14 @@ export default async function OrderDetailPage({
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
+                            ) : item.productId ? (
+                              <span className="inline-flex rounded-lg border border-[#d9e2e8] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">Mapped</span>
                             ) : (
                               <Link
-                                href={item.sku ? `/inventory?q=${encodeURIComponent(item.sku)}` : "/inventory"}
+                                href="/inventory"
                                 className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]"
                               >
-                                {item.productId ? "Review Product" : "Map SKU"}
+                                Map SKU
                               </Link>
                             )}
                           </span>

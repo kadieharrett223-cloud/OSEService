@@ -57,13 +57,6 @@ type HistoricalStatusRow = {
   notes: string | null;
 };
 
-function statusBadgeClass(status: string | null | undefined) {
-  if (status === "APPROVED" || status === "FULFILLED") return "bg-[#e7f7ed] text-[#1b7a43]";
-  if (status === "HOLD") return "bg-[#fee2e2] text-[#b91c1c]";
-  if (status === "PENDING_REVIEW") return "bg-[#fef3c7] text-[#92400e]";
-  return "bg-[#eef2f7] text-[#334155]";
-}
-
 function formatDate(value: string | null | undefined) {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -418,12 +411,10 @@ export default async function OrdersPage({
               <thead className="bg-[#f8fafc]">
                 <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
                   <th className="px-3 py-3">Order / Customer</th>
-                  <th className="px-3 py-3">Status / Priority</th>
                   <th className="px-3 py-3">Total Items</th>
                   <th className="px-3 py-3">Approved</th>
                   <th className="px-3 py-3">In Warehouse</th>
                   <th className="px-3 py-3">Shipped</th>
-                  <th className="px-3 py-3">In Transit</th>
                   <th className="px-3 py-3">Order Date</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
@@ -438,16 +429,11 @@ export default async function OrdersPage({
               const warehouseQty = lines.filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "FULFILLED"].includes(String(line.warehouse_status ?? ""))).reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
               const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
               const remainingQty = Math.max(0, approvedQty - shippedQty);
-              const inTransitQty = Math.max(0, approvedQty - warehouseQty);
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
                   <td className="px-3 py-3">
                     <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{invoiceNumber}</Link>
                     <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className={`rounded-full px-2 py-1 text-xs font-semibold ${statusBadgeClass(order.review_status)}`}>{order.review_status ?? "PENDING_REVIEW"}</span>
-                    <div className="mt-1 text-xs text-[#64748b]">Priority {lines[0]?.priority ?? "NORMAL"}</div>
                   </td>
                   <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
                   <td className="px-3 py-3 font-semibold text-[#15803d]">{approvedQty} / {totalQty}</td>
@@ -458,7 +444,6 @@ export default async function OrdersPage({
                       <div className="mt-1 text-xs font-semibold text-[#b45309]">{remainingQty} remaining</div>
                     ) : null}
                   </td>
-                  <td className="px-3 py-3 text-[#2563eb]">{inTransitQty}</td>
                   <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">

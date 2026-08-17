@@ -202,85 +202,50 @@ export async function updateOrderLineStatusAction(formData: FormData) {
   redirect(`/orders/${orderId}`);
 }
 
-export async function acceptNewOrderAction(formData: FormData) {
+export async function moveOrderToWarehouseAction(formData: FormData) {
   await requireUser();
 
   const orderId = getString(formData, "orderId");
-  if (!orderId) {
-    redirect("/orders?error=Missing+order+reference");
-  }
-
   const adminClient = getSupabaseAdmin();
-  const { data: orderRecord, error: orderLookupError } = await adminClient
-    .from("shipping_orders")
-    .select("id, review_status")
-    .eq("id", orderId)
-    .maybeSingle();
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
 
-  if (orderLookupError || !orderRecord) {
-    redirect(`/orders?error=${encodeURIComponent(orderLookupError?.message ?? "Order not found")}`);
-  }
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, ordered_qty, approval_status, fulfillment_status")
+    .select("id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
     .eq("shipping_order_id", orderId);
 
-  if (linesError) {
-    redirect(`/orders?error=${encodeURIComponent(linesError.message)}`);
-  }
+  if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
 
-  const pendingLines = (lines ?? []).filter((line) => line.approval_status === "PENDING_REVIEW");
-  const openLines = (lines ?? []).filter((line) => line.approval_status !== "CANCELLED" && line.fulfillment_status !== "FULFILLED");
-  if (pendingLines.length === 0 && orderRecord.review_status !== "PENDING_REVIEW") {
-    redirect("/orders?message=Order+has+no+pending+review+lines");
-  }
+  const openLines = (lines ?? []).filter((line) =>
+    line.product_id
+    && Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
+    && line.fulfillment_status !== "FULFILLED"
+    && line.fulfillment_status !== "CANCELLED",
+  );
+  if (openLines.length === 0) redirect(`/orders/${orderId}?error=This+order+has+no+open+items+to+move+to+the+warehouse`);
 
-  const linesToAccept = pendingLines.length > 0 ? pendingLines : openLines;
-  for (const line of linesToAccept) {
-    const { error: lineUpdateError } = await adminClient
-      .from("shipping_order_lines")
-      .update({
-        approved_qty: Number(line.ordered_qty ?? 0),
-        approval_status: "APPROVED",
-        warehouse_status: "APPROVED",
-        fulfillment_status: "PENDING",
-        approved_at: new Date().toISOString(),
-      })
-      .eq("id", line.id);
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update({
+      approval_status: "APPROVED",
+      warehouse_status: "IN_WAREHOUSE",
+      fulfillment_status: "PENDING",
+    })
+    .eq("shipping_order_id", orderId)
+    .in("id", openLines.map((line) => line.id));
 
-    if (lineUpdateError) {
-      redirect(`/orders?error=${encodeURIComponent(lineUpdateError.message)}`);
-    }
-  }
+  if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
 
   const orderColumns = await loadTableColumnSet(adminClient, "shipping_orders", ["review_status", "fulfillment_status"]);
-  const orderUpdatePayload = filterPayloadByColumnSet({
-    review_status: "APPROVED",
-    fulfillment_status: "PENDING",
-  }, orderColumns);
-  const { error: orderUpdateError } = await adminClient
-    .from("shipping_orders")
-    .update(orderUpdatePayload)
-    .eq("id", orderId);
-
-  if (orderUpdateError) {
-    redirect(`/orders?error=${encodeURIComponent(orderUpdateError.message)}`);
-  }
-
-  await recalculateProductQueues(linesToAccept.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
-
-  await writeOrderActivity(adminClient, orderId, "ORDER_ACCEPTED", {
-    action: "accept_order",
-    accepted_line_count: linesToAccept.length,
-  });
+  const orderPayload = filterPayloadByColumnSet({ review_status: "APPROVED", fulfillment_status: "PENDING" }, orderColumns);
+  await adminClient.from("shipping_orders").update(orderPayload).eq("id", orderId);
+  await recalculateProductQueues(openLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_TO_WAREHOUSE", { line_count: openLines.length });
 
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
-  revalidatePath("/shipping-review");
-  revalidatePath("/order-queue");
   revalidatePath("/inventory");
-  const returnPath = getString(formData, "returnPath");
-  redirect(returnPath || "/orders?message=Order+accepted");
+  redirect(`/orders/${orderId}?message=Order+moved+to+warehouse`);
 }
 
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
@@ -315,7 +280,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
       source_invoice_id: invoice.id,
       order_number: invoice.invoice_number,
       source_type: "QBO_INVOICE",
-      review_status: "PENDING_REVIEW",
+      review_status: "APPROVED",
       fulfillment_status: "PENDING",
       priority: "NORMAL",
       legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
@@ -333,11 +298,11 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
     qbo_invoice_line_id: line.id,
     product_id: line.product_id,
     ordered_qty: line.ordered_qty,
-    approved_qty: 0,
     fulfilled_qty: 0,
     cancelled_qty: 0,
-    approval_status: "PENDING_REVIEW",
-    warehouse_status: "PENDING_REVIEW",
+    approved_qty: line.ordered_qty,
+    approval_status: "APPROVED",
+    warehouse_status: "ON_FLOOR",
     allocation_status: "UNALLOCATED",
     fulfillment_status: "PENDING",
     priority: "NORMAL",
@@ -347,8 +312,9 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
     : { error: null };
 
   if (lineError) redirect(`/orders/new?error=${encodeURIComponent(lineError.message)}`);
+  await recalculateProductQueues(mappedInvoiceLines.map((line) => line.product_id));
   revalidatePath("/orders");
-  redirect(`/orders?tab=review&message=QuickBooks+invoice+added+to+New+%2F+Review`);
+  redirect(`/orders?tab=new&message=QuickBooks+invoice+added+to+New+Orders`);
 }
 
 export async function overrideProductQueuePositionAction(formData: FormData) {

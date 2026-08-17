@@ -371,11 +371,11 @@ export default async function DashboardPage() {
             <article className="flex h-full flex-col rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <p className="text-sm font-semibold uppercase tracking-[0.08em] text-[#047857]">📋 Orders</p>
               <div className="mt-3 flex-1 space-y-2 text-sm">
-                <Link href="/orders?tab=review" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>New Orders (Review)</span><span className="font-semibold text-[#047857]">{formatNumber(newOrders)}</span></Link>
-                <Link href="/orders?tab=accepted" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Open / Queued</span><span className="font-semibold text-[#047857]">{formatNumber(openQueuedOrders)}</span></Link>
+                <Link href="/orders?tab=new" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>New Orders</span><span className="font-semibold text-[#047857]">{formatNumber(newOrders)}</span></Link>
+                <Link href="/orders?tab=orders" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Orders</span><span className="font-semibold text-[#047857]">{formatNumber(openQueuedOrders)}</span></Link>
                 <Link href="/orders?tab=warehouse" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>In Warehouse</span><span className="font-semibold text-[#d97706]">{formatNumber(inWarehouse)}</span></Link>
-                <Link href="/orders?tab=shipped" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Shipped / In Transit</span><span className="font-semibold text-[#2563eb]">{formatNumber(shippedInTransit)}</span></Link>
-                <Link href="/orders?tab=fulfilled" className="flex items-center justify-between hover:text-[#047857]"><span>Fulfilled</span><span className="font-semibold text-[#059669]">{formatNumber(fulfilledOrders)}</span></Link>
+                <Link href="/orders?tab=partial" className="flex items-center justify-between border-b border-[#eef1f4] pb-2 hover:text-[#047857]"><span>Partially Shipped</span><span className="font-semibold text-[#2563eb]">{formatNumber(shippedInTransit)}</span></Link>
+                <Link href="/orders?tab=archived" className="flex items-center justify-between hover:text-[#047857]"><span>Archived</span><span className="font-semibold text-[#059669]">{formatNumber(fulfilledOrders)}</span></Link>
               </div>
               <Link href="/orders" className="mt-auto inline-flex pt-4 text-sm font-semibold text-[#059669] hover:underline">View Orders</Link>
             </article>

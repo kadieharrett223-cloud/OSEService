@@ -10,7 +10,7 @@ import {
   addOrderNoteAction,
   deleteOrderAttachmentAction,
   markOrderLineShippedAction,
-  acceptNewOrderAction,
+  moveOrderToWarehouseAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
@@ -1225,11 +1225,14 @@ export default async function OrderDetailPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {orderRecord.review_status === "PENDING_REVIEW" || orderLines.some((line) => line.approval_status === "PENDING_REVIEW") ? (
-              <form action={acceptNewOrderAction}>
+            {orderLines.some((line) =>
+              Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
+              && line.fulfillment_status !== "FULFILLED"
+              && !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED"].includes(String(line.warehouse_status ?? "").toUpperCase()),
+            ) ? (
+              <form action={moveOrderToWarehouseAction}>
                 <input type="hidden" name="orderId" value={orderRecord.id} />
-                <input type="hidden" name="returnPath" value={`/orders/${orderRecord.id}?message=Order+accepted`} />
-                <button type="submit" className="btn-primary inline-flex">Accept Order</button>
+                <button type="submit" className="btn-primary inline-flex">Move to Warehouse</button>
               </form>
             ) : null}
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (

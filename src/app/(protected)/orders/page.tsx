@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { acceptNewOrderAction, updateDeniedArchiveReasonAction } from "./actions";
+import { moveOrderToWarehouseAction } from "./actions";
 
 type OrderSummary = {
   id: string;
@@ -103,99 +103,8 @@ export default async function OrdersPage({
   await requireUser();
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
-  const activeTab = params.tab ?? "review";
+  const activeTab = params.tab ?? "orders";
   const searchText = String(params.q ?? "").trim().toLowerCase();
-
-  const [{ count: deniedCountRaw }, { count: cancelledCountRaw }, { count: removedCountRaw }, { count: acceptedCountRaw }, { count: warehouseCountRaw }, { count: shippedCountRaw }] = await Promise.all([
-    supabase
-      .from("order_history_reason_rollups")
-      .select("id", { count: "exact", head: true })
-      .eq("reason_category", "cancel_deny_rollback"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "CANCELLED"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "REMOVED"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "ACCEPTED"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "IN_WAREHOUSE"),
-    supabase
-      .from("old_erp_order_status_history")
-      .select("id", { count: "exact", head: true })
-      .eq("historical_status", "SHIPPED"),
-  ]);
-
-  const deniedCount = Number(deniedCountRaw ?? 0);
-
-  const historicalStatus = activeTab === "warehouse"
-      ? "IN_WAREHOUSE"
-      : activeTab === "shipped"
-        ? "SHIPPED"
-        : activeTab === "fulfilled"
-          ? "SHIPPED"
-          : activeTab === "denied"
-            ? "DENIED"
-            : activeTab === "cancelled"
-              ? "CANCELLED"
-              : activeTab === "removed"
-                ? "REMOVED"
-                : null;
-  const { data: historicalStatusRows, error: historicalStatusError } = historicalStatus
-    ? await supabase
-        .from("old_erp_order_status_history")
-        .select("id, invoice_number, customer_name, item_code, quantity, historical_status, occurred_at, notes")
-        .eq("historical_status", historicalStatus)
-        .order("occurred_at", { ascending: false })
-    : { data: [], error: null };
-
-  const { data: deniedRollupRows, error: deniedRollupError } = activeTab === "denied"
-    ? await supabase
-        .from("order_history_reason_rollups")
-        .select(`
-          id,
-          reason_category,
-          canonical_invoice_number,
-          canonical_item_code,
-          canonical_reason,
-          first_seen_at,
-          last_seen_at,
-          occurrence_count
-        `)
-        .eq("reason_category", "cancel_deny_rollback")
-        .order("last_seen_at", { ascending: false })
-    : { data: [], error: null };
-
-  const deniedSummaries = ((deniedRollupRows ?? []) as DeniedInvoiceRollup[]).filter((entry) => {
-    if (!searchText) return true;
-
-    const searchable = [
-      entry.canonical_invoice_number,
-      entry.canonical_item_code,
-      entry.canonical_reason,
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return searchable.includes(searchText);
-  });
-
-  const historicalStatusSummaries = ((historicalStatusRows ?? []) as HistoricalStatusRow[]).filter((entry) => {
-    if (!searchText) return true;
-    return [entry.invoice_number, entry.customer_name, entry.item_code, entry.notes]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(searchText);
-  });
 
   const { data: orders, error } = await supabase
     .from("shipping_orders")
@@ -256,25 +165,21 @@ export default async function OrdersPage({
       && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
       && !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"].includes(String(line.warehouse_status ?? "").toUpperCase()),
     );
-    if (!hasLegacyActiveQueue && !isWithinActiveOrderWindow(order)) return false;
-
     const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
-    const anyApproved = lines.some((line) => line.approval_status === "APPROVED" || line.approval_status === "PARTIAL");
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
-    const anyShipped = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED");
-    const anyReview = lines.some((line) => line.approval_status === "PENDING_REVIEW");
+    const anyShipped = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
+    const anyOpen = lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED");
 
     switch (tabId) {
-      case "review":
-        return (order.source_type === "QBO_INVOICE" || isRecentPaidQuickbooksReviewOrder(order))
-          && (order.review_status === "PENDING_REVIEW" || !hasLines || anyReview);
-      case "accepted":
-        return anyApproved && !anyWarehouse && !anyShipped && !allFulfilled;
+      case "orders":
+        return anyOpen && !allFulfilled;
+      case "new":
+        return anyOpen && !anyWarehouse && !anyShipped && !allFulfilled;
       case "warehouse":
-        return anyWarehouse && !allFulfilled;
-      case "shipped":
+        return anyWarehouse && !anyShipped && !allFulfilled;
+      case "partial":
         return anyShipped && !allFulfilled;
-      case "fulfilled":
+      case "archived":
         return allFulfilled || order.review_status === "FULFILLED";
       default:
         return true;
@@ -301,24 +206,19 @@ export default async function OrdersPage({
   });
 
   const tabCounts = {
-    review: allOrders.filter((order) => matchesTab(order, "review")).length,
-    accepted: allOrders.filter((order) => matchesTab(order, "accepted")).length,
-    warehouse: Number(warehouseCountRaw ?? 0),
-    shipped: Number(shippedCountRaw ?? 0),
-    fulfilled: Number(shippedCountRaw ?? 0),
-    denied: deniedCount,
-    cancelled: Number(cancelledCountRaw ?? 0),
-    removed: Number(removedCountRaw ?? 0),
+    orders: allOrders.filter((order) => matchesTab(order, "orders")).length,
+    new: allOrders.filter((order) => matchesTab(order, "new")).length,
+    warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
+    partial: allOrders.filter((order) => matchesTab(order, "partial")).length,
+    archived: allOrders.filter((order) => matchesTab(order, "archived")).length,
   };
 
   const tabs = [
-    { id: "review", label: "New / Review" },
-    { id: "accepted", label: "Accepted" },
+    { id: "orders", label: "Orders" },
+    { id: "new", label: "New Orders" },
     { id: "warehouse", label: "In Warehouse" },
-    { id: "fulfilled", label: "Fulfilled" },
-    { id: "denied", label: "Denied" },
-    { id: "cancelled", label: "Cancelled" },
-    { id: "removed", label: "Removed" },
+    { id: "partial", label: "Partially Shipped" },
+    { id: "archived", label: "Archived" },
   ];
 
   return (
@@ -342,10 +242,10 @@ export default async function OrdersPage({
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {[
           ["Total Orders", allOrders.length, "bg-[#eff6ff] text-[#2563eb]"],
-          ["Accepted", tabCounts.accepted, "bg-[#ecfdf5] text-[#15803d]"],
+          ["New Orders", tabCounts.new, "bg-[#ecfdf5] text-[#15803d]"],
           ["In Warehouse", tabCounts.warehouse, "bg-[#fff7ed] text-[#c2410c]"],
-          ["Fulfilled", tabCounts.fulfilled, "bg-[#eff6ff] text-[#1d4ed8]"],
-          ["Cancelled", tabCounts.cancelled, "bg-[#fff1f2] text-[#be123c]"],
+          ["Partially Shipped", tabCounts.partial, "bg-[#fff7ed] text-[#c2410c]"],
+          ["Archived", tabCounts.archived, "bg-[#eff6ff] text-[#1d4ed8]"],
         ].map(([label, value, color]) => (
           <div key={String(label)} className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
             <div className={`inline-flex rounded-lg px-2 py-1 text-xs font-bold ${color}`}>{label}</div>
@@ -401,31 +301,13 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {historicalStatus && historicalStatusError ? (
-          <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
-            Unable to load historical order rows right now.
-          </div>
-        ) : null}
-
-        {!historicalStatus && activeTab !== "denied" && orderSummaries.length === 0 ? (
+        {orderSummaries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             <p>{searchText ? "No orders match that filter in this status." : "No orders match this status yet."}</p>
-            {activeTab === "review" && tabCounts.accepted > 0 ? (
-              <p className="mt-2">
-                {tabCounts.accepted} approved open order{tabCounts.accepted === 1 ? "" : "s"} are available under{" "}
-                <Link href="/orders?tab=accepted" className="font-semibold text-[#2563eb] hover:underline">Accepted</Link>.
-              </p>
-            ) : null}
           </div>
         ) : null}
 
-        {historicalStatus && !historicalStatusError && historicalStatusSummaries.length === 0 && (activeTab !== "warehouse" || orderSummaries.length === 0) ? (
-          <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
-            <p>{searchText ? `No ${activeTab} invoices match that filter.` : `No ${activeTab} invoices are archived yet.`}</p>
-          </div>
-        ) : null}
-
-        {(!historicalStatus || activeTab === "warehouse") && activeTab !== "denied" && orderSummaries.length > 0 ? (
+        {orderSummaries.length > 0 ? (
           <div className="overflow-x-auto rounded-xl border border-[#e5e7eb]">
             <table className="w-full min-w-[1040px] text-left text-sm">
               <thead className="bg-[#f8fafc]">
@@ -468,10 +350,10 @@ export default async function OrdersPage({
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {activeTab === "review" ? (
-                      <form action={acceptNewOrderAction}>
+                    {activeTab === "new" ? (
+                      <form action={moveOrderToWarehouseAction}>
                         <input type="hidden" name="orderId" value={order.id} />
-                        <button type="submit" className="btn-primary inline-flex text-xs">Accept</button>
+                        <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>
                       </form>
                     ) : null}
                     </div>
@@ -484,76 +366,6 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab === "denied" && !deniedRollupError && deniedSummaries.length > 0 ? (
-          <div className="space-y-3">
-            {deniedSummaries.map((entry) => {
-              const customerName = deniedCustomerByInvoice.get(entry.canonical_invoice_number.toUpperCase()) ?? "Customer not available";
-
-              return (
-                <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-[#111827]">Invoice #{entry.canonical_invoice_number}</p>
-                      <p className="mt-1 text-sm text-[#374151]">{customerName}</p>
-                      <p className="mt-1 text-sm text-[#374151]">Item {entry.canonical_item_code}</p>
-                      <p className="mt-1 text-sm text-[#5a5a5a]">Occurrences {entry.occurrence_count}</p>
-                      <p className="mt-1 text-xs text-[#6b7280]">First seen {formatDate(entry.first_seen_at)} • Last seen {formatDate(entry.last_seen_at)}</p>
-                    </div>
-                    <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">Denied</span>
-                  </div>
-
-                  <form action={updateDeniedArchiveReasonAction} className="mt-4 space-y-2">
-                    <input type="hidden" name="rollup_id" value={entry.id} />
-                    <input type="hidden" name="return_path" value={searchText ? `/orders?tab=denied&q=${encodeURIComponent(searchText)}` : "/orders?tab=denied"} />
-                    <label className="block text-xs font-semibold uppercase tracking-[0.08em] text-[#6b7280]" htmlFor={`reason-${entry.id}`}>
-                      Denied reason (editable)
-                    </label>
-                    <textarea
-                      id={`reason-${entry.id}`}
-                      name="canonical_reason"
-                      defaultValue={entry.canonical_reason}
-                      className="w-full rounded-lg border border-[#d1d5db] bg-white px-3 py-2 text-sm text-[#111827] focus:border-[#111827] focus:outline-none"
-                      rows={2}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button type="submit" className="btn-secondary">Save reason</button>
-                    </div>
-                  </form>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-
-        {historicalStatus && activeTab !== "denied" && !historicalStatusError && historicalStatusSummaries.length > 0 ? (
-          <div className="space-y-3">
-            {historicalStatusSummaries.map((entry) => (
-              <div key={entry.id} className="rounded-xl border border-[#e5e7eb] bg-[#fafbfc] p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-[#111827]">Invoice #{entry.invoice_number ?? "—"}</p>
-                    <p className="mt-1 text-sm text-[#374151]">{entry.customer_name ?? "Customer not available"}</p>
-                    <p className="mt-1 text-sm text-[#374151]">Item {entry.item_code ?? "—"} · Qty {entry.quantity ?? 0}</p>
-                    {entry.notes ? <p className="mt-1 text-sm text-[#5a5a5a]">{entry.notes}</p> : null}
-                    <p className="mt-1 text-xs text-[#6b7280]">{formatDate(entry.occurred_at)}</p>
-                  </div>
-                  <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">{entry.historical_status}</span>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {liveOrderIdByInvoice.get(String(entry.invoice_number ?? "").toUpperCase()) ? (
-                    <Link href={`/orders/${liveOrderIdByInvoice.get(String(entry.invoice_number ?? "").toUpperCase())}`} className="btn-primary inline-flex">
-                      Open / Edit Invoice
-                    </Link>
-                  ) : (
-                    <Link href={`/orders?tab=${activeTab}&q=${encodeURIComponent(entry.invoice_number ?? "")}`} className="btn-secondary inline-flex">
-                      View Invoice History
-                    </Link>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
       </div>
     </div>
   );

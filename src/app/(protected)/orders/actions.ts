@@ -242,12 +242,14 @@ export async function acceptNewOrderAction(formData: FormData) {
     }
   }
 
+  const orderColumns = await loadTableColumnSet(adminClient, "shipping_orders", ["review_status", "fulfillment_status"]);
+  const orderUpdatePayload = filterPayloadByColumnSet({
+    review_status: "APPROVED",
+    fulfillment_status: "PENDING",
+  }, orderColumns);
   const { error: orderUpdateError } = await adminClient
     .from("shipping_orders")
-    .update({
-      review_status: "APPROVED",
-      fulfillment_status: "PENDING",
-    })
+    .update(orderUpdatePayload)
     .eq("id", orderId);
 
   if (orderUpdateError) {

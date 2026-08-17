@@ -56,7 +56,7 @@ export default async function NewOrderPage({
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
             <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Enter New Order</h1>
-            <p className="mt-2 max-w-2xl text-sm text-[#5a5a5a]">Find a QuickBooks invoice and place it into New / Review. Duplicate invoice numbers are shown separately so you can choose the correct customer.</p>
+            <p className="mt-2 max-w-2xl text-sm text-[#5a5a5a]">Find a QuickBooks invoice and add it to the product and customer queues. Duplicate invoice numbers are shown separately so you can choose the correct customer.</p>
           </div>
           <Link href="/orders" className="btn-secondary inline-flex">Back to Orders</Link>
         </div>
@@ -88,11 +88,11 @@ export default async function NewOrderPage({
                   <p className="mt-1 text-xs text-[#64748b]">{invoice.invoice_date ?? "Date unavailable"} · {invoice.payment_status ?? "Payment status unavailable"} · {invoice.total_amount == null ? "Total unavailable" : `$${invoice.total_amount.toFixed(2)}`}</p>
                 </div>
                 {invoice.existingOrderId ? (
-                  <Link href={`/orders/${invoice.existingOrderId}`} className="btn-secondary inline-flex">Open New / Review</Link>
+                  <Link href={`/orders/${invoice.existingOrderId}`} className="btn-secondary inline-flex">Open Order</Link>
                 ) : (
                   <form action={createOrderFromQuickbooksInvoiceAction}>
                     <input type="hidden" name="qbo_invoice_id" value={invoice.id} />
-                    <button type="submit" className="btn-primary">Add to New / Review</button>
+                    <button type="submit" className="btn-primary">Add to New Orders</button>
                   </form>
                 )}
               </div>

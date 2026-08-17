@@ -202,23 +202,17 @@ export default async function DashboardPage() {
   }, 0);
 
   const newOrders = orderRows.filter((order) => {
-    const paid = order.qbo_invoices?.payment_status === "Paid" || order.qbo_invoices?.payment_status === "Partially Paid";
-    const cutoff = new Date();
-    cutoff.setHours(0, 0, 0, 0);
-    cutoff.setMonth(cutoff.getMonth() - 1);
-    const invoiceDate = order.qbo_invoices?.invoice_date
-      ? new Date(`${order.qbo_invoices.invoice_date}T00:00:00Z`)
-      : null;
-    return paid
-      && order.review_status === "PENDING_REVIEW"
-      && Boolean(invoiceDate && !Number.isNaN(invoiceDate.getTime()) && invoiceDate >= cutoff);
+    const lines = order.shipping_order_lines ?? [];
+    const hasOpenLine = lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED");
+    const hasWarehouseLine = lines.some((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(line.warehouse_status ?? ""));
+    const hasShippedLine = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
+    return hasOpenLine && !hasWarehouseLine && !hasShippedLine;
   }).length;
 
   const openQueuedOrders = orderRows.filter((order) => {
-    const accepted = order.review_status === "APPROVED" || (order.shipping_order_lines ?? []).some((line) => line.approval_status === "APPROVED");
     const lines = order.shipping_order_lines ?? [];
     const fulfilled = lines.length > 0 && lines.every((line) => line.fulfillment_status === "FULFILLED");
-    return accepted && !fulfilled;
+    return lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED") && !fulfilled;
   }).length;
 
   const inWarehouseOrderIds = new Set<string>();

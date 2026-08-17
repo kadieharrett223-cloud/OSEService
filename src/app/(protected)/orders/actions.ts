@@ -269,6 +269,74 @@ export async function acceptNewOrderAction(formData: FormData) {
   redirect("/orders?message=Order+accepted");
 }
 
+export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
+  await requireUser();
+  const invoiceId = getString(formData, "qbo_invoice_id");
+  const adminClient = getSupabaseAdmin();
+  if (!invoiceId) redirect("/orders/new?error=Select+a+QuickBooks+invoice");
+
+  const [{ data: invoice, error: invoiceError }, { data: existing }] = await Promise.all([
+    adminClient.from("qbo_invoices").select("id, qbo_invoice_id, invoice_number, customer_id, payment_status, invoice_date, total_amount").eq("id", invoiceId).maybeSingle(),
+    adminClient.from("shipping_orders").select("id").eq("source_invoice_id", invoiceId).limit(1),
+  ]);
+
+  if (invoiceError || !invoice) redirect(`/orders/new?error=${encodeURIComponent(invoiceError?.message ?? "QuickBooks invoice not found")}`);
+  if (existing?.[0]?.id) redirect(`/orders/${existing[0].id}?message=This+QuickBooks+invoice+is+already+in+New+%2F+Review`);
+
+  const { data: customer } = invoice.customer_id
+    ? await adminClient.from("customers").select("full_name, company_name").eq("id", invoice.customer_id).maybeSingle()
+    : { data: null };
+  const { data: invoiceLines, error: linesError } = await adminClient
+    .from("qbo_invoice_lines")
+    .select("id, qbo_invoice_id, qbo_line_id, product_id, ordered_qty, qbo_sku, source_description")
+    .eq("qbo_invoice_id", invoiceId);
+
+  if (linesError) redirect(`/orders/new?error=${encodeURIComponent(linesError.message)}`);
+  if (!invoiceLines?.length) redirect(`/orders/new?error=This+invoice+has+no+imported+QuickBooks+lines`);
+
+  const { data: order, error: orderError } = await adminClient
+    .from("shipping_orders")
+    .insert({
+      customer_id: invoice.customer_id,
+      source_invoice_id: invoice.id,
+      order_number: invoice.invoice_number,
+      source_type: "QBO_INVOICE",
+      review_status: "PENDING_REVIEW",
+      fulfillment_status: "PENDING",
+      priority: "NORMAL",
+      legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
+      notes: "Entered from QuickBooks invoice lookup.",
+    })
+    .select("id")
+    .single();
+
+  if (orderError || !order?.id) redirect(`/orders/new?error=${encodeURIComponent(orderError?.message ?? "Unable to create order")}`);
+
+  const mappedInvoiceLines = invoiceLines.filter((line): line is typeof line & { product_id: string } => Boolean(line.product_id));
+  const { error: lineError } = mappedInvoiceLines.length
+    ? await adminClient.from("shipping_order_lines").insert(mappedInvoiceLines.map((line) => ({
+    shipping_order_id: order.id,
+    qbo_invoice_line_id: line.id,
+    product_id: line.product_id,
+    ordered_qty: line.ordered_qty,
+    approved_qty: 0,
+    fulfilled_qty: 0,
+    cancelled_qty: 0,
+    approval_status: "PENDING_REVIEW",
+    warehouse_status: "PENDING_REVIEW",
+    allocation_status: "UNALLOCATED",
+    fulfillment_status: "PENDING",
+    priority: "NORMAL",
+    source_event_key: `QBO_INVOICE_LINE:${invoice.qbo_invoice_id}:${line.qbo_line_id}`,
+    legacy_item_code: line.qbo_sku,
+    })))
+    : { error: null };
+
+  if (lineError) redirect(`/orders/new?error=${encodeURIComponent(lineError.message)}`);
+  revalidatePath("/orders");
+  redirect(`/orders/${order.id}?message=QuickBooks+invoice+added+to+New+%2F+Review`);
+}
+
 export async function overrideProductQueuePositionAction(formData: FormData) {
   await requireUser();
 

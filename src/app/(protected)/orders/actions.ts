@@ -632,6 +632,89 @@ export async function markOrderLineShippedAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Shipment+recorded`);
 }
 
+export async function shipSelectedOrderLinesAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const trackingNumber = (getString(formData, "tracking_number") ?? "").trim();
+  const shipmentDate = (getString(formData, "shipment_date") ?? "").trim();
+  const carrier = (getString(formData, "carrier") ?? "").trim();
+  const selectedIds = formData.getAll("line_id").map((value) => String(value).trim()).filter(Boolean);
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
+  if (!trackingNumber) redirect(`/orders/${orderId}?error=Tracking+number+is+required`);
+  if (!shipmentDate) redirect(`/orders/${orderId}?error=Shipment+date+is+required`);
+
+  const { data: lines, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .eq("shipping_order_id", orderId)
+    .in("id", selectedIds);
+
+  if (lineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError.message)}`);
+
+  const selectedLines = (lines ?? []) as Array<{
+    id: string;
+    product_id: string | null;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+    approval_status: string | null;
+    fulfillment_status: string | null;
+  }>;
+
+  if (selectedLines.length !== selectedIds.length || selectedLines.some((line) => {
+    const remaining = Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0);
+    return !line.product_id || remaining <= 0 || !["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase()) || line.fulfillment_status === "CANCELLED";
+  })) {
+    redirect(`/orders/${orderId}?error=Only+mapped+open+inventory+items+can+be+shipped`);
+  }
+
+  const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
+  const shipmentNumber = `SHIP-${Date.now()}`;
+  for (const line of selectedLines) {
+    const remaining = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const { error: updateError } = await adminClient.from("shipping_order_lines").update({
+      fulfilled_qty: Number(line.fulfilled_qty ?? 0) + remaining,
+      fulfillment_status: "FULFILLED",
+      warehouse_status: "FULFILLED",
+    }).eq("id", line.id);
+    if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+
+    const { error: fulfillmentError } = await adminClient.from("fulfillments").insert({
+      shipping_order_line_id: line.id,
+      fulfilled_qty: remaining,
+      fulfilled_at: fulfilledAt,
+      shipment_number: shipmentNumber,
+      carrier: carrier || null,
+      tracking_number: trackingNumber,
+      reason: "Selected items shipped",
+      source_event_key: crypto.randomUUID(),
+    });
+    if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
+  }
+
+  try {
+    await syncOrderSummaryState(adminClient, orderId, trackingNumber, carrier || null);
+  } catch (error) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to update order summary")}`);
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_ITEMS_SHIPPED", {
+    line_ids: selectedIds.join(","),
+    line_count: selectedIds.length,
+    tracking_number: trackingNumber,
+    carrier: carrier || null,
+    shipment_date: shipmentDate,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=${encodeURIComponent(`${selectedLines.length} item${selectedLines.length === 1 ? "" : "s"} shipped`)}`);
+}
+
 export async function uploadOrderAttachmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "order_id");

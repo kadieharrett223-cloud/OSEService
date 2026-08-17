@@ -16,6 +16,7 @@ import {
   overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
 } from "../actions";
+import { ShipItemsForm } from "./ship-items-form";
 
 type OrderDetailRow = {
   id: string;
@@ -1248,9 +1249,20 @@ export default async function OrderDetailPage({
                 <h2 className="text-xl font-semibold text-[#111827]">Items</h2>
                 <p className="mt-1 text-sm text-[#5a5a5a]">What they bought, what is available, and what can ship now.</p>
               </div>
-              <div className="flex flex-wrap gap-2 text-xs font-semibold text-[#475569]">
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
+                <ShipItemsForm
+                  orderId={orderRecord.id}
+                  items={itemStockSummary
+                    .filter(({ item, needed, status }) => Boolean(item.shippingLine?.product_id) && Boolean(item.shippingLine) && needed > 0 && status === "In Stock")
+                    .map(({ item, needed }) => ({
+                      id: item.shippingLine!.id,
+                      label: item.description,
+                      sku: item.sku ?? item.shippingLine!.products?.sku ?? "Mapped item",
+                      remainingQty: Math.max(0, Number(item.shippingLine!.approved_qty ?? 0) - Number(item.shippingLine!.fulfilled_qty ?? 0)),
+                    }))}
+                />
               </div>
             </div>
 

@@ -231,7 +231,7 @@ export async function acceptNewOrderAction(formData: FormData) {
       .update({
         approved_qty: Number(line.ordered_qty ?? 0),
         approval_status: "APPROVED",
-        warehouse_status: "READY_TO_SHIP",
+        warehouse_status: "APPROVED",
         fulfillment_status: "PENDING",
         approved_at: new Date().toISOString(),
       })

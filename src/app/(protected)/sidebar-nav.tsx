@@ -52,7 +52,10 @@ const navGroups: NavGroup[] = [
   },
   {
     title: "Settings",
-    items: [{ href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" }],
+    items: [
+      { href: "/product-mappings", label: "Product Mappings", matchPath: "/product-mappings", icon: "PM" },
+      { href: "/settings", label: "Settings", matchPath: "/settings", icon: "ST" },
+    ],
   },
 ];
 

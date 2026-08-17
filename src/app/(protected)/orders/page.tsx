@@ -30,6 +30,8 @@ type OrderSummary = {
     approved_qty: number | null;
     fulfilled_qty: number | null;
     source_system: string | null;
+    legacy_item_code?: string | null;
+    product_id?: string | null;
     products?: {
       sku: string | null;
       canonical_name: string | null;
@@ -91,6 +93,7 @@ function buildOrdersSelect(orderColumns: Set<string>, lineColumns: Set<string>) 
   if (lineColumns.has("source_system")) {
     lineFields.push("source_system");
   }
+  lineFields.push("legacy_item_code", "product_id");
 
   return `
     ${orderFields.join(",\n      ")},
@@ -121,12 +124,33 @@ export default async function OrdersPage({
 
   const ordersSelect = buildOrdersSelect(shippingOrderColumns, shippingOrderLineColumns);
 
+  const { data: manualMappingRows } = await supabase
+    .from("manual_product_mapping_queue")
+    .select("source_sku")
+    .eq("status", "OPEN");
+  const manualMappingSkus = new Set((manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase()));
+
   const { data: orders, error } = await supabase
     .from("shipping_orders")
     .select(ordersSelect)
     .order("created_at", { ascending: false });
 
   const allOrders = (orders ?? []) as unknown as OrderSummary[];
+
+  function operationalLines(order: OrderSummary) {
+    return (order.shipping_order_lines ?? []).filter((line) => {
+      const remaining = Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+      const sku = String(line.products?.sku ?? "").trim().toUpperCase();
+      const legacySku = String(line.legacy_item_code ?? "").trim().toUpperCase();
+      return Boolean(line.product_id)
+        && order.order_number !== "126037"
+        && !manualMappingSkus.has(sku)
+        && !manualMappingSkus.has(legacySku)
+        && ["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase())
+        && remaining > 0
+        && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
+    });
+  }
   const liveOrderIdByInvoice = new Map<string, string>();
   for (const order of allOrders) {
     const invoice = order.qbo_invoices?.invoice_number ?? order.order_number;
@@ -149,24 +173,27 @@ export default async function OrdersPage({
   }
 
   function matchesTab(order: OrderSummary, tabId: string) {
-    const lines = order.shipping_order_lines ?? [];
+    const lines = operationalLines(order);
+    const allLines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
-    const allFulfilled = hasLines && lines.every((line) => line.fulfillment_status === "FULFILLED");
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
-    const anyOpen = lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED");
+    const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
+      !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
+      && line.fulfillment_status === "FULFILLED",
+    );
 
     switch (tabId) {
       case "orders":
-        return true;
+        return hasLines;
       case "new":
-        return anyOpen && !anyWarehouse && !anyShipped && !allFulfilled;
+        return hasLines && !anyWarehouse && !anyShipped;
       case "warehouse":
-        return anyWarehouse && !anyShipped && !allFulfilled;
+        return hasLines && anyWarehouse && !anyShipped;
       case "partial":
-        return anyShipped && !allFulfilled;
+        return hasLines && anyShipped;
       case "archived":
-        return allFulfilled || order.review_status === "FULFILLED";
+        return !hasLines && hasArchivedLines;
       default:
         return true;
     }
@@ -227,7 +254,7 @@ export default async function OrdersPage({
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {[
-          ["Total Orders", allOrders.length, "bg-[#eff6ff] text-[#2563eb]"],
+          ["Total Orders", tabCounts.orders, "bg-[#eff6ff] text-[#2563eb]"],
           ["New Orders", tabCounts.new, "bg-[#ecfdf5] text-[#15803d]"],
           ["In Warehouse", tabCounts.warehouse, "bg-[#fff7ed] text-[#c2410c]"],
           ["Partially Shipped", tabCounts.partial, "bg-[#fff7ed] text-[#c2410c]"],
@@ -312,7 +339,7 @@ export default async function OrdersPage({
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
-              const lines = order.shipping_order_lines ?? [];
+              const lines = operationalLines(order);
               const totalQty = lines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
               const inStockQty = lines
                 .filter((line) => ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))

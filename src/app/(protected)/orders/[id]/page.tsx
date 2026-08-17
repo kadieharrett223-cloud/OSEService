@@ -1291,7 +1291,9 @@ export default async function OrderDetailPage({
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
                             ) : (
-                              <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">{supply.action}</span>
+                              <span className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]">
+                                {item.productId ? "Review Line" : supply.action}
+                              </span>
                             )}
                           </span>
                         </summary>

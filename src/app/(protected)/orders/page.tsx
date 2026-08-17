@@ -137,9 +137,7 @@ export default async function OrdersPage({
 
   const deniedCount = Number(deniedCountRaw ?? 0);
 
-  const historicalStatus = activeTab === "accepted"
-    ? "ACCEPTED"
-    : activeTab === "warehouse"
+  const historicalStatus = activeTab === "warehouse"
       ? "IN_WAREHOUSE"
       : activeTab === "shipped"
         ? "SHIPPED"
@@ -297,7 +295,7 @@ export default async function OrdersPage({
 
   const tabCounts = {
     review: allOrders.filter((order) => matchesTab(order, "review")).length,
-    accepted: Number(acceptedCountRaw ?? 0),
+    accepted: allOrders.filter((order) => matchesTab(order, "accepted")).length,
     warehouse: Number(warehouseCountRaw ?? 0),
     shipped: Number(shippedCountRaw ?? 0),
     fulfilled: Number(shippedCountRaw ?? 0),

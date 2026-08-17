@@ -7,6 +7,7 @@ type OrderSummary = {
   id: string;
   order_number: string | null;
   source_type: string | null;
+  notes: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
   created_at: string;
@@ -83,6 +84,7 @@ function isRecentPaidQuickbooksReviewOrder(order: OrderSummary) {
 }
 
 function isWithinActiveOrderWindow(order: OrderSummary) {
+  if (order.source_type === "QBO_INVOICE" && order.notes === "Entered from QuickBooks invoice lookup.") return true;
   const invoiceDate = order.qbo_invoices?.invoice_date;
   if (!invoiceDate) return false;
 
@@ -205,6 +207,7 @@ export default async function OrdersPage({
       id,
       order_number,
       source_type,
+      notes,
       legacy_customer_name,
       review_status,
       created_at,

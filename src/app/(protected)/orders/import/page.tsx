@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { bulkImportOrdersAction } from "./actions";
 
@@ -115,6 +116,7 @@ export default async function OrderImportPage({
   searchParams: Promise<SearchParams>;
 }) {
   await requireUser();
+  redirect("/orders/new");
   const params = await searchParams;
   const report = await loadReport(params.report);
   const pendingImport = await loadPendingImport(params.pending);

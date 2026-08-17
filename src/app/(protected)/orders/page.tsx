@@ -103,7 +103,7 @@ export default async function OrdersPage({
   await requireUser();
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
-  const activeTab = params.tab ?? "orders";
+  const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
   const { data: orders, error } = await supabase
@@ -172,7 +172,7 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "orders":
-        return anyOpen && !allFulfilled;
+        return true;
       case "new":
         return anyOpen && !anyWarehouse && !anyShipped && !allFulfilled;
       case "warehouse":
@@ -214,8 +214,8 @@ export default async function OrdersPage({
   };
 
   const tabs = [
-    { id: "orders", label: "Orders" },
     { id: "new", label: "New Orders" },
+    { id: "orders", label: "Orders" },
     { id: "warehouse", label: "In Warehouse" },
     { id: "partial", label: "Partially Shipped" },
     { id: "archived", label: "Archived" },
@@ -295,7 +295,7 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab !== "denied" && error ? (
+        {error ? (
           <div className="mb-4 rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
             Unable to load orders right now.
           </div>
@@ -313,10 +313,11 @@ export default async function OrdersPage({
               <thead className="bg-[#f8fafc]">
                 <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
                   <th className="px-3 py-3">Order / Customer</th>
-                  <th className="px-3 py-3">Total Items</th>
-                  <th className="px-3 py-3">Approved</th>
+                  <th className="px-3 py-3">Ordered</th>
+                  <th className="px-3 py-3">In Stock</th>
                   <th className="px-3 py-3">In Warehouse</th>
                   <th className="px-3 py-3">Shipped</th>
+                  <th className="px-3 py-3">Remaining</th>
                   <th className="px-3 py-3">Order Date</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
@@ -327,10 +328,14 @@ export default async function OrdersPage({
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
               const lines = order.shipping_order_lines ?? [];
               const totalQty = lines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
-              const approvedQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
-              const warehouseQty = lines.filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "FULFILLED"].includes(String(line.warehouse_status ?? ""))).reduce((sum, line) => sum + Number(line.approved_qty ?? 0), 0);
+              const inStockQty = lines
+                .filter((line) => ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+                .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
+              const warehouseQty = lines
+                .filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+                .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
               const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
-              const remainingQty = Math.max(0, approvedQty - shippedQty);
+              const remainingQty = Math.max(0, totalQty - shippedQty);
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
                   <td className="px-3 py-3">
@@ -338,14 +343,15 @@ export default async function OrdersPage({
                     <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
                   </td>
                   <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
-                  <td className="px-3 py-3 font-semibold text-[#15803d]">{approvedQty} / {totalQty}</td>
-                  <td className="px-3 py-3 font-semibold text-[#c2410c]">{warehouseQty} / {approvedQty}</td>
+                  <td className="px-3 py-3 font-semibold text-[#15803d]">{inStockQty} / {totalQty}</td>
+                  <td className="px-3 py-3 font-semibold text-[#c2410c]">{warehouseQty} / {totalQty}</td>
                   <td className="px-3 py-3">
-                    <span className="font-semibold text-[#0f766e]">{shippedQty} / {approvedQty}</span>
+                    <span className="font-semibold text-[#0f766e]">{shippedQty} / {totalQty}</span>
                     {shippedQty > 0 && remainingQty > 0 ? (
                       <div className="mt-1 text-xs font-semibold text-[#b45309]">{remainingQty} remaining</div>
                     ) : null}
                   </td>
+                  <td className="px-3 py-3 font-semibold text-[#b45309]">{remainingQty}</td>
                   <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">

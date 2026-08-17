@@ -6,6 +6,7 @@ import { acceptNewOrderAction, updateDeniedArchiveReasonAction } from "./actions
 type OrderSummary = {
   id: string;
   order_number: string | null;
+  source_type: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
   created_at: string;
@@ -194,6 +195,7 @@ export default async function OrdersPage({
     .select(`
       id,
       order_number,
+      source_type,
       legacy_customer_name,
       review_status,
       created_at,
@@ -246,7 +248,7 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "review":
-        return isRecentPaidQuickbooksReviewOrder(order)
+        return (order.source_type === "QBO_INVOICE" || isRecentPaidQuickbooksReviewOrder(order))
           && (order.review_status === "PENDING_REVIEW" || !hasLines || anyReview);
       case "accepted":
         return anyApproved && !anyWarehouse && !anyShipped && !allFulfilled;

@@ -334,7 +334,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
 
   if (lineError) redirect(`/orders/new?error=${encodeURIComponent(lineError.message)}`);
   revalidatePath("/orders");
-  redirect(`/orders/${order.id}?message=QuickBooks+invoice+added+to+New+%2F+Review`);
+  redirect(`/orders?tab=review&message=QuickBooks+invoice+added+to+New+%2F+Review`);
 }
 
 export async function overrideProductQueuePositionAction(formData: FormData) {

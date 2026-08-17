@@ -51,11 +51,16 @@ type QueueLine = {
   approved_qty: number | null;
   fulfilled_qty: number | null;
   approval_status: string | null;
+  fulfillment_status: string | null;
   priority: string | null;
   warehouse_status: string | null;
   queue_position_start: number | null;
+  queue_position_count: number | null;
+  source_system?: string | null;
+  legacy_item_code?: string | null;
   shipping_orders?: {
     id: string;
+    order_number?: string | null;
     legacy_customer_name: string | null;
     qbo_invoices?: {
       invoice_number: string | null;
@@ -77,6 +82,7 @@ type QueueLine = {
       eta_estimated_date: string | null;
     } | null;
   }>;
+  products?: { sku: string | null } | null;
 };
 
 type InventoryViewRow = {
@@ -165,14 +171,14 @@ function canonicalSkuKey(value: string | null | undefined) {
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
 
-const CLOSED_QUEUE_STATES = ["FULFILLED", "SHIPPED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
+const CLOSED_QUEUE_STATES = ["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
 
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 function isOpenQueueLine(line: QueueLine) {
   const remaining = Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0);
   if (remaining <= 0) return false;
   if (CLOSED_QUEUE_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
-  return !CLOSED_QUEUE_STATES.includes(String(line.warehouse_status ?? "").toUpperCase());
+  return !CLOSED_QUEUE_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
 }
 
 function isActiveIncomingContainer(status: string | null | undefined) {
@@ -250,8 +256,12 @@ export default async function InventoryPage({
         priority,
         warehouse_status,
         queue_position_start,
+        queue_position_count,
+        source_system,
+        legacy_item_code,
         shipping_orders (
           id,
+          order_number,
           legacy_customer_name,
           qbo_invoices (
             invoice_number,
@@ -298,6 +308,12 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
+  const manualMappingSkus = new Set<string>();
+  const { data: manualMappingRows } = await supabase
+    .from("manual_product_mapping_queue")
+    .select("source_sku")
+    .eq("status", "OPEN");
+  for (const row of (manualMappingRows ?? []) as unknown as Array<{ source_sku: string | null }>) manualMappingSkus.add(normalizeSkuKey(row.source_sku));
 
   const operationalSkuByProduct = new Map<string, string>();
   for (const alias of productAliasRows) {
@@ -364,6 +380,7 @@ export default async function InventoryPage({
 
   for (const line of queueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
+    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
 
     const openQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     const qty = openQty;
@@ -375,7 +392,9 @@ export default async function InventoryPage({
       ?? "Customer pending";
 
     const row = {
-      position: line.queue_position_start != null ? String(line.queue_position_start) : "—",
+      position: line.queue_position_start != null
+        ? `${line.queue_position_start}${Number(line.queue_position_count ?? 0) > 1 ? `-${line.queue_position_start + Number(line.queue_position_count) - 1}` : ""}`
+        : "—",
       lineId: line.id,
       openQty,
       approvedQty: Math.max(0, Number(line.approved_qty ?? 0)),
@@ -407,9 +426,6 @@ export default async function InventoryPage({
       const left = a.position === "—" ? Number.MAX_SAFE_INTEGER : Number(a.position);
       const right = b.position === "—" ? Number.MAX_SAFE_INTEGER : Number(b.position);
       return left - right;
-    });
-    queue.forEach((item, index) => {
-      if (item.position === "—") item.position = String(index + 1);
     });
   }
 
@@ -496,7 +512,7 @@ export default async function InventoryPage({
           const rightPosition = right.position === "—" ? Number.MAX_SAFE_INTEGER : Number(right.position);
           return leftPosition - rightPosition;
         })
-        .map((item, index) => ({ ...item, position: String(index + 1) }));
+        .map((item) => item);
 
       // Migrated lines carry no allocation rows, so cover the queue from real stock in order.
       let floorLeft = Math.max(0, group.onFloor - group.floorCommitted);

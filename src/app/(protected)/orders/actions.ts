@@ -268,7 +268,8 @@ export async function acceptNewOrderAction(formData: FormData) {
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");
   revalidatePath("/inventory");
-  redirect("/orders?message=Order+accepted");
+  const returnPath = getString(formData, "returnPath");
+  redirect(returnPath || "/orders?message=Order+accepted");
 }
 
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {

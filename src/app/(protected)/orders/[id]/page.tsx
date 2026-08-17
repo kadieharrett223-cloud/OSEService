@@ -10,6 +10,7 @@ import {
   addOrderNoteAction,
   deleteOrderAttachmentAction,
   markOrderLineShippedAction,
+  acceptNewOrderAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
@@ -1224,6 +1225,13 @@ export default async function OrderDetailPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {orderRecord.review_status === "PENDING_REVIEW" || orderLines.some((line) => line.approval_status === "PENDING_REVIEW") ? (
+              <form action={acceptNewOrderAction}>
+                <input type="hidden" name="orderId" value={orderRecord.id} />
+                <input type="hidden" name="returnPath" value={`/orders/${orderRecord.id}?message=Order+accepted`} />
+                <button type="submit" className="btn-primary inline-flex">Accept Order</button>
+              </form>
+            ) : null}
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
               <details className="group rounded-xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-[#334155]">Edit Order</summary>

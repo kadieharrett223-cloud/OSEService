@@ -545,7 +545,9 @@ export default async function InventoryPage({
     .map((group) => {
       const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
       for (const item of group.customerQueue) {
-        const key = `${item.invoice}|${item.customer}`.toUpperCase();
+        const key = item.invoice && item.invoice !== "—"
+          ? `INVOICE:${item.invoice}`.toUpperCase()
+          : `ORDER:${item.orderId}`.toUpperCase();
         const existing = customerDemandByInvoice.get(key);
         if (!existing || item.openQty > existing.openQty) {
           customerDemandByInvoice.set(key, item);

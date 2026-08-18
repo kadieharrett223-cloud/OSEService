@@ -177,7 +177,7 @@ export default async function OrdersPage({
       `)
         .order("id", { ascending: true })
         .range(from, to)),
-    ];
+    ]);
   } catch (error) {
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }

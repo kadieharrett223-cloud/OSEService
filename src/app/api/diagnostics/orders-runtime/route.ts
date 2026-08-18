@@ -30,10 +30,10 @@ export async function GET() {
 
   let orders: unknown[] = [];
   let lines: unknown[] = [];
-  let manualRows: Array<{ source_sku: string | null }> = [];
+  let manualRows: unknown[] = [];
   let queryError: Error | null = null;
   try {
-    [orders, lines, manualRows] = await Promise.all([
+    [orders, lines] = await Promise.all([
       fetchAllRows((from, to) => supabase
       .from("shipping_orders")
       .select(`
@@ -62,12 +62,14 @@ export async function GET() {
       .order("id", { ascending: true })
       .range(from, to)),
       fetchAllRows((from, to) => supabase
-      .from("shipping_order_lines")
+        .from("shipping_order_lines")
       .select("id, shipping_order_id, product_id, legacy_item_code, approval_status, warehouse_status, fulfillment_status, ordered_qty, approved_qty, fulfilled_qty, products(sku, canonical_name)")
       .order("id", { ascending: true })
-      .range(from, to)),
-      supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
+        .range(from, to)),
     ]);
+    const { data: rawManualRows, error: manualError } = await supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN");
+    if (manualError) throw new Error(manualError.message);
+    manualRows = rawManualRows ?? [];
   } catch (error) {
     queryError = error instanceof Error ? error : new Error("Unable to load diagnostic data");
   }
@@ -86,7 +88,7 @@ export async function GET() {
   }
 
   const typedLines = lines as Array<Record<string, any>>;
-  const manualMappingSkus = new Set(manualRows.map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
+  const manualMappingSkus = new Set((manualRows as Array<{ source_sku: string | null }>).map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
   const remaining = (line: { approved_qty?: number | null; ordered_qty?: number | null; fulfilled_qty?: number | null }) => Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
   const predicateReason = (order: {
     order_number?: string | null;

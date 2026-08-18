@@ -1344,7 +1344,14 @@ export default async function OrderDetailPage({
                   {itemStockSummary.map(({ item, supply, needed, inStock, status }) => {
                     const line = item.shippingLine;
                     const shipmentLine = line ?? (item.productId
-                      ? orderLines.find((candidate) => candidate.product_id === item.productId && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0) && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase())) ?? null
+                      ? orderLines.find((candidate) => {
+                        const candidateSku = normalizeSkuKey(candidate.legacy_item_code);
+                        const itemSku = normalizeSkuKey(item.sku);
+                        const skuMatches = Boolean(candidateSku && itemSku && (candidateSku === itemSku || candidateSku === itemSku.replace(/1$/, "") || itemSku === candidateSku.replace(/1$/, "")));
+                        return (candidate.product_id === item.productId || skuMatches)
+                          && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0)
+                          && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
+                      }) ?? null
                       : null);
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;

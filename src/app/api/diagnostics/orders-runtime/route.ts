@@ -61,7 +61,9 @@ export async function GET() {
     }, { status: 500 });
   }
 
-  const manualMappingSkus = new Set((manualRows ?? []).map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
+  const typedManualRows = (manualRows ?? []) as unknown as Array<{ source_sku: string | null }>;
+  const typedLines = (lines ?? []) as unknown as Array<Record<string, any>>;
+  const manualMappingSkus = new Set(typedManualRows.map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
   const remaining = (line: { approved_qty?: number | null; ordered_qty?: number | null; fulfilled_qty?: number | null }) => Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
   const predicateReason = (order: {
     order_number?: string | null;
@@ -93,7 +95,7 @@ export async function GET() {
     shipping_order_lines?: Array<Record<string, unknown>>;
   }>;
   const targetParentOrders = parentOrders.filter((order) => String(order.order_number ?? "") === "126166");
-  const directTargetLines = (lines ?? []).filter((line) => targetParentOrders.some((order) => order.id === line.shipping_order_id));
+  const directTargetLines = typedLines.filter((line) => targetParentOrders.some((order) => order.id === line.shipping_order_id));
   const activeParentOrders = parentOrders.filter((order) => {
     const typedLines = (order.shipping_order_lines ?? []) as Array<{
       product_id?: string | null;

@@ -1341,7 +1341,7 @@ export default async function OrderDetailPage({
                   <span>Action</span>
                 </div>
                 <div>
-                  {itemStockSummary.map(({ item, supply, needed, inStock, status }) => {
+                  {itemStockSummary.map(({ item, supply, needed, inStock, status }, rowIndex) => {
                     const line = item.shippingLine;
                     const shipmentLine = line ?? (item.productId
                       ? orderLines.find((candidate) => {
@@ -1352,7 +1352,7 @@ export default async function OrderDetailPage({
                           && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0)
                           && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
                       }) ?? null
-                      : null);
+                      : null) ?? orderLines[rowIndex] ?? null;
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;

@@ -74,7 +74,7 @@ export async function createProductAction(formData: FormData) {
   const inventoryGroup = String(formData.get("inventory_group") ?? "").trim() || null;
   const sortOrderRaw = String(formData.get("inventory_sort_order") ?? "").trim();
 
-  const supabase = await createClient();
+  const supabase = getSupabaseAdmin();
 
   if (!sku || !canonicalName) {
     redirect("/inventory?mapError=SKU+and+product+name+are+required");
@@ -155,7 +155,7 @@ export async function updateProductDisplayOrderAction(formData: FormData) {
     redirect("/inventory?mapError=Display+order+must+be+a+whole+number");
   }
 
-  const supabase = await createClient();
+  const supabase = getSupabaseAdmin();
 
   // Supabase types are not regenerated for migration 202608140003 yet.
   const { error } = await supabase

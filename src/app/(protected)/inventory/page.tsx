@@ -625,7 +625,7 @@ export default async function InventoryPage({
           <div className="flex flex-wrap items-center gap-3">
             <AdminModeToggle unlocked={adminMode} />
             <Link href="/product-mappings" className="btn-primary">Map Unmapped SKUs</Link>
-            <AddProductModal createAction={createProductAction} />
+            <AddProductModal createAction={createProductAction} groups={groupNames.filter((group) => group !== UNSORTED_GROUP)} />
           </div>
         </div>
       </div>

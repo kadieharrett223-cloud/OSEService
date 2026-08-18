@@ -4,9 +4,10 @@ import { useState } from "react";
 
 type AddProductModalProps = {
   createAction: (formData: FormData) => void | Promise<void>;
+  groups: string[];
 };
 
-export function AddProductModal({ createAction }: AddProductModalProps) {
+export function AddProductModal({ createAction, groups }: AddProductModalProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -57,7 +58,10 @@ export function AddProductModal({ createAction }: AddProductModalProps) {
                 </div>
                 <div>
                   <label htmlFor="add-product-group" className="label">Inventory group <span className="font-normal text-[#94a3b8]">(optional)</span></label>
-                  <input id="add-product-group" name="inventory_group" className="input" placeholder="e.g. Lifts" />
+                  <select id="add-product-group" name="inventory_group" className="input">
+                    <option value="">Choose group</option>
+                    {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+                  </select>
                 </div>
               </div>
 

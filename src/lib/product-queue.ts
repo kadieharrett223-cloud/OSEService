@@ -74,6 +74,7 @@ export async function recalculateProductQueues(productIds: string[]) {
     });
 
     let position = 1;
+    const activeLineUpdates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
     for (const line of lines) {
       const units = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
       if (units <= 0) continue;
@@ -86,29 +87,31 @@ export async function recalculateProductQueues(productIds: string[]) {
             ? currentWarehouseStatus
             : "APPROVED";
 
-      const { error: updateError } = await supabase
+      activeLineUpdates.push(supabase
         .from("shipping_order_lines")
         .update({
           queue_position_start: position,
           queue_position_count: units,
           warehouse_status: nextWarehouseStatus,
         })
-        .eq("id", line.id);
-      if (updateError) throw new Error(updateError.message);
+        .eq("id", line.id));
       position += units;
       linesUpdated += 1;
     }
 
+    const activeUpdateResults = await Promise.all(activeLineUpdates);
+    const activeUpdateError = activeUpdateResults.find((result) => result.error)?.error;
+    if (activeUpdateError) throw new Error(activeUpdateError.message);
+
     const inactiveLines = (data ?? [])
       .map((row) => row as unknown as QueueLine)
       .filter((line) => line.product_id === productId && !isActiveQueueLine(line));
-    for (const line of inactiveLines) {
-      const { error: clearError } = await supabase
+    const inactiveUpdateResults = await Promise.all(inactiveLines.map((line) => supabase
         .from("shipping_order_lines")
         .update({ queue_position_start: null, queue_position_count: null })
-        .eq("id", line.id);
-      if (clearError) throw new Error(clearError.message);
-    }
+        .eq("id", line.id)));
+    const inactiveUpdateError = inactiveUpdateResults.find((result) => result.error)?.error;
+    if (inactiveUpdateError) throw new Error(inactiveUpdateError.message);
   }
 
   return { productsUpdated: uniqueProductIds.length, linesUpdated };

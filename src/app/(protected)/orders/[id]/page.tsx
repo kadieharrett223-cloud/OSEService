@@ -788,19 +788,20 @@ export default async function OrderDetailPage({
 
   const orderNotes = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED");
 
-  const { data: productRows } = await supabase
-    .from("products")
-    .select("id, sku, canonical_name");
+  const [{ data: productRows }, { data: aliasRows }] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, sku, canonical_name"),
+    supabase
+      .from("product_aliases")
+      .select("product_id, alias, products (id, sku, canonical_name)"),
+  ]);
 
   const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
   for (const product of productRows ?? []) {
     const skuKey = normalizeSkuKey(product.sku);
     if (skuKey) productMap.set(skuKey, product);
   }
-
-  const { data: aliasRows } = await supabase
-    .from("product_aliases")
-    .select("product_id, alias, products (id, sku, canonical_name)");
 
   for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
     const aliasKey = normalizeSkuKey(alias.alias);
@@ -815,37 +816,29 @@ export default async function OrderDetailPage({
     return direct?.id ?? null;
   }).filter(Boolean))) as string[];
 
-  const { data: onFloorRows } = resolvedProductIds.length
-    ? await supabase
-        .from("inventory_transactions")
-        .select("product_id, bucket, delta")
-        .in("product_id", resolvedProductIds)
-        .eq("bucket", "ON_FLOOR")
-    : { data: [] };
-
-  const { data: containerLineRows } = resolvedProductIds.length
-    ? await supabase
-        .from("container_lines")
-        .select("product_id, on_order_qty, container_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
-        .in("product_id", resolvedProductIds)
-    : { data: [] };
-
-  const { data: allAllocRows } = resolvedProductIds.length
-    ? await supabase
-        .from("inventory_allocations")
-        .select("product_id, container_id, quantity, source_type, allocation_status, shipping_order_line_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
-        .in("product_id", resolvedProductIds)
-    : { data: [] };
-
-  const { data: openQueueRows } = resolvedProductIds.length
-    ? await supabase
-        .from("shipping_order_lines")
-        .select("id, product_id, approved_qty, fulfilled_qty, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
-        .in("product_id", resolvedProductIds)
-        .eq("approval_status", "APPROVED")
-        .neq("fulfillment_status", "FULFILLED")
-    : { data: [] };
-
+  const [{ data: onFloorRows }, { data: containerLineRows }, { data: allAllocRows }, { data: openQueueRows }] = resolvedProductIds.length
+    ? await Promise.all([
+        supabase
+          .from("inventory_transactions")
+          .select("product_id, bucket, delta")
+          .in("product_id", resolvedProductIds)
+          .eq("bucket", "ON_FLOOR"),
+        supabase
+          .from("container_lines")
+          .select("product_id, on_order_qty, container_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+          .in("product_id", resolvedProductIds),
+        supabase
+          .from("inventory_allocations")
+          .select("product_id, container_id, quantity, source_type, allocation_status, shipping_order_line_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
+          .in("product_id", resolvedProductIds),
+        supabase
+          .from("shipping_order_lines")
+          .select("id, product_id, approved_qty, fulfilled_qty, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
+          .in("product_id", resolvedProductIds)
+          .eq("approval_status", "APPROVED")
+          .neq("fulfillment_status", "FULFILLED"),
+      ])
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }];
   const onFloorAvailableByProduct = new Map<string, number>();
   for (const row of (onFloorRows ?? []) as InventoryTransactionLookupRow[]) {
     const productId = row.product_id ?? null;

@@ -290,6 +290,41 @@ export async function moveOrderLineBackToOrdersAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Item+moved+back+to+Orders`);
 }
 
+export async function moveOrderBackToOrdersAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
+
+  const { data: lines, error: linesError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, warehouse_status, fulfillment_status, fulfilled_qty")
+    .eq("shipping_order_id", orderId);
+  if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
+
+  const movableLines = (lines ?? []).filter((line) =>
+    ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())
+    && Number(line.fulfilled_qty ?? 0) <= 0
+    && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()),
+  );
+  if (movableLines.length === 0) redirect(`/orders/${orderId}?error=No+open+warehouse+items+can+be+moved+back+to+Orders`);
+
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update({ approval_status: "APPROVED", warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" })
+    .eq("shipping_order_id", orderId)
+    .in("id", movableLines.map((line) => line.id));
+  if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+
+  await recalculateProductQueues(movableLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_BACK_TO_ORDERS", { line_count: movableLines.length });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/inventory");
+  redirect(`/orders/${orderId}?message=${encodeURIComponent(`${movableLines.length} item${movableLines.length === 1 ? "" : "s"} moved back to Orders`)}`);
+}
+
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");

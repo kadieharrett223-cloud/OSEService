@@ -12,6 +12,7 @@ import {
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
   moveOrderLineBackToOrdersAction,
+  moveOrderBackToOrdersAction,
   moveOrderToWarehouseAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
@@ -305,7 +306,7 @@ function cleanAddressForHeader(address: string | null | undefined, phone: string
 }
 
 function normalizeSkuKey(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const normalized = String(value ?? "").trim().replace(/\s*\(deleted\)\s*$/i, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return normalized || null;
 }
 
@@ -1248,6 +1249,16 @@ export default async function OrderDetailPage({
               <form action={moveOrderToWarehouseAction}>
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <button type="submit" className="btn-primary inline-flex">Move to Warehouse</button>
+              </form>
+            ) : null}
+            {orderLines.some((line) =>
+              ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())
+              && Number(line.fulfilled_qty ?? 0) <= 0
+              && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()),
+            ) ? (
+              <form action={moveOrderBackToOrdersAction}>
+                <input type="hidden" name="orderId" value={orderRecord.id} />
+                <button type="submit" className="btn-secondary inline-flex">Move back to Orders</button>
               </form>
             ) : null}
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (

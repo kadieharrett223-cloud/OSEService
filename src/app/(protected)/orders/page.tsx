@@ -133,7 +133,7 @@ export default async function OrdersPage({
         approved_qty,
         fulfilled_qty,
         legacy_item_code,
-        .source_system,
+        source_system,
         products (sku, canonical_name)
       `)
         .order("id", { ascending: true })

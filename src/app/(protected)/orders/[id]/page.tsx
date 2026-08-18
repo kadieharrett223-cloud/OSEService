@@ -19,6 +19,7 @@ import {
   overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
 } from "../actions";
+import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { ShipItemsForm } from "./ship-items-form";
 
 type OrderDetailRow = {
@@ -649,7 +650,7 @@ export default async function OrderDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
-  await requireUser();
+  const user = await requireUser();
   const supabase = getSupabaseAdmin();
   const { id } = await params;
   const { error, message } = await searchParams;
@@ -1462,12 +1463,14 @@ export default async function OrderDetailPage({
               <span className="rounded-full bg-[#f1f5f9] px-3 py-1 text-xs font-semibold text-[#475569]">{attachments.length} attached</span>
             </div>
             {hasOrderAttachmentsTable ? (
-              <form action={uploadOrderAttachmentAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_1fr_auto] md:items-end" encType="multipart/form-data">
+              <form action={uploadOrderAttachmentAction} className="mt-4 space-y-3" encType="multipart/form-data">
                 <input type="hidden" name="order_id" value={orderRecord.id} />
-                <label className="text-xs font-semibold text-[#64748b]">Files<input type="file" name="attachments" multiple required className="mt-1 block w-full text-sm" /></label>
-                <label className="text-xs font-semibold text-[#64748b]">Document type<select name="document_type" defaultValue={orderRecord.fulfillment_method === "WILL_CALL" ? "PICKUP_RECEIPT" : "OTHER"} className="input mt-1"><option value="OTHER">Other</option><option value="BOL">BOL</option><option value="PACKING_LIST">Packing list</option><option value="PICKUP_RECEIPT">Pickup acknowledgment</option><option value="DRIVERS_LICENSE">Driver's license</option><option value="CUSTOMER_DOCUMENT">Customer document</option><option value="INSTALLATION">Installation</option><option value="PHOTO">Photo</option></select></label>
-                <label className="text-xs font-semibold text-[#64748b]">Note<input name="document_note" className="input mt-1" placeholder="Optional note" /></label>
-                <button type="submit" className="btn-primary">Upload</button>
+                <AttachmentDropzone uploadedBy={user.fullName ?? "Unknown"} />
+                <div className="grid gap-3 md:grid-cols-[180px_1fr_auto] md:items-end">
+                  <label className="text-xs font-semibold text-[#64748b]">Document type<select name="document_type" defaultValue={orderRecord.fulfillment_method === "WILL_CALL" ? "PICKUP_RECEIPT" : "OTHER"} className="input mt-1"><option value="OTHER">Other</option><option value="BOL">BOL</option><option value="PACKING_LIST">Packing list</option><option value="PICKUP_RECEIPT">Pickup acknowledgment</option><option value="DRIVERS_LICENSE">Driver's license</option><option value="CUSTOMER_DOCUMENT">Customer document</option><option value="INSTALLATION">Installation</option><option value="PHOTO">Photo</option></select></label>
+                  <label className="text-xs font-semibold text-[#64748b]">Note<input name="document_note" className="input mt-1" placeholder="Optional note" /></label>
+                  <button type="submit" className="btn-primary">Upload Files</button>
+                </div>
               </form>
             ) : <p className="mt-4 text-sm text-[#b45309]">Document storage is not available in the current schema.</p>}
             <div className="mt-5 grid gap-2 md:grid-cols-2">

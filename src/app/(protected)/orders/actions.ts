@@ -507,6 +507,46 @@ export async function updateOrderFulfillmentMethodAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Fulfillment+method+updated`);
 }
 
+export async function updateOrderOperationsAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const warehouseState = getString(formData, "warehouse_state");
+  const fulfillmentMethod = getString(formData, "fulfillment_method");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || !["ORDERS", "IN_WAREHOUSE"].includes(warehouseState ?? "") || !["SHIP", "WILL_CALL"].includes(fulfillmentMethod ?? "")) {
+    redirect(`/orders/${orderId ?? ""}?error=Invalid+order+operations+selection`);
+  }
+
+  const { data: lines, error: linesError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, warehouse_status, fulfillment_status, fulfilled_qty, approved_qty")
+    .eq("shipping_order_id", orderId);
+  if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
+
+  const openLines = (lines ?? []).filter((line) =>
+    Number(line.fulfilled_qty ?? 0) <= 0
+    && Number(line.approved_qty ?? 0) > 0
+    && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()),
+  );
+  const targetStatuses = warehouseState === "IN_WAREHOUSE"
+    ? { approval_status: "APPROVED", warehouse_status: "IN_WAREHOUSE", fulfillment_status: "PENDING" }
+    : { approval_status: "APPROVED", warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" };
+  const { error: lineUpdateError } = openLines.length
+    ? await adminClient.from("shipping_order_lines").update(targetStatuses).eq("shipping_order_id", orderId).in("id", openLines.map((line) => line.id))
+    : { error: null };
+  if (lineUpdateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineUpdateError.message)}`);
+
+  const { error: methodError } = await adminClient.from("shipping_orders").update({ fulfillment_method: fulfillmentMethod } as never).eq("id", orderId);
+  if (methodError) redirect(`/orders/${orderId}?error=${encodeURIComponent(methodError.message)}`);
+
+  await recalculateProductQueues(openLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  await writeOrderActivity(adminClient, orderId, "ORDER_OPERATIONS_UPDATED", { warehouse_state: warehouseState, fulfillment_method: fulfillmentMethod });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/inventory");
+  redirect(`/orders/${orderId}?message=Order+operations+updated`);
+}
+
 export async function addOrderNoteAction(formData: FormData) {
   const user = await requireUser();
   const orderId = formData.get("orderId")?.toString();

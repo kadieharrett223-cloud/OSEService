@@ -12,12 +12,10 @@ import {
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
   moveOrderLineBackToOrdersAction,
-  moveOrderBackToOrdersAction,
-  moveOrderToWarehouseAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
-  updateOrderFulfillmentMethodAction,
+  updateOrderOperationsAction,
   overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
 } from "../actions";
@@ -1231,11 +1229,11 @@ export default async function OrderDetailPage({
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
               {hasOpenWarehouseItems ? (
-                <form action={moveOrderBackToOrdersAction}>
-                  <input type="hidden" name="orderId" value={orderRecord.id} />
-                  <button type="submit" className="rounded-full bg-[#fff7e6] px-2.5 py-1 text-[#b45309] underline decoration-dotted underline-offset-2">In Warehouse · Move back to Orders</button>
-                </form>
-              ) : null}
+                  <form action={moveOrderBackToOrdersAction}>
+                    <input type="hidden" name="orderId" value={orderRecord.id} />
+                    <button type="submit" className="rounded-full bg-[#fff7e6] px-2.5 py-1 text-[#b45309] underline decoration-dotted underline-offset-2">In Warehouse · Move back to Orders</button>
+                  </form>
+                ) : null}
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
               <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">Priority: {highestPriority(orderLines.map((line) => line.priority))}</span>
               <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-[#3730a3]">Fulfillment: {orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call" : "Ship"}</span>
@@ -1253,24 +1251,19 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap gap-2">
             <ShipItemsForm orderId={orderRecord.id} items={shipReadyItems} />
             {shippingOrderColumnSet.has("fulfillment_method") ? (
-              <form action={updateOrderFulfillmentMethodAction} className="flex items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
+              <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
+                <label htmlFor="warehouse_state" className="text-xs font-semibold text-[#64748b]">Warehouse</label>
+                <select id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                  <option value="ORDERS">Orders</option>
+                  <option value="IN_WAREHOUSE">In Warehouse</option>
+                </select>
                 <label htmlFor="fulfillment_method" className="text-xs font-semibold text-[#64748b]">Fulfillment</label>
                 <select id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
                   <option value="SHIP">Ship</option>
                   <option value="WILL_CALL">Will Call</option>
                 </select>
                 <button type="submit" className="btn-secondary text-xs">Save</button>
-              </form>
-            ) : null}
-            {orderLines.some((line) =>
-              Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
-              && line.fulfillment_status !== "FULFILLED"
-              && !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED"].includes(String(line.warehouse_status ?? "").toUpperCase()),
-            ) ? (
-              <form action={moveOrderToWarehouseAction}>
-                <input type="hidden" name="orderId" value={orderRecord.id} />
-                <button type="submit" className="btn-primary inline-flex">Move to Warehouse</button>
               </form>
             ) : null}
             {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (

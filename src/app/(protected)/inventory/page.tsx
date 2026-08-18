@@ -343,6 +343,20 @@ export default async function InventoryPage({
     if (!operationalSkuByProduct.has(alias.product_id)) operationalSkuByProduct.set(alias.product_id, candidate);
   }
 
+  const demandSkuCountsByProduct = new Map<string, Map<string, number>>();
+  for (const line of dedupedQueueLineRows) {
+    if (!line.product_id || !isOpenQueueLine(line) || !line.legacy_item_code) continue;
+    const candidate = line.legacy_item_code.trim().replace(/\s*\(deleted\)\s*$/i, "").toUpperCase();
+    if (!candidate || /^\d+$/.test(candidate)) continue;
+    const counts = demandSkuCountsByProduct.get(line.product_id) ?? new Map<string, number>();
+    counts.set(candidate, (counts.get(candidate) ?? 0) + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)));
+    demandSkuCountsByProduct.set(line.product_id, counts);
+  }
+  for (const [productId, counts] of demandSkuCountsByProduct) {
+    const preferred = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
+    if (preferred) operationalSkuByProduct.set(productId, preferred);
+  }
+
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
     (row) => row.product_id,
@@ -454,12 +468,13 @@ export default async function InventoryPage({
     const displaySku = operationalSkuByProduct.get(product.id) ?? product.sku ?? "—";
     const canonicalKey = canonicalSkuKey(displaySku) || canonicalSkuKey(product.sku) || product.id;
     const { manufacturer, title } = splitProductTitle(product.canonical_name);
+    const preferredDemandSku = demandSkuCountsByProduct.has(product.id) ? displaySku : null;
 
     const group = canonicalGroups.get(canonicalKey) ?? {
       productId: product.id,
       productIds: [],
       sku: displaySku,
-      productName: title || "Unnamed Product",
+      productName: preferredDemandSku ?? title ?? "Unnamed Product",
       storedName: product.canonical_name ?? "",
       manufacturer,
       group: UNSORTED_GROUP,

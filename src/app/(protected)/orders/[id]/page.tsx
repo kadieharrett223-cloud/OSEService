@@ -1454,7 +1454,7 @@ export default async function OrderDetailPage({
             </div>
           </section>
 
-          <section className="order-last rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="documents">
+          <section className="order-last mt-6 rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="documents">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-[#111827]">Documents</h2>
@@ -1478,7 +1478,7 @@ export default async function OrderDetailPage({
                 <div key={attachment!.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm">
                   {attachment!.signedUrl && attachment!.mime_type?.startsWith("image/") ? <a href={attachment!.signedUrl} target="_blank" rel="noreferrer" className="shrink-0"><img src={attachment!.signedUrl} alt={attachment!.file_name ?? "Order document"} className="h-16 w-20 rounded border border-[#dbe3ee] object-cover" /></a> : <div className="flex h-16 w-20 shrink-0 items-center justify-center rounded border border-[#dbe3ee] bg-white text-xs font-semibold text-[#64748b]">FILE</div>}
                   <div className="min-w-0 flex-1"><p className="truncate font-semibold text-[#1f2937]">{attachment!.file_name}</p><p className="text-xs text-[#64748b]">{attachment!.document_type ?? "OTHER"}{attachment!.is_restricted ? " · Restricted" : ""}{attachment!.note ? ` · ${attachment!.note}` : ""}</p></div>
-                  {attachment!.signedUrl ? <a href={attachment!.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary shrink-0 text-xs">View</a> : null}
+                  {attachment!.signedUrl ? <a href={attachment!.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary shrink-0 text-xs">View document</a> : null}
                   <form action={deleteOrderAttachmentAction}><input type="hidden" name="order_id" value={orderRecord.id} /><input type="hidden" name="attachment_id" value={attachment!.id} /><button type="submit" className="btn-ghost shrink-0 text-xs">Delete</button></form>
                 </div>
               ))}

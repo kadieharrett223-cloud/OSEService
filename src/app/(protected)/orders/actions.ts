@@ -896,9 +896,10 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
 export async function deleteOrderAttachmentAction(formData: FormData) {
   const orderId = getString(formData, "order_id");
   const attachmentId = getString(formData, "attachment_id");
+  const deleteIntent = getString(formData, "delete_intent");
   const adminClient = getSupabaseAdmin();
 
-  if (!orderId || !attachmentId) {
+  if (!orderId || !attachmentId || deleteIntent !== "DELETE_ATTACHMENT") {
     redirect(`/orders/${orderId ?? ""}`);
   }
 

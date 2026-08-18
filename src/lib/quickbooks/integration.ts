@@ -800,6 +800,62 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   };
 }
 
+async function syncQuickbooksFirstPaymentDates(
+  connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
+  accessToken: string,
+) {
+  const supabase = getSupabaseAdmin();
+  const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
+  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true };
+
+  const paymentsByInvoiceId = new Map<string, string>();
+  const pageSize = 200;
+  for (let page = 0; page < 50; page += 1) {
+    const payload = await fetchQuickbooksQuery({
+      apiBase: getQuickbooksApiBase(connection.environment),
+      realmId: connection.realm_id,
+      accessToken,
+      query: `select * from Payment startposition ${page * pageSize + 1} maxresults ${pageSize}`,
+    });
+    const batch = ((payload.QueryResponse as Record<string, unknown> | undefined)?.Payment ?? []) as Array<Record<string, unknown>>;
+    if (batch.length === 0) break;
+
+    for (const payment of batch) {
+      const paymentDate = typeof payment.TxnDate === "string" ? payment.TxnDate : null;
+      if (!paymentDate) continue;
+      const lines = Array.isArray(payment.Line) ? payment.Line : [];
+      for (const rawLine of lines) {
+        if (!rawLine || typeof rawLine !== "object") continue;
+        const linked = (rawLine as { LinkedTxn?: unknown[] }).LinkedTxn;
+        if (!Array.isArray(linked)) continue;
+        for (const rawTxn of linked) {
+          if (!rawTxn || typeof rawTxn !== "object") continue;
+          const txn = rawTxn as { TxnId?: unknown; TxnType?: unknown };
+          if (txn.TxnType !== "Invoice" || typeof txn.TxnId !== "string") continue;
+          const existing = paymentsByInvoiceId.get(txn.TxnId);
+          if (!existing || Date.parse(paymentDate) < Date.parse(existing)) paymentsByInvoiceId.set(txn.TxnId, paymentDate);
+        }
+      }
+    }
+
+    if (batch.length < pageSize) break;
+  }
+
+  const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
+  const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));
+  const updates = [...paymentsByInvoiceId.entries()]
+    .map(([qboInvoiceId, firstPaymentAt]) => ({ invoiceId: invoiceIdByQboId.get(qboInvoiceId), firstPaymentAt }))
+    .filter((row): row is { invoiceId: string; firstPaymentAt: string } => Boolean(row.invoiceId));
+
+  const results = await Promise.all(updates.map((row) => supabase
+    .from("shipping_orders")
+    .update({ first_payment_at: row.firstPaymentAt } as never)
+    .eq("source_invoice_id", row.invoiceId)));
+  const failed = results.find((result) => result.error)?.error;
+  if (failed) throw new Error(failed.message);
+  return { paymentsProcessed: paymentsByInvoiceId.size, ordersUpdated: updates.length, skipped: false };
+}
+
 export async function syncQuickbooksInvoices() {
   const supabase = getSupabaseAdmin();
   const connection = await loadConnectionForSync();
@@ -807,6 +863,7 @@ export async function syncQuickbooksInvoices() {
   try {
     const accessToken = await ensureAccessToken(connection);
     const result = await syncQuickbooksSnapshots(connection, accessToken);
+    await syncQuickbooksFirstPaymentDates(connection, accessToken);
 
     const { error } = await supabase
       .from("quickbooks_connections")

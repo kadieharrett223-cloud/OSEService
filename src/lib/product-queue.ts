@@ -11,14 +11,7 @@ type QueueLine = {
   fulfillment_status: string | null;
   priority: string | null;
   queue_position_override: number | null;
-  shipping_orders?: { created_at: string | null } | null;
-};
-
-const priorityRank: Record<string, number> = {
-  CRITICAL: 0,
-  HIGH: 1,
-  NORMAL: 2,
-  LOW: 3,
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null } | null;
 };
 
 function isActiveQueueLine(line: QueueLine) {
@@ -34,9 +27,11 @@ export async function recalculateProductQueues(productIds: string[]) {
   if (uniqueProductIds.length === 0) return { productsUpdated: 0, linesUpdated: 0 };
 
   const supabase = getSupabaseAdmin();
+  const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
+  const shippingOrderPaymentField = firstPaymentColumnError ? "" : ", first_payment_at";
   const { data, error } = await supabase
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, shipping_orders(created_at)")
+    .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, shipping_orders(created_at${shippingOrderPaymentField})`)
     .in("product_id", uniqueProductIds);
 
   if (error) throw new Error(error.message);
@@ -63,12 +58,15 @@ export async function recalculateProductQueues(productIds: string[]) {
         if (leftOverride !== rightOverride) return leftOverride - rightOverride;
       }
 
-      const priorityDifference = (priorityRank[String(left.priority ?? "NORMAL").toUpperCase()] ?? 2)
-        - (priorityRank[String(right.priority ?? "NORMAL").toUpperCase()] ?? 2);
-      if (priorityDifference !== 0) return priorityDifference;
+      const leftPaymentDate = Date.parse(String(left.shipping_orders?.first_payment_at ?? ""));
+      const rightPaymentDate = Date.parse(String(right.shipping_orders?.first_payment_at ?? ""));
+      const leftHasPayment = Number.isFinite(leftPaymentDate);
+      const rightHasPayment = Number.isFinite(rightPaymentDate);
+      if (leftHasPayment !== rightHasPayment) return leftHasPayment ? -1 : 1;
+      if (leftHasPayment && leftPaymentDate !== rightPaymentDate) return leftPaymentDate - rightPaymentDate;
 
-      const leftDate = Date.parse(String(left.shipping_orders?.created_at ?? "")) || 0;
-      const rightDate = Date.parse(String(right.shipping_orders?.created_at ?? "")) || 0;
+      const leftDate = Date.parse(String(left.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
+      const rightDate = Date.parse(String(right.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
       if (leftDate !== rightDate) return leftDate - rightDate;
       return left.id.localeCompare(right.id);
     });

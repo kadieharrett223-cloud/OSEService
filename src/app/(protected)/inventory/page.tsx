@@ -61,6 +61,7 @@ type QueueLine = {
   shipping_orders?: {
     id: string;
     created_at?: string | null;
+    first_payment_at?: string | null;
     order_number?: string | null;
     legacy_customer_name: string | null;
     qbo_invoices?: {
@@ -128,6 +129,7 @@ type InventoryViewRow = {
     status: string;
     orderId: string;
     orderCreatedAt: string | null;
+    firstPaymentAt: string | null;
   }>;
 };
 
@@ -229,6 +231,9 @@ export default async function InventoryPage({
   const q = String(params.q ?? "").trim().toLowerCase();
   const mapError = String(params.mapError ?? "").trim();
   const mapMessage = String(params.mapMessage ?? "").trim();
+  const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
+  const firstPaymentColumnAvailable = !firstPaymentColumnError;
+  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
 
   const [
     productsResult,
@@ -264,6 +269,7 @@ export default async function InventoryPage({
         shipping_orders (
           id,
           created_at,
+          ${shippingOrderPaymentField}
           order_number,
           legacy_customer_name,
           qbo_invoices (
@@ -449,6 +455,7 @@ export default async function InventoryPage({
       status: formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
       orderCreatedAt: line.shipping_orders?.created_at ?? null,
+      firstPaymentAt: line.shipping_orders?.first_payment_at ?? null,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];
@@ -555,12 +562,15 @@ export default async function InventoryPage({
       const customerQueue = group.customerQueue
         .slice()
         .sort((left, right) => {
-            const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-            const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-            if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
-          const priorityRank: Record<string, number> = { Critical: 0, High: 1, Normal: 2, Low: 3 };
-          const priorityDifference = (priorityRank[left.priority] ?? 2) - (priorityRank[right.priority] ?? 2);
-          if (priorityDifference !== 0) return priorityDifference;
+          const leftPaymentAt = Date.parse(left.firstPaymentAt ?? "");
+          const rightPaymentAt = Date.parse(right.firstPaymentAt ?? "");
+          const leftHasPayment = Number.isFinite(leftPaymentAt);
+          const rightHasPayment = Number.isFinite(rightPaymentAt);
+          if (leftHasPayment !== rightHasPayment) return leftHasPayment ? -1 : 1;
+          if (leftHasPayment && leftPaymentAt !== rightPaymentAt) return leftPaymentAt - rightPaymentAt;
+          const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+          const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+          if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
           const leftPosition = left.position === "—" ? Number.MAX_SAFE_INTEGER : Number(left.position);
           const rightPosition = right.position === "—" ? Number.MAX_SAFE_INTEGER : Number(right.position);
           return leftPosition - rightPosition;

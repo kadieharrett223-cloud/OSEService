@@ -18,6 +18,7 @@ type CustomerQueueItem = {
   expectedAvailability: string;
   status: string;
   orderId: string;
+  firstPaymentAt: string | null;
 };
 
 type CustomerDemandDropdownProps = {
@@ -164,6 +165,7 @@ export function CustomerDemandDropdown({
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
+                    <div className="mt-1 text-[#64748b]">First Paid: {item.firstPaymentAt ? new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not recorded"}</div>
                   </div>
                   <div className="text-[#475569]">
                     {item.shippedQty > 0 ? (

@@ -133,12 +133,44 @@ export default async function OrdersPage({
     .eq("status", "OPEN");
   const manualMappingSkus = new Set((manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase()));
 
-  const { data: orders, error } = await supabase
-    .from("shipping_orders")
-    .select(ordersSelect)
-    .order("created_at", { ascending: false });
+  const [{ data: orders, error }, { data: directLines, error: directLinesError }] = await Promise.all([
+    supabase
+      .from("shipping_orders")
+      .select(ordersSelect)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("shipping_order_lines")
+      .select(`
+        id,
+        shipping_order_id,
+        product_id,
+        approval_status,
+        warehouse_status,
+        fulfillment_status,
+        priority,
+        ordered_qty,
+        approved_qty,
+        fulfilled_qty,
+        legacy_item_code,
+        source_system,
+        products (sku, canonical_name)
+      `),
+  ]);
 
-  const allOrders = (orders ?? []) as unknown as OrderSummary[];
+  const directLinesByOrder = new Map<string, OrderSummary["shipping_order_lines"]>();
+  for (const line of (directLines ?? []) as Array<{ shipping_order_id?: string; [key: string]: unknown }>) {
+    if (!line.shipping_order_id) continue;
+    directLinesByOrder.set(line.shipping_order_id, [
+      ...(directLinesByOrder.get(line.shipping_order_id) ?? []),
+      line as unknown as NonNullable<OrderSummary["shipping_order_lines"]>[number],
+    ]);
+  }
+
+  const allOrders = ((orders ?? []) as unknown as OrderSummary[]).map((order) => ({
+    ...order,
+    shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
+  }));
+  const ordersLoadError = error ?? directLinesError;
 
   function operationalLines(order: OrderSummary) {
     return (order.shipping_order_lines ?? []).filter((line) => {
@@ -311,7 +343,7 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {error ? (
+        {ordersLoadError ? (
           <div className="mb-4 rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
             Unable to load orders right now.
           </div>

@@ -71,7 +71,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
       status: "RESOLVED",
       resolution_note: note || null,
       resolved_at: new Date().toISOString(),
-      resolved_by: resolvedBy,
+      ...(resolvedBy ? { resolved_by: resolvedBy } : {}),
     })
     .eq("id", queueId);
 
@@ -146,7 +146,7 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
       status: "RESOLVED",
       resolution_note: note || null,
       resolved_at: new Date().toISOString(),
-      resolved_by: resolvedBy,
+      ...(resolvedBy ? { resolved_by: resolvedBy } : {}),
     })
     .eq("status", "OPEN")
     .eq("source_sku", sourceSku);

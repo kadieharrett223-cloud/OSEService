@@ -3,6 +3,9 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type OrderSummary = {
   id: string;
   order_number: string | null;

@@ -668,8 +668,8 @@ export async function markOrderLineShippedAction(formData: FormData) {
       carrier: carrier || null,
       tracking_number: trackingNumber,
       reason: "Order line marked shipped",
-      fulfillment_type: "SHIPMENT",
       source_event_key: crypto.randomUUID(),
+      ...((await loadTableColumnSet(adminClient, "fulfillments", ["fulfillment_type"])).has("fulfillment_type") ? { fulfillment_type: "SHIPMENT" } : {}),
     } as never);
 
   if (fulfillmentInsertError) {
@@ -710,9 +710,13 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
 
+  const orderColumns = await loadTableColumnSet(adminClient, "shipping_orders", ["fulfillment_method"]);
+  if (!orderColumns.has("fulfillment_method")) redirect(`/orders/${orderId}?error=Will+Call+schema+is+not+available+yet`);
   const { data: rawOrder } = await adminClient.from("shipping_orders").select("id,fulfillment_method").eq("id", orderId).maybeSingle();
   const order = rawOrder as unknown as { id: string; fulfillment_method?: string | null } | null;
   if (!order || order.fulfillment_method !== "WILL_CALL") redirect(`/orders/${orderId}?error=Order+is+not+set+to+Will+Call`);
+  const documentColumns = await loadTableColumnSet(adminClient, "order_attachments", ["document_type", "is_restricted"]);
+  if (!documentColumns.has("document_type") || !documentColumns.has("is_restricted")) redirect(`/orders/${orderId}?error=Pickup+document+schema+is+not+available+yet`);
   const { data: rawDocuments, error: documentError } = await adminClient.from("order_attachments").select("id,document_type,is_restricted").eq("shipping_order_id", orderId).in("id", [acknowledgmentDocumentId, driversLicenseDocumentId]);
   const documents = rawDocuments as unknown as Array<{ id: string; document_type?: string | null; is_restricted?: boolean | null }> | null;
   if (documentError || documents?.length !== 2 || !documents.some((doc) => doc.id === acknowledgmentDocumentId && doc.document_type === "PICKUP_RECEIPT") || !documents.some((doc) => doc.id === driversLicenseDocumentId && doc.document_type === "DRIVERS_LICENSE" && doc.is_restricted)) redirect(`/orders/${orderId}?error=Required+pickup+documents+are+missing+or+not+restricted`);
@@ -866,9 +870,9 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
       file_size: file.size,
       mime_type: file.type || null,
       uploaded_by: user.id,
-      document_type: documentType,
-      note: documentNote,
-      is_restricted: documentType === "DRIVERS_LICENSE",
+      ...((await loadTableColumnSet(adminClient, "order_attachments", ["document_type"])).has("document_type") ? { document_type: documentType } : {}),
+      ...((await loadTableColumnSet(adminClient, "order_attachments", ["note"])).has("note") ? { note: documentNote } : {}),
+      ...((await loadTableColumnSet(adminClient, "order_attachments", ["is_restricted"])).has("is_restricted") ? { is_restricted: documentType === "DRIVERS_LICENSE" } : {}),
     } as never);
 
     if (dbError) {

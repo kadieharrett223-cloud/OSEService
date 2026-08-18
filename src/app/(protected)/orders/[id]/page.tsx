@@ -1401,7 +1401,8 @@ export default async function OrderDetailPage({
                           </div>
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
-                            <h3 className="text-sm font-semibold text-[#111827]">Ship</h3>
+                            <h3 className="text-sm font-semibold text-[#111827]">{orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call Pickup" : "Ship"}</h3>
+                            {orderRecord.fulfillment_method === "WILL_CALL" ? <p className="mt-1 text-xs text-[#92400e]">Complete Pickup below after the pickup person, acknowledgment, and restricted driver's-license documents are attached.</p> : null}
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
                               {(fulfillmentsByLine[line.id] ?? []).length === 0 ? <p className="text-[#64748b]">No shipments yet.</p> : (fulfillmentsByLine[line.id] ?? []).map((shipment) => (
                                 <div key={shipment.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs">

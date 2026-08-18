@@ -417,6 +417,19 @@ export async function updateOrderScheduleAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Schedule+updated`);
 }
 
+export async function updateOrderFulfillmentMethodAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const method = getString(formData, "fulfillment_method");
+  if (!orderId || !["SHIP", "WILL_CALL"].includes(method ?? "")) redirect(`/orders/${orderId ?? ""}?error=Invalid+fulfillment+method`);
+  const adminClient = getSupabaseAdmin();
+  const { error } = await adminClient.from("shipping_orders").update({ fulfillment_method: method } as never).eq("id", orderId);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  await writeOrderActivity(adminClient, orderId, "ORDER_FULFILLMENT_METHOD_UPDATED", { fulfillment_method: method });
+  revalidatePath("/orders"); revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Fulfillment+method+updated`);
+}
+
 export async function addOrderNoteAction(formData: FormData) {
   const user = await requireUser();
   const orderId = formData.get("orderId")?.toString();
@@ -655,8 +668,9 @@ export async function markOrderLineShippedAction(formData: FormData) {
       carrier: carrier || null,
       tracking_number: trackingNumber,
       reason: "Order line marked shipped",
+      fulfillment_type: "SHIPMENT",
       source_event_key: crypto.randomUUID(),
-    });
+    } as never);
 
   if (fulfillmentInsertError) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentInsertError.message)}`);
@@ -683,6 +697,48 @@ export async function markOrderLineShippedAction(formData: FormData) {
   revalidatePath("/schedule");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Shipment+recorded`);
+}
+
+export async function markOrderLinesPickedUpAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const selectedIds = formData.getAll("line_id").map(String).filter(Boolean);
+  const pickupPersonName = getString(formData, "pickup_person_name")?.trim();
+  const acknowledgmentDocumentId = getString(formData, "acknowledgment_document_id");
+  const driversLicenseDocumentId = getString(formData, "drivers_license_document_id");
+  const notes = getString(formData, "pickup_notes")?.trim() || null;
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
+
+  const { data: rawOrder } = await adminClient.from("shipping_orders").select("id,fulfillment_method").eq("id", orderId).maybeSingle();
+  const order = rawOrder as unknown as { id: string; fulfillment_method?: string | null } | null;
+  if (!order || order.fulfillment_method !== "WILL_CALL") redirect(`/orders/${orderId}?error=Order+is+not+set+to+Will+Call`);
+  const { data: rawDocuments, error: documentError } = await adminClient.from("order_attachments").select("id,document_type,is_restricted").eq("shipping_order_id", orderId).in("id", [acknowledgmentDocumentId, driversLicenseDocumentId]);
+  const documents = rawDocuments as unknown as Array<{ id: string; document_type?: string | null; is_restricted?: boolean | null }> | null;
+  if (documentError || documents?.length !== 2 || !documents.some((doc) => doc.id === acknowledgmentDocumentId && doc.document_type === "PICKUP_RECEIPT") || !documents.some((doc) => doc.id === driversLicenseDocumentId && doc.document_type === "DRIVERS_LICENSE" && doc.is_restricted)) redirect(`/orders/${orderId}?error=Required+pickup+documents+are+missing+or+not+restricted`);
+
+  const { data: lines, error: lineError } = await adminClient.from("shipping_order_lines").select("id,product_id,approved_qty,fulfilled_qty,fulfillment_status").eq("shipping_order_id", orderId).in("id", selectedIds);
+  if (lineError || lines?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Pickup+line+selection+is+invalid`);
+  const pickedAt = new Date().toISOString();
+  const pickupId = crypto.randomUUID();
+  for (const line of lines ?? []) {
+    const pickupQty = getPositiveNumber(formData, `pickup_qty_${line.id}`);
+    const remaining = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    if (pickupQty <= 0 || pickupQty > remaining) redirect(`/orders/${orderId}?error=Pickup+quantity+is+invalid`);
+    const nextQty = Number(line.fulfilled_qty ?? 0) + pickupQty;
+    const complete = nextQty >= Number(line.approved_qty ?? 0);
+    const update = await adminClient.from("shipping_order_lines").update({ fulfilled_qty: nextQty, fulfillment_status: complete ? "FULFILLED" : "PARTIALLY_FULFILLED", warehouse_status: complete ? "FULFILLED" : "PARTIALLY_FULFILLED" }).eq("id", line.id);
+    if (update.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(update.error.message)}`);
+    const event = await adminClient.from("fulfillments").insert({ shipping_order_line_id: line.id, fulfilled_qty: pickupQty, fulfilled_at: pickedAt, reason: "Order line picked up", source_event_key: `PICKUP:${pickupId}:${line.id}`, fulfillment_type: "PICKUP", actor_id: user.id } as never);
+    if (event.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(event.error.message)}`);
+    if (line.product_id) await recalculateProductQueues([line.product_id]);
+  }
+  const pickupTable = adminClient.from("order_pickups") as any;
+  const pickup = await pickupTable.insert({ id: pickupId, shipping_order_id: orderId, pickup_person_name: pickupPersonName, pickup_at: pickedAt, completed_by: user.id, notes, acknowledgment_document_id: acknowledgmentDocumentId, drivers_license_document_id: driversLicenseDocumentId });
+  if (pickup.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(pickup.error.message)}`);
+  await writeOrderActivity(adminClient, orderId, "ORDER_PICKUP_COMPLETED", { pickup_id: pickupId, pickup_person_name: pickupPersonName, line_count: lines?.length ?? 0, notes });
+  revalidatePath("/orders"); revalidatePath("/inventory"); revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Pickup+completed`);
 }
 
 export async function shipSelectedOrderLinesAction(formData: FormData) {
@@ -772,6 +828,8 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "order_id");
   const files = formData.getAll("attachments").filter((item): item is File => item instanceof File && item.size > 0);
+  const documentType = getString(formData, "document_type")?.trim() || "OTHER";
+  const documentNote = getString(formData, "document_note")?.trim() || null;
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || files.length === 0) {
@@ -808,6 +866,9 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
       file_size: file.size,
       mime_type: file.type || null,
       uploaded_by: user.id,
+      document_type: documentType,
+      note: documentNote,
+      is_restricted: documentType === "DRIVERS_LICENSE",
     } as never);
 
     if (dbError) {

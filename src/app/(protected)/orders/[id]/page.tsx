@@ -9,11 +9,13 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addOrderNoteAction,
   deleteOrderAttachmentAction,
+  markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
   moveOrderToWarehouseAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
+  updateOrderFulfillmentMethodAction,
   overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
 } from "../actions";
@@ -27,6 +29,7 @@ type OrderDetailRow = {
   review_status: string | null;
   promised_ship_date: string | null;
   shipping_method: string | null;
+  fulfillment_method?: "SHIP" | "WILL_CALL" | null;
   notes: string | null;
   tracking_number: string | null;
   carrier: string | null;
@@ -105,6 +108,9 @@ type OrderAttachmentEntry = {
   file_size: number | null;
   mime_type: string | null;
   created_at: string;
+  document_type?: string | null;
+  note?: string | null;
+  is_restricted?: boolean | null;
 };
 
 type FulfillmentEntry = {
@@ -116,6 +122,7 @@ type FulfillmentEntry = {
   carrier: string | null;
   tracking_number: string | null;
   reason: string | null;
+  fulfillment_type?: "SHIPMENT" | "PICKUP" | null;
 };
 
 type InvoiceItem = {
@@ -541,6 +548,7 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
   if (columnSet.has("notes")) columns.push("notes");
   if (columnSet.has("tracking_number")) columns.push("tracking_number");
   if (columnSet.has("carrier")) columns.push("carrier");
+  if (columnSet.has("fulfillment_method")) columns.push("fulfillment_method");
 
   columns.push(
     "customers (company_name, full_name, email, phone)",
@@ -657,9 +665,14 @@ export default async function OrderDetailPage({
     "notes",
     "tracking_number",
     "carrier",
+    "fulfillment_method",
   ]);
-  const hasOrderAttachmentsTable = (await loadTableColumnSet(supabase, "order_attachments", ["id"])).has("id");
+  const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);
+  const fulfillmentColumns = await loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]);
+  const hasOrderAttachmentsTable = attachmentColumns.has("id");
   const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet);
+  const attachmentSelect = ["id", "file_name", "file_path", "file_size", "mime_type", "created_at", ...["document_type", "note", "is_restricted"].filter((column) => attachmentColumns.has(column))].join(", ");
+  const fulfillmentSelect = ["id", "shipping_order_line_id", "fulfilled_qty", "fulfilled_at", "shipment_number", "carrier", "tracking_number", "reason", ...(fulfillmentColumns.has("fulfillment_type") ? ["fulfillment_type"] : [])].join(", ");
 
   const [{ data: order }, { data: activityRows }, attachmentResult, { data: containerRows }] = await Promise.all([
     supabase
@@ -676,7 +689,7 @@ export default async function OrderDetailPage({
     hasOrderAttachmentsTable
       ? supabase
           .from("order_attachments")
-          .select("id, file_name, file_path, file_size, mime_type, created_at")
+          .select(attachmentSelect)
           .eq("shipping_order_id", id)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as OrderAttachmentEntry[] }),
@@ -751,12 +764,12 @@ export default async function OrderDetailPage({
   const { data: fulfillmentRows } = lineIds.length
     ? await supabase
         .from("fulfillments")
-        .select("id, shipping_order_line_id, fulfilled_qty, fulfilled_at, shipment_number, carrier, tracking_number, reason")
+        .select(fulfillmentSelect)
         .in("shipping_order_line_id", lineIds)
         .order("fulfilled_at", { ascending: false })
     : { data: [] };
 
-  const fulfillments = (fulfillmentRows ?? []) as FulfillmentEntry[];
+  const fulfillments = (fulfillmentRows ?? []) as unknown as FulfillmentEntry[];
   const fulfillmentsByLine = fulfillments.reduce<Record<string, FulfillmentEntry[]>>((acc, fulfillment) => {
     if (!acc[fulfillment.shipping_order_line_id]) {
       acc[fulfillment.shipping_order_line_id] = [];
@@ -1213,6 +1226,7 @@ export default async function OrderDetailPage({
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
               <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">Priority: {highestPriority(orderLines.map((line) => line.priority))}</span>
+              <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-[#3730a3]">Fulfillment: {orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call" : "Ship"}</span>
               <span className="text-[#64748b]">Order date {formatDate(orderRecord.created_at)}</span>
             </div>
             <p className="mt-2 truncate text-sm text-[#64748b]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
@@ -1225,6 +1239,17 @@ export default async function OrderDetailPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            {shippingOrderColumnSet.has("fulfillment_method") ? (
+              <form action={updateOrderFulfillmentMethodAction} className="flex items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
+                <input type="hidden" name="orderId" value={orderRecord.id} />
+                <label htmlFor="fulfillment_method" className="text-xs font-semibold text-[#64748b]">Fulfillment</label>
+                <select id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                  <option value="SHIP">Ship</option>
+                  <option value="WILL_CALL">Will Call</option>
+                </select>
+                <button type="submit" className="btn-secondary text-xs">Save</button>
+              </form>
+            ) : null}
             {orderLines.some((line) =>
               Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
               && line.fulfillment_status !== "FULFILLED"
@@ -1430,6 +1455,46 @@ export default async function OrderDetailPage({
                 </div>
               </div>
             </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="documents">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-[#111827]">Documents</h2>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Private order paperwork, pickup records, photos, and installation documents.</p>
+              </div>
+              <span className="rounded-full bg-[#f1f5f9] px-3 py-1 text-xs font-semibold text-[#475569]">{attachments.length} attached</span>
+            </div>
+            {hasOrderAttachmentsTable ? (
+              <form action={uploadOrderAttachmentAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_180px_1fr_auto] md:items-end" encType="multipart/form-data">
+                <input type="hidden" name="order_id" value={orderRecord.id} />
+                <label className="text-xs font-semibold text-[#64748b]">Files<input type="file" name="attachments" multiple required className="mt-1 block w-full text-sm" /></label>
+                <label className="text-xs font-semibold text-[#64748b]">Document type<select name="document_type" defaultValue={orderRecord.fulfillment_method === "WILL_CALL" ? "PICKUP_RECEIPT" : "OTHER"} className="input mt-1"><option value="OTHER">Other</option><option value="BOL">BOL</option><option value="PACKING_LIST">Packing list</option><option value="PICKUP_RECEIPT">Pickup acknowledgment</option><option value="DRIVERS_LICENSE">Driver's license</option><option value="CUSTOMER_DOCUMENT">Customer document</option><option value="INSTALLATION">Installation</option><option value="PHOTO">Photo</option></select></label>
+                <label className="text-xs font-semibold text-[#64748b]">Note<input name="document_note" className="input mt-1" placeholder="Optional note" /></label>
+                <button type="submit" className="btn-primary">Upload</button>
+              </form>
+            ) : <p className="mt-4 text-sm text-[#b45309]">Document storage is not available in the current schema.</p>}
+            <div className="mt-5 grid gap-2 md:grid-cols-2">
+              {attachmentLinks.filter(Boolean).map((attachment) => (
+                <div key={attachment!.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3 text-sm">
+                  <div className="min-w-0"><p className="truncate font-semibold text-[#1f2937]">{attachment!.file_name}</p><p className="text-xs text-[#64748b]">{attachment!.document_type ?? "OTHER"}{attachment!.is_restricted ? " · Restricted" : ""}{attachment!.note ? ` · ${attachment!.note}` : ""}</p></div>
+                  {attachment!.signedUrl ? <a href={attachment!.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary shrink-0 text-xs">View</a> : null}
+                  <form action={deleteOrderAttachmentAction}><input type="hidden" name="order_id" value={orderRecord.id} /><input type="hidden" name="attachment_id" value={attachment!.id} /><button type="submit" className="btn-ghost shrink-0 text-xs">Delete</button></form>
+                </div>
+              ))}
+            </div>
+            {orderRecord.fulfillment_method === "WILL_CALL" ? (
+              <details className="mt-5 rounded-xl border border-[#f5c26b] bg-[#fffbeb] p-4">
+                <summary className="cursor-pointer font-semibold text-[#92400e]">Complete Pickup</summary>
+                <form action={markOrderLinesPickedUpAction} className="mt-4 space-y-3">
+                  <input type="hidden" name="orderId" value={orderRecord.id} />
+                  <div className="grid gap-3 md:grid-cols-2"><input name="pickup_person_name" required className="input" placeholder="Pickup person's full name" /><input name="pickup_notes" className="input" placeholder="Optional pickup notes" /></div>
+                  <div className="grid gap-3 md:grid-cols-2"><select name="acknowledgment_document_id" required className="input"><option value="">Pickup acknowledgment document</option>{attachments.filter(item => item.document_type === "PICKUP_RECEIPT").map(item => <option key={item.id} value={item.id}>{item.file_name}</option>)}</select><select name="drivers_license_document_id" required className="input"><option value="">Restricted driver's license document</option>{attachments.filter(item => item.document_type === "DRIVERS_LICENSE" && item.is_restricted).map(item => <option key={item.id} value={item.id}>{item.file_name}</option>)}</select></div>
+                  <div className="space-y-2"><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#92400e]">Items and quantities</p>{orderLines.filter(line => Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)).map(line => <label key={line.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#f5c26b] bg-white p-2 text-sm"><span>{line.products?.sku ?? "Item"} · remaining {Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))}</span><input name={`pickup_qty_${line.id}`} type="number" min="0" max={Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))} step="1" defaultValue="0" className="w-24 rounded border border-[#d1d5db] px-2 py-1" /><input type="hidden" name="line_id" value={line.id} /></label>)}</div>
+                  <button type="submit" className="btn-primary">Mark Picked Up</button>
+                </form>
+              </details>
+            ) : null}
           </section>
 
           <div className="grid gap-6 xl:grid-cols-2">

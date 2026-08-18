@@ -1343,6 +1343,9 @@ export default async function OrderDetailPage({
                 <div>
                   {itemStockSummary.map(({ item, supply, needed, inStock, status }) => {
                     const line = item.shippingLine;
+                    const shipmentLine = line ?? (item.productId
+                      ? orderLines.find((candidate) => candidate.product_id === item.productId && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0) && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase())) ?? null
+                      : null);
                     const remainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
@@ -1354,7 +1357,7 @@ export default async function OrderDetailPage({
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
-                            {line ? <ShipmentSelectionCheckbox line={{ id: line.id, sku: item.sku ?? line.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock)) }} /> : null}
+                            {shipmentLine ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty: Math.max(0, Number(shipmentLine.approved_qty ?? 0) - Number(shipmentLine.fulfilled_qty ?? 0)), defaultQty: Math.max(1, Math.min(Math.max(0, Number(shipmentLine.approved_qty ?? 0) - Number(shipmentLine.fulfilled_qty ?? 0)), inStock)), inStock }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>

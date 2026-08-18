@@ -88,8 +88,9 @@ async function fetchRowsByIds<T>(
   fetchChunk: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ) {
   const rows: T[] = [];
-  for (let index = 0; index < ids.length; index += 500) {
-    const { data, error } = await fetchChunk(ids.slice(index, index + 500));
+  const chunkSize = 100;
+  for (let index = 0; index < ids.length; index += chunkSize) {
+    const { data, error } = await fetchChunk(ids.slice(index, index + chunkSize));
     if (error) throw new Error(error.message);
     rows.push(...(data ?? []));
   }

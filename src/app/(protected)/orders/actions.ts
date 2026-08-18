@@ -823,15 +823,11 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const pickupPersonName = getString(formData, "pickup_person_name")?.trim();
   const acknowledgmentDocumentId = getString(formData, "acknowledgment_document_id");
   const driversLicenseDocumentId = getString(formData, "drivers_license_document_id");
+  const pickupDate = getString(formData, "pickup_date")?.trim();
   const notes = getString(formData, "pickup_notes")?.trim() || null;
   const adminClient = getSupabaseAdmin();
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
 
-  const orderColumns = await loadTableColumnSet(adminClient, "shipping_orders", ["fulfillment_method"]);
-  if (!orderColumns.has("fulfillment_method")) redirect(`/orders/${orderId}?error=Will+Call+schema+is+not+available+yet`);
-  const { data: rawOrder } = await adminClient.from("shipping_orders").select("id,fulfillment_method").eq("id", orderId).maybeSingle();
-  const order = rawOrder as unknown as { id: string; fulfillment_method?: string | null } | null;
-  if (!order || order.fulfillment_method !== "WILL_CALL") redirect(`/orders/${orderId}?error=Order+is+not+set+to+Will+Call`);
   const documentColumns = await loadTableColumnSet(adminClient, "order_attachments", ["document_type", "is_restricted"]);
   if (!documentColumns.has("document_type") || !documentColumns.has("is_restricted")) redirect(`/orders/${orderId}?error=Pickup+document+schema+is+not+available+yet`);
   const { data: rawDocuments, error: documentError } = await adminClient.from("order_attachments").select("id,document_type,is_restricted").eq("shipping_order_id", orderId).in("id", [acknowledgmentDocumentId, driversLicenseDocumentId]);
@@ -840,7 +836,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
 
   const { data: lines, error: lineError } = await adminClient.from("shipping_order_lines").select("id,product_id,approved_qty,fulfilled_qty,fulfillment_status").eq("shipping_order_id", orderId).in("id", selectedIds);
   if (lineError || lines?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Pickup+line+selection+is+invalid`);
-  const pickedAt = new Date().toISOString();
+  const pickedAt = pickupDate ? `${pickupDate}T12:00:00.000Z` : new Date().toISOString();
   const pickupId = crypto.randomUUID();
   for (const line of lines ?? []) {
     const pickupQty = getPositiveNumber(formData, `pickup_qty_${line.id}`);

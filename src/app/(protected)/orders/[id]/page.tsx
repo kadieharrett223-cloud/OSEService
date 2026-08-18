@@ -20,6 +20,7 @@ import {
   uploadOrderAttachmentAction,
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
+import { LineFulfillmentPanel } from "./line-fulfillment-panel";
 import { ShipItemsForm } from "./ship-items-form";
 
 type OrderDetailRow = {
@@ -1341,13 +1342,25 @@ export default async function OrderDetailPage({
                             )}
                           </span>
                         </summary>
-                        {line ? <div className="grid gap-4 border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4 xl:grid-cols-3">
+                        {line ? <div className="border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4">
+                          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#dbe3ee] bg-white px-3 py-2 text-sm font-semibold text-[#334155]">
+                            <span>FULFILLMENT · {item.sku ?? line.products?.sku ?? "Item"} · Qty {remainingQty}</span>
+                            <span className="text-[#94a3b8]">→</span>
+                            <span>{line.inventory_allocations?.[0]?.source_type === "CONTAINER" ? `Allocated: ${containerNumberById.get(line.inventory_allocations[0].container_id ?? "") ?? "Container"}` : line.inventory_allocations?.[0]?.source_type === "FLOOR" ? "Allocated: Warehouse" : "Allocated: Not assigned"}</span>
+                            <span className="text-[#94a3b8]">→</span>
+                            <span className={`rounded-full px-2 py-0.5 text-xs ${itemStatusClass(status)}`}>{status}</span>
+                            <span className="text-[#94a3b8]">→</span>
+                            <span>{orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call / Pickup" : "Ship"}</span>
+                          </div>
+                          <div className="grid gap-4 xl:grid-cols-2">
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
-                            <h3 className="text-sm font-semibold text-[#111827]">Inventory Source</h3>
+                            <h3 className="text-sm font-semibold text-[#111827]">1. Inventory / Allocation</h3>
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
                               <div><span className="font-medium text-[#64748b]">Item:</span> {item.sku ?? "—"} · {item.description}</div>
-                              <div><span className="font-medium text-[#64748b]">Current source:</span> {supply.comingFrom}</div>
+                              <div><span className="font-medium text-[#64748b]">Currently assigned:</span> {line.inventory_allocations?.[0]?.source_type === "CONTAINER" ? containerNumberById.get(line.inventory_allocations[0].container_id ?? "") ?? "Container" : line.inventory_allocations?.[0]?.source_type === "FLOOR" ? "Warehouse / Floor" : "Not assigned"}</div>
+                              <div><span className="font-medium text-[#64748b]">Suggested source:</span> {supply.suggestion?.container_number ?? (supply.suggestion?.source_type === "WAREHOUSE" ? "Warehouse / Floor" : "None")}</div>
                               <div><span className="font-medium text-[#64748b]">Availability:</span> {supply.availability}</div>
+                              <div><span className="font-medium text-[#64748b]">Assigned:</span> {assignedQty} of {remainingQty}</div>
                             </div>
                             {(line.inventory_allocations?.length ?? 0) === 0 && supply.suggestion && supply.suggestion.source_type !== "UNASSIGNED" ? (
                               <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
@@ -1398,31 +1411,7 @@ export default async function OrderDetailPage({
                             ) : null}
                           </div>
 
-                          <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
-                            <h3 className="text-sm font-semibold text-[#111827]">{orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call Pickup" : "Ship"}</h3>
-                            {orderRecord.fulfillment_method === "WILL_CALL" ? <p className="mt-1 text-xs text-[#92400e]">Complete Pickup below after the pickup person, acknowledgment, and restricted driver's-license documents are attached.</p> : null}
-                            <div className="mt-3 space-y-2 text-sm text-[#374151]">
-                              {(fulfillmentsByLine[line.id] ?? []).length === 0 ? <p className="text-[#64748b]">No shipments yet.</p> : (fulfillmentsByLine[line.id] ?? []).map((shipment) => (
-                                <div key={shipment.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs">
-                                  <p>{formatDateTime(shipment.fulfilled_at)} · Qty {shipment.fulfilled_qty ?? 0}</p>
-                                  <p>{shipment.carrier ?? "Carrier pending"} · {shipment.tracking_number ?? "Tracking pending"}</p>
-                                </div>
-                              ))}
-                            </div>
-                            <form action={markOrderLineShippedAction} className="mt-4 grid gap-2">
-                              <input type="hidden" name="orderId" value={orderRecord.id} />
-                              <input type="hidden" name="lineId" value={line.id} />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Qty</label>
-                              <input name="ship_qty" type="number" min="1" max={remainingQty} step="1" defaultValue={remainingQty > 0 ? 1 : 0} className="input" />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Tracking</label>
-                              <input name="tracking_number" className="input" placeholder="Tracking #" required />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Carrier</label>
-                              <input name="carrier" className="input" placeholder="Carrier" />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Ship date</label>
-                              <input name="shipment_date" type="date" className="input" required />
-                              <button className="btn-primary" type="submit" disabled={remainingQty <= 0}>Mark Shipped</button>
-                            </form>
-                          </div>
+                          <LineFulfillmentPanel orderId={orderRecord.id} lineId={line.id} sku={item.sku ?? line.products?.sku ?? "Item"} remainingQty={remainingQty} queuePosition={line.queue_position_start} fulfillmentMethod={orderRecord.fulfillment_method === "WILL_CALL" ? "WILL_CALL" : "SHIP"} attachments={attachments} history={fulfillmentsByLine[line.id] ?? []} />
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
                             <h3 className="text-sm font-semibold text-[#111827]">Item Note</h3>
@@ -1433,8 +1422,8 @@ export default async function OrderDetailPage({
                               <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />
                               <button className="btn-secondary" type="submit">Save Note</button>
                             </form>
-                            <div className="mt-5 border-t border-[#eef2f7] pt-4">
-                              <h3 className="text-sm font-semibold text-[#111827]">Product Queue Position</h3>
+                            <details className="mt-5 border-t border-[#eef2f7] pt-4">
+                              <summary className="cursor-pointer text-sm font-semibold text-[#111827]">Advanced · Queue position</summary>
                               <p className="mt-1 text-xs text-[#64748b]">Automatic position: {line.queue_position_start ?? "—"} · Units: {line.queue_position_count ?? 0}</p>
                               <form action={overrideProductQueuePositionAction} className="mt-3 grid gap-2">
                                 <input type="hidden" name="lineId" value={line.id} />
@@ -1444,8 +1433,9 @@ export default async function OrderDetailPage({
                                 <input name="queue_position_reason" defaultValue={line.queue_position_override_reason ?? ""} className="input" placeholder="Customer was promised priority" required />
                                 <button className="btn-secondary" type="submit">Reorder Product Queue</button>
                               </form>
-                            </div>
+                            </details>
                             <p className="mt-3 text-xs text-[#64748b]">Line activity events: {lineHistoryCount}</p>
+                          </div>
                           </div>
                         </div> : null}
                       </details>

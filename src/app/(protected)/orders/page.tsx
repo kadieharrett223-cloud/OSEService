@@ -6,6 +6,20 @@ import { moveOrderToWarehouseAction } from "./actions";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+async function fetchAllRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const pageSize = 1000;
+  const allRows: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    allRows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) break;
+  }
+  return allRows;
+}
+
 type OrderSummary = {
   id: string;
   order_number: string | null;
@@ -133,15 +147,20 @@ export default async function OrdersPage({
     .eq("status", "OPEN");
   const manualMappingSkus = new Set((manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase()));
 
-  const [{ data: orders, error }, { data: directLines, error: directLinesError }] = await Promise.all([
-    supabase
-      .from("shipping_orders")
-      .select(ordersSelect)
-      .order("created_at", { ascending: false })
-      .range(0, 9999),
-    supabase
-      .from("shipping_order_lines")
-      .select(`
+  let orders: unknown[] = [];
+  let directLines: unknown[] = [];
+  let ordersLoadError: Error | null = null;
+  try {
+    [orders, directLines] = await Promise.all([
+      fetchAllRows((from, to) => supabase
+        .from("shipping_orders")
+        .select(ordersSelect)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to)),
+      fetchAllRows((from, to) => supabase
+        .from("shipping_order_lines")
+        .select(`
         id,
         shipping_order_id,
         product_id,
@@ -156,11 +175,15 @@ export default async function OrdersPage({
         source_system,
         products (sku, canonical_name)
       `)
-      .range(0, 9999),
-  ]);
+        .order("id", { ascending: true })
+        .range(from, to)),
+    ];
+  } catch (error) {
+    ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
+  }
 
   const directLinesByOrder = new Map<string, OrderSummary["shipping_order_lines"]>();
-  for (const line of (directLines ?? []) as Array<{ shipping_order_id?: string; [key: string]: unknown }>) {
+  for (const line of directLines as Array<{ shipping_order_id?: string; [key: string]: unknown }>) {
     if (!line.shipping_order_id) continue;
     directLinesByOrder.set(line.shipping_order_id, [
       ...(directLinesByOrder.get(line.shipping_order_id) ?? []),
@@ -168,11 +191,10 @@ export default async function OrdersPage({
     ]);
   }
 
-  const allOrders = ((orders ?? []) as unknown as OrderSummary[]).map((order) => ({
+  const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
     ...order,
     shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
   }));
-  const ordersLoadError = error ?? directLinesError;
 
   function operationalLines(order: OrderSummary) {
     return (order.shipping_order_lines ?? []).filter((line) => {

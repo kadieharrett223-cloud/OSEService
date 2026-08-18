@@ -4,6 +4,18 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
+async function fetchAllRows<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) break;
+  }
+  return rows;
+}
+
 export async function GET() {
   await requireUser();
   const supabase = getSupabaseAdmin();
@@ -16,8 +28,13 @@ export async function GET() {
     }
   })();
 
-  const [{ data: orders, error: ordersError }, { data: lines, error: linesError }, { data: manualRows, error: manualError }, { count: orderCount, error: orderCountError }, { count: lineCount, error: lineCountError }] = await Promise.all([
-    supabase
+  let orders: unknown[] = [];
+  let lines: unknown[] = [];
+  let manualRows: Array<{ source_sku: string | null }> = [];
+  let queryError: Error | null = null;
+  try {
+    [orders, lines, manualRows] = await Promise.all([
+      fetchAllRows((from, to) => supabase
       .from("shipping_orders")
       .select(`
         id,
@@ -42,17 +59,24 @@ export async function GET() {
         )
       `)
       .order("created_at", { ascending: false })
-      .range(0, 9999),
-    supabase
+      .order("id", { ascending: true })
+      .range(from, to)),
+      fetchAllRows((from, to) => supabase
       .from("shipping_order_lines")
       .select("id, shipping_order_id, product_id, legacy_item_code, approval_status, warehouse_status, fulfillment_status, ordered_qty, approved_qty, fulfilled_qty, products(sku, canonical_name)")
-      .range(0, 9999),
-    supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
+      .order("id", { ascending: true })
+      .range(from, to)),
+      supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
+    ]);
+  } catch (error) {
+    queryError = error instanceof Error ? error : new Error("Unable to load diagnostic data");
+  }
+  const [{ count: orderCount }, { count: lineCount }] = await Promise.all([
     supabase.from("shipping_orders").select("id", { count: "exact", head: true }),
     supabase.from("shipping_order_lines").select("id", { count: "exact", head: true }),
   ]);
 
-  const error = ordersError ?? linesError ?? manualError ?? orderCountError ?? lineCountError;
+  const error = queryError;
   if (error) {
     return NextResponse.json({
       deployedCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? "not-exposed",
@@ -61,9 +85,8 @@ export async function GET() {
     }, { status: 500 });
   }
 
-  const typedManualRows = (manualRows ?? []) as unknown as Array<{ source_sku: string | null }>;
-  const typedLines = (lines ?? []) as unknown as Array<Record<string, any>>;
-  const manualMappingSkus = new Set(typedManualRows.map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
+  const typedLines = lines as Array<Record<string, any>>;
+  const manualMappingSkus = new Set(manualRows.map((row) => String(row.source_sku ?? "").trim().toUpperCase()));
   const remaining = (line: { approved_qty?: number | null; ordered_qty?: number | null; fulfilled_qty?: number | null }) => Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
   const predicateReason = (order: {
     order_number?: string | null;
@@ -89,7 +112,7 @@ export async function GET() {
     return "not excluded by predicate";
   };
 
-  const parentOrders = (orders ?? []) as Array<{
+  const parentOrders = orders as Array<{
     id: string;
     order_number: string | null;
     shipping_order_lines?: Array<Record<string, unknown>>;

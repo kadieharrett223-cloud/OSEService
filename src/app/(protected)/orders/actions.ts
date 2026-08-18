@@ -941,12 +941,45 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=${encodeURIComponent(`${selectedLines.length} item${selectedLines.length === 1 ? "" : "s"} shipped`)}`);
 }
 
+export async function completeOrderShipmentAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const shipmentDate = getString(formData, "shipment_date");
+  const idempotencyKey = getString(formData, "idempotency_key");
+  const carrier = getString(formData, "carrier");
+  const trackingNumber = getString(formData, "tracking_number");
+  const notes = getString(formData, "shipment_notes");
+  const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || !shipmentDate || !idempotencyKey || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
+
+  const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
+  if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
+  const { data: shipmentId, error } = await adminClient.rpc("complete_order_shipment", {
+    p_order_id: orderId,
+    p_shipped_at: `${shipmentDate}T12:00:00.000Z`,
+    p_carrier: carrier || null,
+    p_tracking_number: trackingNumber || null,
+    p_notes: notes || null,
+    p_idempotency_key: idempotencyKey,
+    p_lines: lines,
+  } as never);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Shipment+completed`);
+}
+
 export async function uploadOrderAttachmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "order_id");
   const files = formData.getAll("attachments").filter((item): item is File => item instanceof File && item.size > 0);
   const documentType = getString(formData, "document_type")?.trim() || "OTHER";
   const documentNote = getString(formData, "document_note")?.trim() || null;
+  const shipmentId = getString(formData, "shipment_id");
   const adminClient = getSupabaseAdmin();
   const { data: accessUser } = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(user.id)
     ? await adminClient.from("access_users").select("id").eq("id", user.id).maybeSingle()
@@ -979,7 +1012,7 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
       redirect(`/orders/${orderId}?error=${encodeURIComponent(uploadError.message)}`);
     }
 
-    const { error: dbError } = await adminClient.from("order_attachments").insert({
+    const attachmentPayload = {
       shipping_order_id: orderId,
       file_path: storagePath,
       file_name: file.name,
@@ -989,7 +1022,9 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["document_type"])).has("document_type") ? { document_type: documentType } : {}),
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["note"])).has("note") ? { note: documentNote } : {}),
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["is_restricted"])).has("is_restricted") ? { is_restricted: documentType === "DRIVERS_LICENSE" } : {}),
-    } as never);
+      ...((shipmentId && (await loadTableColumnSet(adminClient, "order_attachments", ["shipment_id"])).has("shipment_id")) ? { shipment_id: shipmentId } : {}),
+    } as never;
+    const { error: dbError } = await adminClient.from("order_attachments").insert(attachmentPayload);
 
     if (dbError) redirect(`/orders/${orderId}?error=${encodeURIComponent(`Unable to save document metadata: ${dbError.message}`)}`);
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { markOrderLineShippedAction, markOrderLinesPickedUpAction } from "../actions";
+import { markOrderLinesPickedUpAction } from "../actions";
 
 type Attachment = {
   id: string;
@@ -61,15 +61,7 @@ export function LineFulfillmentPanel({
       </div>
 
       {mode === "SHIP" ? (
-        <form action={markOrderLineShippedAction} className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <input type="hidden" name="orderId" value={orderId} />
-          <input type="hidden" name="lineId" value={lineId} />
-          <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Qty<input name="ship_qty" type="number" min="1" max={remainingQty} defaultValue={remainingQty > 0 ? 1 : 0} className="input mt-1" required /></label>
-          <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Ship date<input name="shipment_date" type="date" defaultValue={today()} className="input mt-1" required /></label>
-          <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Carrier<input name="carrier" className="input mt-1" placeholder="UPS, FedEx, Freight" /></label>
-          <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b] xl:col-span-2">Tracking / PRO #<input name="tracking_number" className="input mt-1" placeholder="Tracking or PRO number" required /></label>
-          <button type="submit" className="btn-primary md:col-span-2 xl:col-span-5" disabled={remainingQty <= 0}>Mark Shipped</button>
-        </form>
+        <p className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">Create physical shipments from the <strong>Create Shipment</strong> button above Items. You can include multiple products and partial quantities in one shipment.</p>
       ) : (
         <form action={markOrderLinesPickedUpAction} className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <input type="hidden" name="orderId" value={orderId} />

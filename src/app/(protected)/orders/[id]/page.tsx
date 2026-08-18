@@ -21,7 +21,7 @@ import {
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
-import { ShipItemsForm } from "./ship-items-form";
+import { CreateShipmentForm } from "./create-shipment-form";
 
 type OrderDetailRow = {
   id: string;
@@ -125,6 +125,16 @@ type FulfillmentEntry = {
   tracking_number: string | null;
   reason: string | null;
   fulfillment_type?: "SHIPMENT" | "PICKUP" | null;
+};
+
+type ShipmentEntry = {
+  id: string;
+  shipment_number: string;
+  shipped_at: string;
+  carrier: string | null;
+  tracking_number: string | null;
+  notes: string | null;
+  lines?: Array<{ quantity: number | null; shipping_order_line_id: string; shipping_order_lines?: { products?: { sku: string | null } | null } | null }>;
 };
 
 type InvoiceItem = {
@@ -665,13 +675,15 @@ export default async function OrderDetailPage({
     "fulfillment_method",
   ]);
   const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);
+  const shipmentColumns = await loadTableColumnSet(supabase, "order_shipments", ["id"]);
+  const hasOrderShipmentsTables = shipmentColumns.has("id");
   const fulfillmentColumns = await loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]);
   const hasOrderAttachmentsTable = attachmentColumns.has("id");
   const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet);
   const attachmentSelect = ["id", "file_name", "file_path", "file_size", "mime_type", "created_at", ...["document_type", "note", "is_restricted"].filter((column) => attachmentColumns.has(column))].join(", ");
   const fulfillmentSelect = ["id", "shipping_order_line_id", "fulfilled_qty", "fulfilled_at", "shipment_number", "carrier", "tracking_number", "reason", ...(fulfillmentColumns.has("fulfillment_type") ? ["fulfillment_type"] : [])].join(", ");
 
-  const [{ data: order }, { data: activityRows }, attachmentResult, { data: containerRows }] = await Promise.all([
+  const [{ data: order }, { data: activityRows }, attachmentResult, { data: containerRows }, { data: shipmentRows }] = await Promise.all([
     supabase
       .from("shipping_orders")
       .select(shippingOrderSelect)
@@ -695,11 +707,15 @@ export default async function OrderDetailPage({
       .select("id, container_number, lifecycle_status, entered_date, eta_confirmed_date, eta_estimated_date")
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
+    hasOrderShipmentsTables
+      ? supabase.from("order_shipments").select("id, shipment_number, shipped_at, carrier, tracking_number, notes, order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku)))").eq("shipping_order_id", id).order("shipped_at", { ascending: false })
+      : Promise.resolve({ data: [] as ShipmentEntry[] }),
   ]);
 
   const orderRecord = order as OrderDetailRow | null;
   const activities = (activityRows ?? []) as OrderActivityEntry[];
   const attachments = (attachmentResult.data ?? []) as OrderAttachmentEntry[];
+  const shipments = (shipmentRows ?? []) as unknown as ShipmentEntry[];
 
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
@@ -774,6 +790,26 @@ export default async function OrderDetailPage({
     acc[fulfillment.shipping_order_line_id].push(fulfillment);
     return acc;
   }, {});
+
+  const loggedShipmentNumbers = new Set(shipments.map((shipment) => shipment.shipment_number));
+  const historicalShipments = new Map<string, ShipmentEntry>();
+  for (const line of orderLines) {
+    for (const fulfillment of fulfillmentsByLine[line.id] ?? []) {
+      if (fulfillment.fulfillment_type === "PICKUP" || !fulfillment.shipment_number || loggedShipmentNumbers.has(fulfillment.shipment_number)) continue;
+      const entry = historicalShipments.get(fulfillment.shipment_number) ?? {
+        id: `historical-${fulfillment.shipment_number}`,
+        shipment_number: `Historical Fulfillment · ${fulfillment.shipment_number}`,
+        shipped_at: fulfillment.fulfilled_at,
+        carrier: fulfillment.carrier,
+        tracking_number: fulfillment.tracking_number,
+        notes: "Historical fulfillment record; physical shipment grouping was not available.",
+        lines: [],
+      };
+      entry.lines?.push({ quantity: fulfillment.fulfilled_qty, shipping_order_line_id: line.id, shipping_order_lines: { products: { sku: line.products?.sku ?? null } } });
+      historicalShipments.set(fulfillment.shipment_number, entry);
+    }
+  }
+  const shipmentLog = [...shipments, ...historicalShipments.values()];
 
   const noteCount = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED").length;
 
@@ -1195,6 +1231,14 @@ export default async function OrderDetailPage({
       remainingQty: Math.max(0, Number(item.shippingLine!.approved_qty ?? 0) - Number(item.shippingLine!.fulfilled_qty ?? 0)),
     }));
 
+  const shipmentSelectionLines = orderLines.map((line) => ({
+    id: line.id,
+    sku: line.products?.sku ?? line.legacy_item_code ?? "Item",
+    label: line.products?.canonical_name ?? "Order item",
+    remainingQty: Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)),
+    fulfilledQty: Number(line.fulfilled_qty ?? 0),
+  }));
+
   const hasOpenWarehouseItems = orderLines.some((line) =>
     ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())
     && Number(line.fulfilled_qty ?? 0) <= 0
@@ -1244,7 +1288,7 @@ export default async function OrderDetailPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <ShipItemsForm orderId={orderRecord.id} items={shipReadyItems} />
+            {hasOrderShipmentsTables ? <CreateShipmentForm orderId={orderRecord.id} lines={shipmentSelectionLines} /> : null}
             {shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
@@ -1443,6 +1487,31 @@ export default async function OrderDetailPage({
                   })}
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="shipments">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold text-[#111827]">Shipments</h2>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Each completed physical shipment remains an independent record.</p>
+              </div>
+              <span className="rounded-full bg-[#f1f5f9] px-3 py-1 text-xs font-semibold text-[#475569]">{shipmentLog.length} records</span>
+            </div>
+            <div className="mt-4 space-y-3">
+              {shipmentLog.map((shipment) => (
+                <div key={shipment.id} className="rounded-xl border border-[#e2e8f0] bg-[#fafbfc] p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h3 className="font-semibold text-[#111827]">{shipment.shipment_number}</h3><p className="mt-1 text-xs text-[#64748b]">{formatDateTime(shipment.shipped_at)} · SHIPPED</p></div>
+                    <p className="text-sm font-semibold text-[#334155]">{shipment.carrier ?? "Carrier pending"}{shipment.tracking_number ? ` · ${shipment.tracking_number}` : ""}</p>
+                  </div>
+                  <ul className="mt-3 list-disc pl-5 text-sm text-[#475569]">{(shipment.lines ?? []).map((line) => <li key={line.shipping_order_line_id}>{line.shipping_order_lines?.products?.sku ?? "Item"} × {line.quantity ?? 0}</li>)}</ul>
+                  {shipment.notes ? <p className="mt-2 text-xs text-[#64748b]">Notes: {shipment.notes}</p> : null}
+                  {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex btn-secondary text-xs">View Tracking</a> : null}
+                  {hasOrderAttachmentsTable && !shipment.id.startsWith("historical-") ? <form action={uploadOrderAttachmentAction} className="mt-3 flex flex-wrap items-end gap-2" encType="multipart/form-data"><input type="hidden" name="order_id" value={orderRecord.id} /><input type="hidden" name="shipment_id" value={shipment.id} /><label className="text-xs font-semibold text-[#64748b]">Shipment documents<input type="file" name="attachments" multiple className="mt-1 block text-xs" /></label><select name="document_type" className="input text-xs"><option value="BOL">BOL</option><option value="PACKING_LIST">Packing list</option><option value="PHOTO">Photo</option><option value="OTHER">Other</option></select><button type="submit" className="btn-secondary text-xs">Attach</button></form> : null}
+                </div>
+              ))}
+              {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}
             </div>
           </section>
 

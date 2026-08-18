@@ -1228,12 +1228,6 @@ export default async function OrderDetailPage({
             <h1 className="mt-1 truncate text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"} <span className="font-normal text-[#64748b]">— Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span></h1>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
-              {hasOpenWarehouseItems ? (
-                  <form action={moveOrderBackToOrdersAction}>
-                    <input type="hidden" name="orderId" value={orderRecord.id} />
-                    <button type="submit" className="rounded-full bg-[#fff7e6] px-2.5 py-1 text-[#b45309] underline decoration-dotted underline-offset-2">In Warehouse · Move back to Orders</button>
-                  </form>
-                ) : null}
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
               <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">Priority: {highestPriority(orderLines.map((line) => line.priority))}</span>
               <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-[#3730a3]">Fulfillment: {orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call" : "Ship"}</span>

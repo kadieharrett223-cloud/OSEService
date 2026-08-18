@@ -60,6 +60,7 @@ type QueueLine = {
   legacy_item_code?: string | null;
   shipping_orders?: {
     id: string;
+    created_at?: string | null;
     order_number?: string | null;
     legacy_customer_name: string | null;
     qbo_invoices?: {
@@ -126,6 +127,7 @@ type InventoryViewRow = {
     expectedAvailability: string;
     status: string;
     orderId: string;
+    orderCreatedAt: string | null;
   }>;
 };
 
@@ -261,6 +263,7 @@ export default async function InventoryPage({
         legacy_item_code,
         shipping_orders (
           id,
+          created_at,
           order_number,
           legacy_customer_name,
           qbo_invoices (
@@ -445,6 +448,7 @@ export default async function InventoryPage({
           : "Waiting for inventory",
       status: formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
+      orderCreatedAt: line.shipping_orders?.created_at ?? null,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];
@@ -551,6 +555,9 @@ export default async function InventoryPage({
       const customerQueue = group.customerQueue
         .slice()
         .sort((left, right) => {
+            const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+            const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+            if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
           const priorityRank: Record<string, number> = { Critical: 0, High: 1, Normal: 2, Low: 3 };
           const priorityDifference = (priorityRank[left.priority] ?? 2) - (priorityRank[right.priority] ?? 2);
           if (priorityDifference !== 0) return priorityDifference;

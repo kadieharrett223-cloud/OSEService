@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createFocusedProductMappingAction, resolveProductMappingForSkuAction } from "./actions";
+import { ProductPicker } from "./product-picker";
 
 type SearchParams = Promise<{ message?: string; error?: string; source_sku?: string; source_description?: string; order_id?: string }>;
 type MappingQueueRow = {
@@ -109,10 +110,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
                   <form id={`mapping-${entry.id}`} action={resolveProductMappingForSkuAction} className="space-y-2">
                     <input type="hidden" name="sourceSku" value={entry.source_sku} />
                     {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
-                    <select name="productId" required className="input min-w-[280px]">
-                      <option value="">Choose canonical product</option>
-                      {(products ?? []).map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.canonical_name}</option>)}
-                    </select>
+                    <ProductPicker products={products ?? []} />
                     <input name="resolutionNote" placeholder="Reason / evidence (optional)" className="input min-w-[280px]" />
                   </form>
                 </td>
@@ -131,7 +129,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
           <form action={createFocusedProductMappingAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
             <input type="hidden" name="sourceSku" value={focusedSourceSku} />
             {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
-            <label className="text-xs font-semibold text-[#64748b]">Select the matching inventory item<select name="productId" required className="input mt-1"><option value="">Choose inventory product</option>{(products ?? []).map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.canonical_name}</option>)}</select></label>
+            <label className="text-xs font-semibold text-[#64748b]">Select the matching inventory item<ProductPicker products={products ?? []} /></label>
             <button type="submit" className="btn-primary">Save Mapping</button>
           </form>
         </section>

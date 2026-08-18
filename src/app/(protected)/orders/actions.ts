@@ -835,6 +835,9 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
   const documentType = getString(formData, "document_type")?.trim() || "OTHER";
   const documentNote = getString(formData, "document_note")?.trim() || null;
   const adminClient = getSupabaseAdmin();
+  const { data: accessUser } = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(user.id)
+    ? await adminClient.from("access_users").select("id").eq("id", user.id).maybeSingle()
+    : { data: null };
 
   if (!orderId || files.length === 0) {
     redirect(`/orders/${orderId ?? ""}`);
@@ -869,15 +872,13 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
       file_name: file.name,
       file_size: file.size,
       mime_type: file.type || null,
-      uploaded_by: user.id,
+      uploaded_by: accessUser?.id ?? null,
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["document_type"])).has("document_type") ? { document_type: documentType } : {}),
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["note"])).has("note") ? { note: documentNote } : {}),
       ...((await loadTableColumnSet(adminClient, "order_attachments", ["is_restricted"])).has("is_restricted") ? { is_restricted: documentType === "DRIVERS_LICENSE" } : {}),
     } as never);
 
-    if (dbError) {
-      redirect(`/orders/${orderId}?error=${encodeURIComponent(dbError.message)}`);
-    }
+    if (dbError) redirect(`/orders/${orderId}?error=${encodeURIComponent(`Unable to save document metadata: ${dbError.message}`)}`);
   }
 
   await adminClient.from("audit_log").insert({

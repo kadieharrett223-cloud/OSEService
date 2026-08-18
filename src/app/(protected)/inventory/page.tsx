@@ -689,6 +689,12 @@ export default async function InventoryPage({
                         sortOrder={row.sortOrder === Number.MAX_SAFE_INTEGER ? null : row.sortOrder}
                         groups={groupNames}
                       />
+                      <Link
+                        href={`/product-mappings?source_sku=${encodeURIComponent(row.sku)}&source_description=${encodeURIComponent(row.productName)}`}
+                        className="mt-2 inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]"
+                      >
+                        Map SKU
+                      </Link>
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.onFloor)}</td>
                     <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.openDemand)}</td>

@@ -21,7 +21,7 @@ import {
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
-import { CreateShipmentForm } from "./create-shipment-form";
+import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionComposer, ShipmentSelectionProvider } from "./shipment-selection";
 
 type OrderDetailRow = {
   id: string;
@@ -1231,14 +1231,6 @@ export default async function OrderDetailPage({
       remainingQty: Math.max(0, Number(item.shippingLine!.approved_qty ?? 0) - Number(item.shippingLine!.fulfilled_qty ?? 0)),
     }));
 
-  const shipmentSelectionLines = orderLines.map((line) => ({
-    id: line.id,
-    sku: line.products?.sku ?? line.legacy_item_code ?? "Item",
-    label: line.products?.canonical_name ?? "Order item",
-    remainingQty: Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)),
-    fulfilledQty: Number(line.fulfilled_qty ?? 0),
-  }));
-
   const hasOpenWarehouseItems = orderLines.some((line) =>
     ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())
     && Number(line.fulfilled_qty ?? 0) <= 0
@@ -1288,7 +1280,6 @@ export default async function OrderDetailPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {hasOrderShipmentsTables ? <CreateShipmentForm orderId={orderRecord.id} lines={shipmentSelectionLines} /> : null}
             {shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
@@ -1324,6 +1315,7 @@ export default async function OrderDetailPage({
 
       <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
         <div className="flex flex-col space-y-6">
+          <ShipmentSelectionProvider>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1333,6 +1325,7 @@ export default async function OrderDetailPage({
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
+                <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
               </div>
             </div>
 
@@ -1361,6 +1354,7 @@ export default async function OrderDetailPage({
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
+                            {line ? <ShipmentSelectionCheckbox line={{ id: line.id, sku: item.sku ?? line.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock)) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
@@ -1488,7 +1482,9 @@ export default async function OrderDetailPage({
                 </div>
               </div>
             </div>
+            <ShipmentSelectionComposer orderId={orderRecord.id} pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
           </section>
+          </ShipmentSelectionProvider>
 
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="shipments">
             <div className="flex flex-wrap items-start justify-between gap-3">

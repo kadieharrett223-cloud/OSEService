@@ -65,16 +65,27 @@ export async function createProductAliasAction(formData: FormData) {
 }
 
 export async function createProductAction(formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
 
   const sku = normalizeAliasSku(formData.get("sku"));
   const canonicalName = String(formData.get("canonical_name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim() || null;
+  const onFloorQtyRaw = String(formData.get("on_floor_qty") ?? "0").trim();
+  const inventoryGroup = String(formData.get("inventory_group") ?? "").trim() || null;
+  const sortOrderRaw = String(formData.get("inventory_sort_order") ?? "").trim();
 
   const supabase = await createClient();
 
   if (!sku || !canonicalName) {
     redirect("/inventory?mapError=SKU+and+product+name+are+required");
+  }
+
+  if (!/^\d+(\.\d+)?$/.test(onFloorQtyRaw) || Number(onFloorQtyRaw) < 0) {
+    redirect("/inventory?mapError=Starting+on+floor+quantity+must+be+zero+or+greater");
+  }
+
+  if (sortOrderRaw && !/^-?\d+$/.test(sortOrderRaw)) {
+    redirect("/inventory?mapError=Display+order+must+be+a+whole+number");
   }
 
   const { data: existingProduct, error: existingError } = await supabase
@@ -91,15 +102,35 @@ export async function createProductAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(`${sku} already exists in the product catalog.`)}`);
   }
 
-  const { error: insertError } = await supabase.from("products").insert({
+  const { data: createdProduct, error: insertError } = await supabase.from("products").insert({
     sku,
     canonical_name: canonicalName,
     description,
     status: "Active",
-  });
+    inventory_group: inventoryGroup,
+    inventory_sort_order: sortOrderRaw ? Number(sortOrderRaw) : null,
+  } as never).select("id").single();
 
   if (insertError) {
     redirect(`/inventory?mapError=${encodeURIComponent(insertError.message)}`);
+  }
+
+  const startingQty = Number(onFloorQtyRaw);
+  if (startingQty > 0 && createdProduct?.id) {
+    const { error: transactionError } = await getSupabaseAdmin().from("inventory_transactions").insert({
+      product_id: createdProduct.id,
+      bucket: "ON_FLOOR",
+      delta: startingQty,
+      before_qty: 0,
+      after_qty: startingQty,
+      reason: `Initial quantity entered by ${user.fullName ?? "user"}`,
+      source_type: "ADJUSTMENT",
+      source_event_key: `product-create:${createdProduct.id}`,
+    });
+
+    if (transactionError) {
+      redirect(`/inventory?mapError=${encodeURIComponent(`Product created, but starting quantity was not saved: ${transactionError.message}`)}`);
+    }
   }
 
   revalidatePath("/inventory");

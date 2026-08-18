@@ -50,6 +50,22 @@ export function AddProductModal({ createAction }: AddProductModalProps) {
                 <textarea id="add-product-description" name="description" className="input min-h-24 resize-y" placeholder="Additional product details" />
               </div>
 
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="add-product-quantity" className="label">Starting on-floor quantity</label>
+                  <input id="add-product-quantity" name="on_floor_qty" type="number" min="0" step="0.01" defaultValue="0" className="input" />
+                </div>
+                <div>
+                  <label htmlFor="add-product-group" className="label">Inventory group <span className="font-normal text-[#94a3b8]">(optional)</span></label>
+                  <input id="add-product-group" name="inventory_group" className="input" placeholder="e.g. Lifts" />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="add-product-sort-order" className="label">Display order <span className="font-normal text-[#94a3b8]">(optional)</span></label>
+                <input id="add-product-sort-order" name="inventory_sort_order" type="number" step="1" className="input" placeholder="Lower numbers appear first" />
+              </div>
+
               <div className="flex justify-end gap-2 border-t border-[#eef2f7] pt-4">
                 <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
                 <button type="submit" className="btn-primary">Create Product</button>

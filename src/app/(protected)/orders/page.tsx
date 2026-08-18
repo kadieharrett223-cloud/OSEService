@@ -87,12 +87,13 @@ async function fetchRowsByIds<T>(
   ids: string[],
   fetchChunk: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ) {
-  const rows: T[] = [];
   const chunkSize = 100;
-  for (let index = 0; index < ids.length; index += chunkSize) {
-    const { data, error } = await fetchChunk(ids.slice(index, index + chunkSize));
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
+  const chunks = Array.from({ length: Math.ceil(ids.length / chunkSize) }, (_, index) => ids.slice(index * chunkSize, (index + 1) * chunkSize));
+  const results = await Promise.all(chunks.map((chunk) => fetchChunk(chunk)));
+  const rows: T[] = [];
+  for (const result of results) {
+    if (result.error) throw new Error(result.error.message);
+    rows.push(...(result.data ?? []));
   }
   return rows;
 }

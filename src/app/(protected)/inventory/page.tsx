@@ -650,6 +650,21 @@ export default async function InventoryPage({
         </form>
       </section>
 
+      <nav aria-label="Inventory groups" className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Groups</span>
+          {sections.map((section) => (
+            <a
+              key={section.name}
+              href={`#group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              className="rounded-full border border-[#dbe3ee] bg-[#f8fafc] px-3 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#93c5fd] hover:bg-[#eff6ff]"
+            >
+              {section.name} <span className="font-normal text-[#64748b]">({section.rows.length})</span>
+            </a>
+          ))}
+        </div>
+      </nav>
+
       {mapError ? <p className="rounded-md border border-[#fecaca] bg-[#fff1f2] p-3 text-sm text-[#991b1b]">{mapError}</p> : null}
       {mapMessage ? <p className="rounded-md border border-[#bbf7d0] bg-[#f0fdf4] p-3 text-sm text-[#166534]">{mapMessage}</p> : null}
 
@@ -686,7 +701,7 @@ export default async function InventoryPage({
               ) : (
                 sections.map((section) => (
                   <Fragment key={section.name}>
-                    <tr className="border-b border-[#e2e8f0] bg-[#f8fafc]">
+                    <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
                       <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
                         {section.name}
                         <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>

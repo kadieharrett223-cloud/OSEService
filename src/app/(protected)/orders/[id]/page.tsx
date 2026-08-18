@@ -11,6 +11,7 @@ import {
   deleteOrderAttachmentAction,
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
+  moveOrderLineBackToOrdersAction,
   moveOrderToWarehouseAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
@@ -1389,6 +1390,13 @@ export default async function OrderDetailPage({
                               <p className="text-xs text-[#64748b]">Container status and ETA are read automatically from Containers.</p>
                               <button className="btn-secondary" type="submit" disabled={remainingQty <= 0}>Save Assignment</button>
                             </form>
+                            {["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) && Number(line.fulfilled_qty ?? 0) <= 0 ? (
+                              <form action={moveOrderLineBackToOrdersAction} className="mt-3">
+                                <input type="hidden" name="orderId" value={orderRecord.id} />
+                                <input type="hidden" name="lineId" value={line.id} />
+                                <button className="btn-secondary w-full" type="submit">Move back to Orders</button>
+                              </form>
+                            ) : null}
                           </div>
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">

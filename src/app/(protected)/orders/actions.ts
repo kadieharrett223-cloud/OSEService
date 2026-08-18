@@ -248,6 +248,48 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Order+moved+to+warehouse`);
 }
 
+export async function moveOrderLineBackToOrdersAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+order+line+reference`);
+
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, warehouse_status, fulfillment_status, approved_qty, fulfilled_qty")
+    .eq("id", lineId)
+    .eq("shipping_order_id", orderId)
+    .maybeSingle();
+
+  if (lineError || !line) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+
+  if (Number(line.fulfilled_qty ?? 0) > 0 || ["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) {
+    redirect(`/orders/${orderId}?error=Shipped+or+closed+items+cannot+be+moved+back+to+Orders`);
+  }
+
+  if (!["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())) {
+    redirect(`/orders/${orderId}?error=This+item+is+not+currently+in+the+warehouse+queue`);
+  }
+
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update({ approval_status: "APPROVED", warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" })
+    .eq("id", lineId)
+    .eq("shipping_order_id", orderId);
+
+  if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+
+  if (line.product_id) await recalculateProductQueues([line.product_id]);
+  await writeOrderActivity(adminClient, orderId, "ORDER_LINE_MOVED_BACK_TO_ORDERS", { line_id: lineId });
+
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/inventory");
+  redirect(`/orders/${orderId}?message=Item+moved+back+to+Orders`);
+}
+
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");

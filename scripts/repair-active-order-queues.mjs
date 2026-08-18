@@ -8,9 +8,8 @@ const normalize = value => String(value ?? "").trim().toUpperCase();
 const remaining = row => Math.max(0, Number(row.approved_qty ?? row.ordered_qty ?? 0) - Number(row.fulfilled_qty ?? 0));
 const heldSkus = new Set(["HLCJ-6", "JVCJ-6", "000185", "10000006", "HPU1103", "2PCFHD-12"]);
 const heldInvoice = "126037";
-const priorityRank = { CRITICAL: 0, HIGH: 1, NORMAL: 2, LOW: 3 };
 const [{ data: lines, error: lineError }, { data: queue, error: queueError }] = await Promise.all([
-  db.from("shipping_order_lines").select("id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,priority,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,created_at,products(sku),shipping_orders(order_number,source_system,created_at,customers(company_name,full_name))"),
+  db.from("shipping_order_lines").select("id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,priority,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,created_at,products(sku),shipping_orders(order_number,source_system,created_at,first_payment_at,customers(company_name,full_name))"),
   db.from("manual_product_mapping_queue").select("source_sku,status"),
 ]);
 if (lineError) throw new Error(lineError.message);
@@ -28,8 +27,12 @@ for (const [productId, productLines] of byProduct.entries()) {
     const hasLeft = Number.isFinite(leftOverride) && leftOverride > 0;
     const hasRight = Number.isFinite(rightOverride) && rightOverride > 0;
     if (hasLeft || hasRight) { if (!hasLeft) return 1; if (!hasRight) return -1; if (leftOverride !== rightOverride) return leftOverride - rightOverride; }
-    const priority = (priorityRank[normalize(left.priority)] ?? 2) - (priorityRank[normalize(right.priority)] ?? 2);
-    if (priority !== 0) return priority;
+    const leftPayment = Date.parse(String(left.shipping_orders?.first_payment_at ?? ""));
+    const rightPayment = Date.parse(String(right.shipping_orders?.first_payment_at ?? ""));
+    const leftHasPayment = Number.isFinite(leftPayment);
+    const rightHasPayment = Number.isFinite(rightPayment);
+    if (leftHasPayment !== rightHasPayment) return leftHasPayment ? -1 : 1;
+    if (leftHasPayment && leftPayment !== rightPayment) return leftPayment - rightPayment;
     const created = String(left.shipping_orders?.created_at ?? left.created_at ?? "").localeCompare(String(right.shipping_orders?.created_at ?? right.created_at ?? ""));
     return created || left.id.localeCompare(right.id);
   });

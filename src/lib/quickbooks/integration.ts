@@ -863,7 +863,7 @@ export async function syncQuickbooksInvoices() {
   try {
     const accessToken = await ensureAccessToken(connection);
     const result = await syncQuickbooksSnapshots(connection, accessToken);
-    await syncQuickbooksFirstPaymentDates(connection, accessToken);
+    const paymentResult = await syncQuickbooksFirstPaymentDates(connection, accessToken);
 
     const { error } = await supabase
       .from("quickbooks_connections")
@@ -878,7 +878,7 @@ export async function syncQuickbooksInvoices() {
       throw new Error(error.message);
     }
 
-    return result;
+    return { ...result, ...paymentResult };
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";
 

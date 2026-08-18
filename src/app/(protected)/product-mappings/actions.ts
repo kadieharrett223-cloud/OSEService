@@ -18,6 +18,18 @@ function value(formData: FormData, key: string) {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+async function resolveAccessUserId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+    return null;
+  }
+
+  const { data } = await supabase.from("access_users").select("id").eq("id", userId).maybeSingle();
+  return data?.id ?? null;
+}
+
 export async function resolveManualProductMappingAction(formData: FormData) {
   const user = await requireUser();
   const queueId = value(formData, "queueId");
@@ -25,6 +37,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
   const note = value(formData, "resolutionNote");
   const returnTo = value(formData, "returnTo");
   const supabase = getSupabaseAdmin();
+  const resolvedBy = await resolveAccessUserId(supabase, user.id);
   const queueTable = supabase.from("manual_product_mapping_queue") as any;
 
   if (!queueId || !productId) {
@@ -58,7 +71,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
       status: "RESOLVED",
       resolution_note: note || null,
       resolved_at: new Date().toISOString(),
-      resolved_by: user.id,
+      resolved_by: resolvedBy,
     })
     .eq("id", queueId);
 
@@ -112,6 +125,7 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
   const productId = value(formData, "productId");
   const note = value(formData, "resolutionNote");
   const supabase = getSupabaseAdmin();
+  const resolvedBy = await resolveAccessUserId(supabase, user.id);
 
   if (!sourceSku || !productId) {
     redirect("/product-mappings?error=Select+a+canonical+product");
@@ -132,7 +146,7 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
       status: "RESOLVED",
       resolution_note: note || null,
       resolved_at: new Date().toISOString(),
-      resolved_by: user.id,
+      resolved_by: resolvedBy,
     })
     .eq("status", "OPEN")
     .eq("source_sku", sourceSku);

@@ -73,3 +73,34 @@ export async function resolveManualProductMappingAction(formData: FormData) {
   }
   redirect("/product-mappings?message=Mapping+saved.+Affected+orders+remain+pending+reconciliation");
 }
+
+export async function createFocusedProductMappingAction(formData: FormData) {
+  await requireUser();
+
+  const sourceSku = value(formData, "sourceSku");
+  const productId = value(formData, "productId");
+  const returnTo = value(formData, "returnTo");
+  if (!sourceSku || !productId) {
+    redirect(`/product-mappings?error=${encodeURIComponent("Select an inventory product")}`);
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from("product_aliases").upsert({
+    product_id: productId,
+    alias: sourceSku,
+    source_type: "manual",
+    source_ref: returnTo || `FOCUSED:${sourceSku}`,
+  }, { onConflict: "product_id,alias,source_type" });
+
+  if (error) {
+    redirect(`/product-mappings?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/product-mappings");
+  revalidatePath("/orders");
+  if (returnTo.startsWith("/orders/")) {
+    revalidatePath(returnTo.split("?")[0]);
+    redirect(`${returnTo}?message=Product+mapping+saved`);
+  }
+  redirect("/product-mappings?message=Product+mapping+saved");
+}

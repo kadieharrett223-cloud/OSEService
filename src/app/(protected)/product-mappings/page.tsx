@@ -1,8 +1,8 @@
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { resolveManualProductMappingAction } from "./actions";
+import { createFocusedProductMappingAction, resolveManualProductMappingAction } from "./actions";
 
-type SearchParams = Promise<{ message?: string; error?: string; source_sku?: string; order_id?: string }>;
+type SearchParams = Promise<{ message?: string; error?: string; source_sku?: string; source_description?: string; order_id?: string }>;
 type MappingQueueRow = {
   id: string;
   source_sku: string;
@@ -21,6 +21,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
   const params = await searchParams;
   const supabase = getSupabaseAdmin();
   const focusedSourceSku = String(params.source_sku ?? "").trim().toUpperCase();
+  const focusedDescription = String(params.source_description ?? "").trim();
   const [{ data: rawQueueRows, error: queueError }, { data: rawProducts, error: productsError }] = await Promise.all([
     supabase
       .from("manual_product_mapping_queue")
@@ -92,6 +93,19 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
         </table>
         {!queueRows?.length ? <p className="p-6 text-sm text-[#64748b]">No open manual mappings are queued.</p> : null}
       </div>
+
+      {focusedSourceSku && !queueRows?.length ? (
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-[#111827]">Map This QuickBooks Item</h2>
+          <p className="mt-1 text-sm text-[#5a5a5a]">{focusedSourceSku}{focusedDescription ? ` — ${focusedDescription}` : ""}</p>
+          <form action={createFocusedProductMappingAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+            <input type="hidden" name="sourceSku" value={focusedSourceSku} />
+            {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
+            <label className="text-xs font-semibold text-[#64748b]">Select the matching inventory item<select name="productId" required className="input mt-1"><option value="">Choose inventory product</option>{(products ?? []).map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.canonical_name}</option>)}</select></label>
+            <button type="submit" className="btn-primary">Save Mapping</button>
+          </form>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -183,28 +183,16 @@ export function CustomerDemandDropdown({
                   </div>
                   {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
                   {adminMode && item.lineId ? (
-                    <form action={moveCustomerQueuePositionAction} className="flex flex-wrap items-center gap-2 sm:col-span-3">
-                      <input type="hidden" name="line_id" value={item.lineId} />
-                      <label className="text-[#64748b]" htmlFor={`pos-${item.lineId}`}>Move to</label>
-                      <input
-                        id={`pos-${item.lineId}`}
-                        name="queue_position"
-                        type="number"
-                        min="1"
-                        step="1"
-                        defaultValue={item.position}
-                        className="w-20 rounded-md border border-[#cbd5e1] px-2 py-1"
-                      />
-                      <input
-                        name="queue_position_reason"
-                        placeholder="Reason"
-                        required
-                        className="min-w-[160px] flex-1 rounded-md border border-[#cbd5e1] px-2 py-1"
-                      />
-                      <button type="submit" className="rounded-md bg-[#111827] px-3 py-1 font-semibold text-white transition hover:bg-[#1f2937]">
-                        Move
-                      </button>
-                    </form>
+                    <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+                      <label className="sr-only" htmlFor={`reason-${item.lineId}`}>Reason for moving customer</label>
+                      <form action={moveCustomerQueuePositionAction} className="flex flex-1 flex-wrap items-center gap-2">
+                        <input type="hidden" name="line_id" value={item.lineId} />
+                        <label className="sr-only" htmlFor={`reason-${item.lineId}`}>Reason for moving customer</label>
+                        <input id={`reason-${item.lineId}`} name="queue_position_reason" placeholder="Reason for moving" required className="min-w-[180px] flex-1 rounded-md border border-[#cbd5e1] px-2 py-1" />
+                        <button type="submit" name="direction" value="up" aria-label={`Move ${item.customer} up`} title="Move up" className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#cbd5e1] bg-white text-base font-bold text-[#334155] hover:bg-[#eff6ff]">↑</button>
+                        <button type="submit" name="direction" value="down" aria-label={`Move ${item.customer} down`} title="Move down" className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[#cbd5e1] bg-white text-base font-bold text-[#334155] hover:bg-[#eff6ff]">↓</button>
+                      </form>
+                    </div>
                   ) : null}
                 </div>
               ))}

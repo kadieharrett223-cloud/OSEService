@@ -280,11 +280,11 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
   await requireInventoryAdmin();
 
   const lineId = String(formData.get("line_id") ?? "").trim();
-  const positionRaw = String(formData.get("queue_position") ?? "").trim();
+  const direction = String(formData.get("direction") ?? "").trim().toLowerCase();
   const reason = String(formData.get("queue_position_reason") ?? "").trim();
 
-  if (!lineId || !/^\d+$/.test(positionRaw) || Number(positionRaw) < 1) {
-    redirect("/inventory?mapError=Enter+a+queue+position+of+1+or+higher");
+  if (!lineId || !["up", "down"].includes(direction)) {
+    redirect("/inventory?mapError=Choose+an+up+or+down+queue+move");
   }
 
   if (!reason) {
@@ -295,7 +295,7 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
 
   const { data: line, error: lineError } = await supabase
     .from("shipping_order_lines")
-    .select("id, product_id")
+    .select("id, product_id, queue_position_start, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
     .eq("id", lineId)
     .maybeSingle();
 
@@ -303,14 +303,44 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
 
-  const { error: updateError } = await supabase
+  const { data: productLines, error: productLinesError } = await supabase
     .from("shipping_order_lines")
-    .update({
-      queue_position_override: Number(positionRaw),
+    .select("id, queue_position_start, queue_position_count, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .eq("product_id", line.product_id)
+    .in("approval_status", ["APPROVED", "PARTIAL"])
+    .neq("fulfillment_status", "FULFILLED")
+    .neq("fulfillment_status", "CANCELLED")
+    .order("queue_position_start", { ascending: true, nullsFirst: false });
+
+  if (productLinesError) redirect(`/inventory?mapError=${encodeURIComponent(productLinesError.message)}`);
+
+  const activeLines = (productLines ?? []).filter((candidate) =>
+    Math.max(0, Number(candidate.approved_qty ?? 0) - Number(candidate.fulfilled_qty ?? 0)) > 0
+    && candidate.queue_position_start != null,
+  );
+  const currentIndex = activeLines.findIndex((candidate) => candidate.id === lineId);
+  const neighborIndex = currentIndex + (direction === "up" ? -1 : 1);
+  const neighbor = activeLines[neighborIndex];
+  if (currentIndex < 0 || !neighbor) {
+    redirect(`/inventory?mapError=${direction === "up" ? "This+customer+is+already+first" : "This+customer+is+already+last"}`);
+  }
+
+  const currentStart = Number(line.queue_position_start ?? 0);
+  const neighborStart = Number(neighbor.queue_position_start ?? 0);
+  const now = new Date().toISOString();
+  const updates = await Promise.all([
+    supabase.from("shipping_order_lines").update({
+      queue_position_override: neighborStart,
       queue_position_override_reason: reason,
-      queue_position_override_at: new Date().toISOString(),
-    } as never)
-    .eq("id", lineId);
+      queue_position_override_at: now,
+    } as never).eq("id", lineId),
+    supabase.from("shipping_order_lines").update({
+      queue_position_override: currentStart,
+      queue_position_override_reason: reason,
+      queue_position_override_at: now,
+    } as never).eq("id", neighbor.id),
+  ]);
+  const updateError = updates.find((result) => result.error)?.error;
 
   if (updateError) {
     redirect(`/inventory?mapError=${encodeURIComponent(updateError.message)}`);
@@ -320,5 +350,5 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
 
   revalidatePath("/inventory");
   revalidatePath("/orders");
-  redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved to position ${positionRaw}.`)}`);
+  redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved ${direction === "up" ? "up" : "down"} one position.`)}`);
 }

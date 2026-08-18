@@ -22,6 +22,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
   const queueId = value(formData, "queueId");
   const productId = value(formData, "productId");
   const note = value(formData, "resolutionNote");
+  const returnTo = value(formData, "returnTo");
   const supabase = getSupabaseAdmin();
   const queueTable = supabase.from("manual_product_mapping_queue") as any;
 
@@ -67,5 +68,8 @@ export async function resolveManualProductMappingAction(formData: FormData) {
   revalidatePath("/product-mappings");
   revalidatePath("/inventory");
   revalidatePath("/orders");
+  if (returnTo.startsWith("/orders/")) {
+    redirect(`${returnTo}?message=Product+mapping+saved`);
+  }
   redirect("/product-mappings?message=Mapping+saved.+Affected+orders+remain+pending+reconciliation");
 }

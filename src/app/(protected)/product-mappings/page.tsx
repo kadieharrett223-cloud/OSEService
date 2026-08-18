@@ -2,7 +2,7 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { resolveManualProductMappingAction } from "./actions";
 
-type SearchParams = Promise<{ message?: string; error?: string }>;
+type SearchParams = Promise<{ message?: string; error?: string; source_sku?: string; order_id?: string }>;
 type MappingQueueRow = {
   id: string;
   source_sku: string;
@@ -20,6 +20,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
   await requireUser();
   const params = await searchParams;
   const supabase = getSupabaseAdmin();
+  const focusedSourceSku = String(params.source_sku ?? "").trim().toUpperCase();
   const [{ data: rawQueueRows, error: queueError }, { data: rawProducts, error: productsError }] = await Promise.all([
     supabase
       .from("manual_product_mapping_queue")
@@ -28,7 +29,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
       .order("created_at", { ascending: true }),
     supabase.from("products").select("id, sku, canonical_name").eq("status", "Active").order("sku"),
   ]);
-  const queueRows = rawQueueRows as unknown as MappingQueueRow[] | null;
+  const queueRows = (rawQueueRows as unknown as MappingQueueRow[] | null)?.filter((entry) => !focusedSourceSku || entry.source_sku.trim().toUpperCase() === focusedSourceSku) ?? null;
   const products = rawProducts as unknown as ProductRow[] | null;
 
   return (
@@ -40,6 +41,13 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
           Resolve only the product identities held out of the validated migration. Saving a mapping does not move inventory or change an order until its affected rows are reconciled.
         </p>
       </section>
+
+      {focusedSourceSku ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#f1d3a4] bg-[#fff8ec] p-3 text-sm text-[#915b12]">
+          <span>Showing the QuickBooks item that needs mapping: <strong>{focusedSourceSku}</strong></span>
+          {params.order_id ? <a href={`/orders/${encodeURIComponent(params.order_id)}`} className="btn-secondary text-xs">Back to order</a> : null}
+        </div>
+      ) : null}
 
       {params.message ? <div className="rounded-lg border border-[#b7e4c7] bg-[#ecfdf3] p-3 text-sm text-[#166534]">{params.message}</div> : null}
       {params.error ? <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{params.error}</div> : null}
@@ -69,6 +77,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
                 <td className="px-4 py-4">
                   <form id={`mapping-${entry.id}`} action={resolveManualProductMappingAction} className="space-y-2">
                     <input type="hidden" name="queueId" value={entry.id} />
+                    {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
                     <select name="productId" required className="input min-w-[280px]">
                       <option value="">Choose canonical product</option>
                       {(products ?? []).map((product) => <option key={product.id} value={product.id}>{product.sku} — {product.canonical_name}</option>)}

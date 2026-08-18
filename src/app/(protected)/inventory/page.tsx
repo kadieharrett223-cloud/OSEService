@@ -517,6 +517,17 @@ export default async function InventoryPage({
 
   const displayRows = Array.from(canonicalGroups.values())
     .map((group) => {
+      const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
+      for (const item of group.customerQueue) {
+        const key = `${item.invoice}|${item.customer}`.toUpperCase();
+        const existing = customerDemandByInvoice.get(key);
+        if (!existing || item.openQty > existing.openQty) {
+          customerDemandByInvoice.set(key, item);
+        }
+      }
+      group.customerQueue = Array.from(customerDemandByInvoice.values());
+      group.openDemand = group.customerQueue.reduce((sum, item) => sum + item.openQty, 0);
+
       // Unallocated open demand still consumes floor stock, matching the OLD_ERP Available = On Floor - Sold rule.
       const committedFloor = Math.max(group.floorCommitted, Math.min(group.openDemand, group.onFloor));
       const incomingContainers = group.incomingContainers

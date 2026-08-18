@@ -137,7 +137,8 @@ export default async function OrdersPage({
     supabase
       .from("shipping_orders")
       .select(ordersSelect)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .range(0, 9999),
     supabase
       .from("shipping_order_lines")
       .select(`
@@ -154,7 +155,8 @@ export default async function OrdersPage({
         legacy_item_code,
         source_system,
         products (sku, canonical_name)
-      `),
+      `)
+      .range(0, 9999),
   ]);
 
   const directLinesByOrder = new Map<string, OrderSummary["shipping_order_lines"]>();

@@ -308,6 +308,26 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
+  const dedupedQueueLineRows = Array.from(queueLineRows.reduce((deduped, line) => {
+    const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? line.shipping_orders?.order_number ?? line.shipping_orders?.id ?? "";
+    const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
+      ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
+      ?? line.shipping_orders?.legacy_customer_name
+      ?? "";
+    const key = `${line.product_id ?? ""}|${invoice}|${customer}`.toUpperCase();
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, line);
+      return deduped;
+    }
+
+    const existingOpen = Math.max(0, Number(existing.approved_qty ?? 0) - Number(existing.fulfilled_qty ?? 0));
+    const incomingOpen = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    if (incomingOpen > existingOpen || (incomingOpen === existingOpen && String(line.warehouse_status ?? "").toUpperCase() === "IN_WAREHOUSE")) {
+      deduped.set(key, line);
+    }
+    return deduped;
+  }, new Map<string, QueueLine>()).values());
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")
@@ -330,14 +350,14 @@ export default async function InventoryPage({
   );
 
   const openDemandByProduct = toRecordMap(
-    queueLineRows.filter(isOpenQueueLine),
+    dedupedQueueLineRows.filter(isOpenQueueLine),
     (row) => row.product_id,
     (row) => Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0)),
   );
 
   const floorCommittedByProduct = new Map<string, number>();
   const committedByProductContainer = new Map<string, number>();
-  for (const line of queueLineRows) {
+  for (const line of dedupedQueueLineRows) {
     for (const allocation of line.inventory_allocations ?? []) {
       if (allocation.allocation_status === "RELEASED") continue;
       const quantity = Number(allocation.quantity ?? 0);
@@ -378,7 +398,7 @@ export default async function InventoryPage({
 
   const queueByProduct = new Map<string, InventoryViewRow["customerQueue"]>();
 
-  for (const line of queueLineRows) {
+  for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
 

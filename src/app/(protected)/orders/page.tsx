@@ -339,8 +339,14 @@ export default async function OrdersPage({
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
-              const lines = operationalLines(order);
-              const totalQty = lines.reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
+              const lines = (order.shipping_order_lines ?? []).filter((line) => {
+                const orderedQty = Number(line.approved_qty ?? line.ordered_qty ?? 0);
+                const fulfilledQty = Number(line.fulfilled_qty ?? 0);
+                return Boolean(line.product_id)
+                  && !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
+                  && (orderedQty > 0 || fulfilledQty > 0);
+              });
+              const totalQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? line.ordered_qty ?? 0), 0);
               const inStockQty = lines
                 .filter((line) => ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
                 .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);

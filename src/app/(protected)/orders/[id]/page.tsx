@@ -1327,6 +1327,8 @@ export default async function OrderDetailPage({
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
+                            ) : item.isNonInventory ? (
+                              <span className="inline-flex rounded-lg border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">No inventory mapping</span>
                             ) : item.productId ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2e8] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">Mapped</span>
                             ) : (

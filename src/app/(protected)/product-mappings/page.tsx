@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { createFocusedProductMappingAction, resolveManualProductMappingAction } from "./actions";
+import { createFocusedProductMappingAction, resolveProductMappingForSkuAction } from "./actions";
 
 type SearchParams = Promise<{ message?: string; error?: string; source_sku?: string; source_description?: string; order_id?: string }>;
 type MappingQueueRow = {
@@ -15,6 +15,15 @@ type MappingQueueRow = {
   resolution_note: string | null;
 };
 type ProductRow = { id: string; sku: string; canonical_name: string };
+type MappingGroup = {
+  id: string;
+  source_sku: string;
+  source_description: string | null;
+  customer_name: string | null;
+  invoice_number: string | null;
+  quantity: number;
+  current_product_id: string | null;
+};
 
 export default async function ProductMappingsPage({ searchParams }: { searchParams: SearchParams }) {
   await requireUser();
@@ -32,6 +41,27 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
   ]);
   const queueRows = (rawQueueRows as unknown as MappingQueueRow[] | null)?.filter((entry) => !focusedSourceSku || entry.source_sku.trim().toUpperCase() === focusedSourceSku) ?? null;
   const products = rawProducts as unknown as ProductRow[] | null;
+  const mappingGroups = Array.from((queueRows ?? []).reduce((groups, entry) => {
+    const key = entry.source_sku.trim().toUpperCase();
+    const existing = groups.get(key);
+    if (existing) {
+      existing.source_description = existing.source_description ?? entry.source_description;
+      existing.customer_name = [existing.customer_name, entry.customer_name].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ") || null;
+      existing.invoice_number = [existing.invoice_number, entry.invoice_number].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ") || null;
+      existing.quantity += Number(entry.quantity ?? 0);
+      return groups;
+    }
+    groups.set(key, {
+      id: entry.id,
+      source_sku: entry.source_sku,
+      source_description: entry.source_description,
+      customer_name: entry.customer_name,
+      invoice_number: entry.invoice_number,
+      quantity: Number(entry.quantity ?? 0),
+      current_product_id: entry.current_product_id,
+    });
+    return groups;
+  }, new Map<string, MappingGroup>())).map(([, group]) => group);
 
   return (
     <div className="space-y-6">
@@ -68,7 +98,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
             </tr>
           </thead>
           <tbody>
-            {(queueRows ?? []).map((entry) => (
+            {mappingGroups.map((entry) => (
               <tr key={entry.id} className="border-b border-[#f1f5f9] align-top last:border-0">
                 <td className="px-4 py-4 font-semibold text-[#111827]">{entry.source_sku}</td>
                 <td className="max-w-[320px] px-4 py-4 text-[#475569]">{entry.source_description ?? "—"}</td>
@@ -76,8 +106,8 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
                 <td className="px-4 py-4 font-semibold">{entry.quantity}</td>
                 <td className="px-4 py-4 text-xs text-[#64748b]">{entry.current_product_id ?? "Unmapped / ambiguous"}</td>
                 <td className="px-4 py-4">
-                  <form id={`mapping-${entry.id}`} action={resolveManualProductMappingAction} className="space-y-2">
-                    <input type="hidden" name="queueId" value={entry.id} />
+                  <form id={`mapping-${entry.id}`} action={resolveProductMappingForSkuAction} className="space-y-2">
+                    <input type="hidden" name="sourceSku" value={entry.source_sku} />
                     {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
                     <select name="productId" required className="input min-w-[280px]">
                       <option value="">Choose canonical product</option>
@@ -91,7 +121,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
             ))}
           </tbody>
         </table>
-        {!queueRows?.length ? <p className="p-6 text-sm text-[#64748b]">No open manual mappings are queued.</p> : null}
+        {!mappingGroups.length ? <p className="p-6 text-sm text-[#64748b]">No open manual mappings are queued.</p> : null}
       </div>
 
       {focusedSourceSku && !queueRows?.length ? (

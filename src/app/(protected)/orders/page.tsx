@@ -177,7 +177,7 @@ export default async function OrdersPage({
     const allLines = order.shipping_order_lines ?? [];
     const hasLines = lines.length > 0;
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
-    const anyShipped = lines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
+    const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
     const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
       !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
       && line.fulfillment_status === "FULFILLED",
@@ -347,7 +347,7 @@ export default async function OrdersPage({
               const warehouseQty = lines
                 .filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
                 .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-              const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
+              const shippedQty = (order.shipping_order_lines ?? []).reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
               const remainingQty = Math.max(0, totalQty - shippedQty);
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">

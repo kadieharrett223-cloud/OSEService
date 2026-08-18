@@ -67,24 +67,7 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-async function loadTableColumnSet(
-  supabase: ReturnType<typeof getSupabaseAdmin>,
-  tableName: string,
-  candidates: string[],
-) {
-  const columns = new Set<string>();
-
-  for (const column of candidates) {
-    const { error } = await supabase.from(tableName).select(column).limit(1);
-    if (!error) {
-      columns.add(column);
-    }
-  }
-
-  return columns;
-}
-
-function buildOrdersSelect(orderColumns: Set<string>, lineColumns: Set<string>) {
+function buildOrdersSelect() {
   const orderFields = [
     "id",
     "order_number",
@@ -93,34 +76,24 @@ function buildOrdersSelect(orderColumns: Set<string>, lineColumns: Set<string>) 
     "review_status",
     "created_at",
   ];
-  if (orderColumns.has("notes")) {
-    orderFields.push("notes");
-  }
-
-  const lineFields = [
-    "id",
-    "approval_status",
-    "warehouse_status",
-    "fulfillment_status",
-    "priority",
-    "ordered_qty",
-    "approved_qty",
-    "fulfilled_qty",
-  ];
-  if (lineColumns.has("source_system")) {
-    lineFields.push("source_system");
-  }
-  lineFields.push("legacy_item_code", "product_id");
-
   return `
     ${orderFields.join(",\n      ")},
     customers (company_name, full_name),
-    qbo_invoices (invoice_number, payment_status, invoice_date),
-    shipping_order_lines (
-      ${lineFields.join(",\n      ")},
-      products (sku, canonical_name)
-    )
+    qbo_invoices (invoice_number, payment_status, invoice_date)
   `;
+}
+
+async function fetchRowsByIds<T>(
+  ids: string[],
+  fetchChunk: (chunk: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const rows: T[] = [];
+  for (let index = 0; index < ids.length; index += 500) {
+    const { data, error } = await fetchChunk(ids.slice(index, index + 500));
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+  }
+  return rows;
 }
 
 export default async function OrdersPage({
@@ -134,12 +107,7 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  const [shippingOrderColumns, shippingOrderLineColumns] = await Promise.all([
-    loadTableColumnSet(supabase, "shipping_orders", ["notes"]),
-    loadTableColumnSet(supabase, "shipping_order_lines", ["source_system"]),
-  ]);
-
-  const ordersSelect = buildOrdersSelect(shippingOrderColumns, shippingOrderLineColumns);
+  const ordersSelect = buildOrdersSelect();
 
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")
@@ -151,14 +119,7 @@ export default async function OrdersPage({
   let directLines: unknown[] = [];
   let ordersLoadError: Error | null = null;
   try {
-    [orders, directLines] = await Promise.all([
-      fetchAllRows((from, to) => supabase
-        .from("shipping_orders")
-        .select(ordersSelect)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: true })
-        .range(from, to)),
-      fetchAllRows((from, to) => supabase
+    directLines = await fetchAllRows((from, to) => supabase
         .from("shipping_order_lines")
         .select(`
         id,
@@ -172,12 +133,18 @@ export default async function OrdersPage({
         approved_qty,
         fulfilled_qty,
         legacy_item_code,
-        source_system,
+        .source_system,
         products (sku, canonical_name)
       `)
         .order("id", { ascending: true })
-        .range(from, to)),
-    ]);
+        .range(from, to));
+    const parentIds = [...new Set((directLines as Array<{ shipping_order_id?: string }>).map((line) => line.shipping_order_id).filter(Boolean))] as string[];
+    orders = await fetchRowsByIds(parentIds, (chunk) => supabase
+      .from("shipping_orders")
+      .select(ordersSelect)
+      .in("id", chunk)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true }));
   } catch (error) {
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }

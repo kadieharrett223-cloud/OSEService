@@ -521,16 +521,11 @@ async function loadTableColumnSet(
   tableName: string,
   candidates: string[],
 ) {
-  const columns = new Set<string>();
-
-  for (const column of candidates) {
-    const { error } = await supabase.from(tableName).select(column).limit(1);
-    if (!error) {
-      columns.add(column);
-    }
-  }
-
-  return columns;
+  const results = await Promise.all(candidates.map(async (column) => ({
+    column,
+    error: (await supabase.from(tableName).select(column).limit(1)).error,
+  })));
+  return new Set(results.filter((result) => !result.error).map((result) => result.column));
 }
 
 function buildShippingOrderSelect(columnSet: Set<string>) {

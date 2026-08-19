@@ -1284,12 +1284,12 @@ export default async function OrderDetailPage({
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <label htmlFor="warehouse_state" className="text-xs font-semibold text-[#64748b]">Warehouse</label>
-                <select id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                <select id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} onChange={(event) => event.currentTarget.form?.requestSubmit()} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
                   <option value="ORDERS">Orders</option>
                   <option value="IN_WAREHOUSE">In Warehouse</option>
                 </select>
                 <label htmlFor="fulfillment_method" className="text-xs font-semibold text-[#64748b]">Fulfillment</label>
-                <select id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                <select id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} onChange={(event) => event.currentTarget.form?.requestSubmit()} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
                   <option value="SHIP">Ship</option>
                   <option value="WILL_CALL">Will Call</option>
                 </select>

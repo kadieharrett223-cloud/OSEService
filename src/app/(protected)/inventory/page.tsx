@@ -9,6 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
+import { CLOSED_DEMAND_STATES, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -58,6 +59,8 @@ type QueueLine = {
   queue_position_count: number | null;
   source_system?: string | null;
   legacy_item_code?: string | null;
+  qbo_invoice_line_id?: string | null;
+  source_record_id?: string | null;
   shipping_orders?: {
     id: string;
     created_at?: string | null;
@@ -175,14 +178,11 @@ function canonicalSkuKey(value: string | null | undefined) {
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
 
-const CLOSED_QUEUE_STATES = ["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
+const CLOSED_QUEUE_STATES = CLOSED_DEMAND_STATES;
 
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 function isOpenQueueLine(line: QueueLine) {
-  const remaining = Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0);
-  if (remaining <= 0) return false;
-  if (CLOSED_QUEUE_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
-  return !CLOSED_QUEUE_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
+  return isOpenDemandLine(line);
 }
 
 function isActiveIncomingContainer(status: string | null | undefined) {
@@ -266,6 +266,8 @@ export default async function InventoryPage({
         queue_position_count,
         source_system,
         legacy_item_code,
+        qbo_invoice_line_id,
+        source_record_id,
         shipping_orders (
           id,
           created_at,
@@ -317,26 +319,7 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-  const dedupedQueueLineRows = Array.from(queueLineRows.reduce((deduped, line) => {
-    const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? line.shipping_orders?.order_number ?? line.shipping_orders?.id ?? "";
-    const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
-      ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
-      ?? line.shipping_orders?.legacy_customer_name
-      ?? "";
-    const key = `${line.product_id ?? ""}|${invoice}|${customer}`.toUpperCase();
-    const existing = deduped.get(key);
-    if (!existing) {
-      deduped.set(key, line);
-      return deduped;
-    }
-
-    const existingOpen = Math.max(0, Number(existing.approved_qty ?? 0) - Number(existing.fulfilled_qty ?? 0));
-    const incomingOpen = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-    if (incomingOpen > existingOpen || (incomingOpen === existingOpen && String(line.warehouse_status ?? "").toUpperCase() === "IN_WAREHOUSE")) {
-      deduped.set(key, line);
-    }
-    return deduped;
-  }, new Map<string, QueueLine>()).values());
+  const dedupedQueueLineRows = dedupeDemandLines(queueLineRows);
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")
@@ -543,15 +526,22 @@ export default async function InventoryPage({
 
   const displayRows = Array.from(canonicalGroups.values())
     .map((group) => {
+      // Separate lines on one invoice are separate obligations, so quantities are summed into a
+      // single customer row rather than collapsed to the largest line.
       const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
       for (const item of group.customerQueue) {
         const key = item.invoice && item.invoice !== "—"
           ? `INVOICE:${item.invoice}`.toUpperCase()
           : `ORDER:${item.orderId}`.toUpperCase();
         const existing = customerDemandByInvoice.get(key);
-        if (!existing || item.openQty > existing.openQty) {
-          customerDemandByInvoice.set(key, item);
+        if (!existing) {
+          customerDemandByInvoice.set(key, { ...item });
+          continue;
         }
+        existing.openQty += item.openQty;
+        existing.qty += item.qty;
+        existing.approvedQty += item.approvedQty;
+        existing.shippedQty += item.shippedQty;
       }
       group.customerQueue = Array.from(customerDemandByInvoice.values());
       group.openDemand = group.customerQueue.reduce((sum, item) => sum + item.openQty, 0);

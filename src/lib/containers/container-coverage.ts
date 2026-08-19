@@ -1,4 +1,5 @@
 import type { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
@@ -45,6 +46,10 @@ type OpenOrderLineRow = {
   product_id: string | null;
   approved_qty: number | null;
   fulfilled_qty: number | null;
+  approval_status?: string | null;
+  fulfillment_status?: string | null;
+  qbo_invoice_line_id?: string | null;
+  source_record_id?: string | null;
   warehouse_status: string | null;
   queue_position_start: number | null;
   created_at: string;
@@ -98,6 +103,10 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
             product_id,
             approved_qty,
             fulfilled_qty,
+            approval_status,
+            fulfillment_status,
+            qbo_invoice_line_id,
+            source_record_id,
             warehouse_status,
             queue_position_start,
             created_at,
@@ -125,9 +134,10 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
   const demandByProduct: DemandByProduct = {};
   for (const productId of productIds) demandByProduct[productId] = [];
 
-  for (const line of (openLineRows ?? []) as unknown as OpenOrderLineRow[]) {
+  for (const line of dedupeDemandLines((openLineRows ?? []) as unknown as OpenOrderLineRow[])) {
     if (!line.product_id || !demandByProduct[line.product_id]) continue;
     if (IN_WAREHOUSE_STATUSES.includes(line.warehouse_status ?? "")) continue;
+    if (!isOpenDemandLine(line)) continue;
 
     const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     if (remainingQty <= 0) continue;

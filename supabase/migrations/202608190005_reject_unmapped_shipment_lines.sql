@@ -109,7 +109,11 @@ begin
     if v_line_id is null or v_requested_qty <= 0 then raise exception 'Shipment lines must have a valid positive quantity'; end if;
     insert into shipment_edit_lines values (v_line_id, v_requested_qty) on conflict (shipping_order_line_id) do update set requested_qty = excluded.requested_qty;
   end loop;
-  for v_line_id, v_requested_qty in select l.id, coalesce(e.requested_qty, 0) from public.shipping_order_lines l left join shipment_edit_lines e on e.shipping_order_line_id = l.id where l.shipping_order_id = p_order_id for update loop
+  for v_line_id in select l.id from public.shipping_order_lines l where l.shipping_order_id = p_order_id for update loop
+    select coalesce(requested_qty, 0) into v_requested_qty
+      from shipment_edit_lines
+      where shipping_order_line_id = v_line_id;
+    v_requested_qty := coalesce(v_requested_qty, 0);
     select l.product_id, greatest(coalesce(l.approved_qty, 0), coalesce(l.ordered_qty, 0)), coalesce(l.fulfilled_qty, 0) into v_product_id, v_demand, v_current_fulfilled from public.shipping_order_lines l where l.id = v_line_id;
     select coalesce(sum(quantity), 0) into v_current_shipment_qty from public.order_shipment_lines where shipment_id = p_shipment_id and shipping_order_line_id = v_line_id;
     v_delta := v_requested_qty - v_current_shipment_qty;

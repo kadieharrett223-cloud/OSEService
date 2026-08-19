@@ -121,7 +121,8 @@ export default async function OrdersPage({
   let directLines: unknown[] = [];
   let ordersLoadError: Error | null = null;
   try {
-    directLines = await fetchAllRows((from, to) => supabase
+    const [lineRows, qboParentRows] = await Promise.all([
+      fetchAllRows((from, to) => supabase
         .from("shipping_order_lines")
         .select(`
         id,
@@ -139,8 +140,19 @@ export default async function OrdersPage({
         products (sku, canonical_name)
       `)
         .order("id", { ascending: true })
-        .range(from, to));
-    const parentIds = [...new Set((directLines as Array<{ shipping_order_id?: string }>).map((line) => line.shipping_order_id).filter(Boolean))] as string[];
+        .range(from, to)),
+      fetchAllRows((from, to) => supabase
+        .from("shipping_orders")
+        .select("id")
+        .eq("source_type", "QBO_INVOICE")
+        .order("created_at", { ascending: false })
+        .range(from, to)),
+    ]);
+    directLines = lineRows;
+    const parentIds = [...new Set([
+      ...(directLines as Array<{ shipping_order_id?: string }>).map((line) => line.shipping_order_id),
+      ...(qboParentRows as Array<{ id?: string }>).map((order) => order.id),
+    ].filter(Boolean))] as string[];
     orders = await fetchRowsByIds(parentIds, (chunk) => supabase
       .from("shipping_orders")
       .select(ordersSelect)
@@ -208,6 +220,8 @@ export default async function OrdersPage({
   function matchesTab(order: OrderSummary, tabId: string) {
     const lines = operationalLines(order);
     const allLines = order.shipping_order_lines ?? [];
+    const hasUnresolvedLines = allLines.some((line) => !line.product_id && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()))
+      || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
     const hasLines = lines.length > 0;
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
@@ -218,9 +232,9 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "orders":
-        return hasLines;
+        return hasLines || hasUnresolvedLines;
       case "new":
-        return hasLines && !anyWarehouse && !anyShipped;
+        return (hasLines || hasUnresolvedLines) && !anyWarehouse && !anyShipped;
       case "warehouse":
         return hasLines && anyWarehouse && !anyShipped;
       case "partial":

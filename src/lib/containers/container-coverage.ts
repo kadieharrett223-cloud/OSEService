@@ -1,36 +1,43 @@
 import type { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
 const IN_WAREHOUSE_STATUSES = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"];
 
-export type ContainerCoverageRow = {
-  lineId: string;
-  orderId: string;
+export const UNPLANNED_RECEIPT_REF = "UNPLANNED_RECEIPT";
+
+export type ContainerLineSummary = {
+  id: string;
   productId: string;
-  invoice: string;
-  customer: string;
   sku: string;
-  remainingQty: number;
-  coveredQty: number;
-  queuePosition: number | null;
-  currentWarehouse: string;
-  isAssigned: boolean;
-  willMarkInWarehouse: boolean;
+  productName: string;
+  expectedQty: number;
+  receivedQty: number;
+  isUnplanned: boolean;
+  demandQty: number;
+  assignedQty: number;
 };
 
-export type ContainerCoverage = {
-  hasExplicitReceipts: boolean;
-  incomingByProduct: Map<string, number>;
-  rows: ContainerCoverageRow[];
+export type ContainerReceipt = {
+  lifecycleStatus: string | null;
+  isReceived: boolean;
+  lines: ContainerLineSummary[];
+  demandByProduct: DemandByProduct;
+  /** Units used for coverage: actual received once the container is received, otherwise the forecast. */
+  effectiveQtyByProduct: Record<string, number>;
+  rows: CoverageRow[];
   eligibleLineIds: Set<string>;
 };
 
 type ContainerLineRow = {
+  id: string;
   product_id: string | null;
   ordered_qty: number | null;
   on_order_qty: number | null;
   received_qty: number | null;
+  source_line_ref: string | null;
+  products?: { sku: string | null; canonical_name: string | null } | null;
 };
 
 type OpenOrderLineRow = {
@@ -56,66 +63,57 @@ function formatStatus(value: string | null | undefined) {
   return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export function getIncomingQty(line: ContainerLineRow, hasExplicitReceipts: boolean) {
-  if (hasExplicitReceipts) return Math.max(0, Number(line.received_qty ?? 0));
+/** Planned quantities are a forecast; only received_qty reflects physical stock. */
+export function getExpectedQty(line: { ordered_qty: number | null; on_order_qty: number | null }) {
   return Math.max(0, Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0));
 }
 
-/**
- * Container units are matched to customer demand by product queue order, so a container shows the
- * customers waiting on it even when no explicit allocation row was ever created.
- */
-export async function loadContainerCoverage(supabase: SupabaseAdmin, containerId: string): Promise<ContainerCoverage> {
-  const { data: containerLineRows } = await supabase
-    .from("container_lines")
-    .select("product_id, ordered_qty, on_order_qty, received_qty")
-    .eq("container_id", containerId);
+export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId: string): Promise<ContainerReceipt> {
+  const [{ data: containerRow }, { data: containerLineRows }] = await Promise.all([
+    supabase.from("containers").select("id, lifecycle_status").eq("id", containerId).maybeSingle(),
+    supabase
+      .from("container_lines")
+      .select("id, product_id, ordered_qty, on_order_qty, received_qty, source_line_ref, products (sku, canonical_name)")
+      .eq("container_id", containerId),
+  ]);
 
-  const containerLines = (containerLineRows ?? []) as ContainerLineRow[];
-  const hasExplicitReceipts = containerLines.some((line) => Number(line.received_qty ?? 0) > 0);
+  const lifecycleStatus = (containerRow as { lifecycle_status: string | null } | null)?.lifecycle_status ?? null;
+  const isReceived = String(lifecycleStatus ?? "").toUpperCase() === "RECEIVED";
+  const containerLines = ((containerLineRows ?? []) as unknown as ContainerLineRow[]).filter((line) => Boolean(line.product_id));
 
-  const incomingByProduct = new Map<string, number>();
-  for (const line of containerLines) {
-    if (!line.product_id) continue;
-    const incoming = getIncomingQty(line, hasExplicitReceipts);
-    if (incoming <= 0) continue;
-    incomingByProduct.set(line.product_id, (incomingByProduct.get(line.product_id) ?? 0) + incoming);
-  }
-
-  const productIds = Array.from(incomingByProduct.keys());
-  if (productIds.length === 0) {
-    return { hasExplicitReceipts, incomingByProduct, rows: [], eligibleLineIds: new Set() };
-  }
+  const productIds = Array.from(new Set(containerLines.map((line) => line.product_id as string)));
 
   const [{ data: allocationRows }, { data: openLineRows }] = await Promise.all([
     supabase
       .from("inventory_allocations")
-      .select("shipping_order_line_id, quantity")
+      .select("shipping_order_line_id")
       .eq("container_id", containerId)
       .eq("source_type", "CONTAINER")
       .eq("allocation_status", "ALLOCATED"),
-    supabase
-      .from("shipping_order_lines")
-      .select(`
-        id,
-        product_id,
-        approved_qty,
-        fulfilled_qty,
-        warehouse_status,
-        queue_position_start,
-        created_at,
-        products (sku, canonical_name),
-        shipping_orders (
-          id,
-          order_number,
-          legacy_customer_name,
-          customers (company_name, full_name),
-          qbo_invoices (invoice_number)
-        )
-      `)
-      .in("product_id", productIds)
-      .eq("approval_status", "APPROVED")
-      .neq("fulfillment_status", "FULFILLED"),
+    productIds.length
+      ? supabase
+          .from("shipping_order_lines")
+          .select(`
+            id,
+            product_id,
+            approved_qty,
+            fulfilled_qty,
+            warehouse_status,
+            queue_position_start,
+            created_at,
+            products (sku, canonical_name),
+            shipping_orders (
+              id,
+              order_number,
+              legacy_customer_name,
+              customers (company_name, full_name),
+              qbo_invoices (invoice_number)
+            )
+          `)
+          .in("product_id", productIds)
+          .eq("approval_status", "APPROVED")
+          .neq("fulfillment_status", "FULFILLED")
+      : Promise.resolve({ data: [] }),
   ]);
 
   const assignedLineIds = new Set(
@@ -124,75 +122,58 @@ export async function loadContainerCoverage(supabase: SupabaseAdmin, containerId
       .filter((value): value is string => Boolean(value)),
   );
 
-  const candidates = ((openLineRows ?? []) as unknown as OpenOrderLineRow[])
-    .filter((line) => Boolean(line.product_id))
-    .filter((line) => !IN_WAREHOUSE_STATUSES.includes(line.warehouse_status ?? ""))
-    .map((line) => {
-      const order = line.shipping_orders;
-      const customer = order?.customers?.company_name
-        ?? order?.customers?.full_name
-        ?? order?.legacy_customer_name
-        ?? "Customer pending";
+  const demandByProduct: DemandByProduct = {};
+  for (const productId of productIds) demandByProduct[productId] = [];
 
-      return {
-        lineId: line.id,
-        orderId: order?.id ?? "",
-        productId: line.product_id as string,
-        invoice: order?.qbo_invoices?.invoice_number ?? order?.order_number ?? "—",
-        customer,
-        sku: line.products?.sku ?? line.products?.canonical_name ?? "SKU pending",
-        remainingQty: Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)),
-        coveredQty: 0,
-        queuePosition: line.queue_position_start ?? null,
-        currentWarehouse: formatStatus(line.warehouse_status),
-        isAssigned: assignedLineIds.has(line.id),
-        willMarkInWarehouse: false,
-        createdAt: line.created_at,
-      };
-    })
-    .filter((row) => row.remainingQty > 0);
+  for (const line of (openLineRows ?? []) as unknown as OpenOrderLineRow[]) {
+    if (!line.product_id || !demandByProduct[line.product_id]) continue;
+    if (IN_WAREHOUSE_STATUSES.includes(line.warehouse_status ?? "")) continue;
 
-  const byProduct = new Map<string, typeof candidates>();
-  for (const row of candidates) {
-    const rows = byProduct.get(row.productId) ?? [];
-    rows.push(row);
-    byProduct.set(row.productId, rows);
+    const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    if (remainingQty <= 0) continue;
+
+    const order = line.shipping_orders;
+    demandByProduct[line.product_id].push({
+      lineId: line.id,
+      orderId: order?.id ?? "",
+      productId: line.product_id,
+      invoice: order?.qbo_invoices?.invoice_number ?? order?.order_number ?? "—",
+      customer:
+        order?.customers?.company_name ?? order?.customers?.full_name ?? order?.legacy_customer_name ?? "Customer pending",
+      sku: line.products?.sku ?? line.products?.canonical_name ?? "SKU pending",
+      remainingQty,
+      queuePosition: line.queue_position_start ?? null,
+      currentWarehouse: formatStatus(line.warehouse_status),
+      isAssigned: assignedLineIds.has(line.id),
+      createdAt: line.created_at,
+    } satisfies DemandLine);
   }
 
-  const eligibleLineIds = new Set<string>();
-  const rows: ContainerCoverageRow[] = [];
+  const effectiveQtyByProduct: Record<string, number> = {};
+  const lines: ContainerLineSummary[] = containerLines.map((line) => {
+    const productId = line.product_id as string;
+    const expectedQty = getExpectedQty(line);
+    const receivedQty = Math.max(0, Number(line.received_qty ?? 0));
+    const demandQty = totalDemandQty(demandByProduct[productId] ?? []);
 
-  for (const [productId, productRows] of byProduct.entries()) {
-    // Explicitly assigned lines claim container units first, then remaining demand in queue order.
-    const sorted = [...productRows].sort((left, right) => {
-      if (left.isAssigned !== right.isAssigned) return left.isAssigned ? -1 : 1;
-      const leftQueue = left.queuePosition ?? Number.MAX_SAFE_INTEGER;
-      const rightQueue = right.queuePosition ?? Number.MAX_SAFE_INTEGER;
-      if (leftQueue !== rightQueue) return leftQueue - rightQueue;
-      return left.createdAt.localeCompare(right.createdAt);
-    });
+    // Once received, physical counts are authoritative even when nothing arrived.
+    const effectiveQty = isReceived ? receivedQty : expectedQty;
+    effectiveQtyByProduct[productId] = (effectiveQtyByProduct[productId] ?? 0) + effectiveQty;
 
-    let capacity = incomingByProduct.get(productId) ?? 0;
-    for (const row of sorted) {
-      const covered = Math.min(row.remainingQty, Math.max(0, capacity));
-      capacity -= covered;
-      const fullyCovered = covered > 0 && covered === row.remainingQty;
-      if (fullyCovered) eligibleLineIds.add(row.lineId);
-
-      const { createdAt: _createdAt, ...rest } = row;
-      void _createdAt;
-      rows.push({ ...rest, coveredQty: covered, willMarkInWarehouse: fullyCovered });
-    }
-  }
-
-  rows.sort((left, right) => {
-    if (left.coveredQty > 0 !== right.coveredQty > 0) return left.coveredQty > 0 ? -1 : 1;
-    if (left.isAssigned !== right.isAssigned) return left.isAssigned ? -1 : 1;
-    const leftQueue = left.queuePosition ?? Number.MAX_SAFE_INTEGER;
-    const rightQueue = right.queuePosition ?? Number.MAX_SAFE_INTEGER;
-    if (leftQueue !== rightQueue) return leftQueue - rightQueue;
-    return left.customer.localeCompare(right.customer);
+    return {
+      id: line.id,
+      productId,
+      sku: line.products?.sku ?? "SKU pending",
+      productName: line.products?.canonical_name ?? line.products?.sku ?? "Product",
+      expectedQty,
+      receivedQty,
+      isUnplanned: line.source_line_ref === UNPLANNED_RECEIPT_REF,
+      demandQty,
+      assignedQty: Math.min(demandQty, expectedQty),
+    };
   });
 
-  return { hasExplicitReceipts, incomingByProduct, rows, eligibleLineIds };
+  const { rows, eligibleLineIds } = computeCoverage(demandByProduct, effectiveQtyByProduct);
+
+  return { lifecycleStatus, isReceived, lines, demandByProduct, effectiveQtyByProduct, rows, eligibleLineIds };
 }

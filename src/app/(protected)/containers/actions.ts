@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { loadContainerCoverage } from "@/lib/containers/container-coverage";
+import { loadContainerReceipt, UNPLANNED_RECEIPT_REF } from "@/lib/containers/container-coverage";
+import { computeCoverage } from "@/lib/containers/coverage-math";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 function emptyToNull(value: FormDataEntryValue | null) {
@@ -157,22 +158,56 @@ export async function createContainerAction(formData: FormData) {
   redirect("/containers?success=Container+added");
 }
 
-type ContainerLineAvailability = {
-  product_id: string | null;
-  ordered_qty: number | null;
-  on_order_qty: number | null;
-  received_qty: number | null;
+type ReceiptEntry = {
+  containerLineId: string | null;
+  productId: string;
+  receivedQty: number;
+  note: string;
 };
 
-export async function acceptContainerToWarehouseAction(formData: FormData) {
+function parseReceiptPayload(raw: string): ReceiptEntry[] {
+  try {
+    const parsed = JSON.parse(raw) as { entries?: unknown };
+    if (!Array.isArray(parsed.entries)) return [];
+
+    return parsed.entries
+      .map((entry) => {
+        const value = entry as Record<string, unknown>;
+        const productId = typeof value.productId === "string" ? value.productId : "";
+        const receivedQty = Number(value.receivedQty);
+        if (!isUuid(productId) || !Number.isFinite(receivedQty) || receivedQty < 0) return null;
+
+        return {
+          containerLineId: typeof value.containerLineId === "string" && isUuid(value.containerLineId) ? value.containerLineId : null,
+          productId,
+          receivedQty: Math.floor(receivedQty),
+          note: typeof value.note === "string" ? value.note.trim().slice(0, 500) : "",
+        } satisfies ReceiptEntry;
+      })
+      .filter((entry): entry is ReceiptEntry => Boolean(entry));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Records what physically arrived. Planned quantities never create inventory; only the counts
+ * entered here do. Re-running is safe: the container status guard and the unique inventory event
+ * key prevent double-adding stock.
+ */
+export async function receiveContainerAction(formData: FormData) {
   await requireUser();
   const supabase = getSupabaseAdmin();
 
   const containerId = String(formData.get("container_id") ?? "").trim();
   const containerNumber = String(formData.get("container_number") ?? "").trim();
-  const fullReceiptConfirmed = String(formData.get("full_receipt_confirmed") ?? "") === "yes";
   if (!containerId || !isUuid(containerId)) {
     redirect("/containers?error=Invalid+container+reference");
+  }
+
+  const entries = parseReceiptPayload(String(formData.get("receipt_payload") ?? ""));
+  if (entries.length === 0) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Enter at least one received quantity before confirming.")}`);
   }
 
   const { data: container, error: containerError } = await supabase
@@ -185,25 +220,85 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     redirect("/containers?error=Container+not+found");
   }
 
-  const { data: containerLines, error: containerLinesError } = await supabase
-    .from("container_lines")
-    .select("product_id, ordered_qty, on_order_qty, received_qty")
-    .eq("container_id", containerId);
-
-  if (containerLinesError) {
-    redirect(`/containers/${containerId}?error=${encodeURIComponent(containerLinesError.message)}`);
+  if (String((container as { lifecycle_status: string | null }).lifecycle_status ?? "").toUpperCase() === "RECEIVED") {
+    redirect(`/containers/${containerId}?success=${encodeURIComponent("This container was already received. Inventory was not changed.")}`);
   }
 
-  const typedContainerLines = (containerLines ?? []) as ContainerLineAvailability[];
-  const hasExplicitReceipts = typedContainerLines.some((line) => Number(line.received_qty ?? 0) > 0);
+  // Demand is read before any writes so coverage is computed against the counts being confirmed.
+  const receipt = await loadContainerReceipt(supabase, containerId);
+  const existingLineByProduct = new Map(receipt.lines.map((line) => [line.productId, line]));
 
-  // Safeguard: if no received_qty values exist, receiving the entire container requires explicit operator confirmation.
-  if (!hasExplicitReceipts && !fullReceiptConfirmed) {
-    redirect(`/containers/${containerId}?error=${encodeURIComponent("Enter received quantities first, or confirm full receipt for this container.")}`);
+  const actualByProduct = new Map<string, number>();
+  const noteByProduct = new Map<string, string>();
+  for (const entry of entries) {
+    actualByProduct.set(entry.productId, (actualByProduct.get(entry.productId) ?? 0) + entry.receivedQty);
+    if (entry.note) noteByProduct.set(entry.productId, entry.note);
   }
 
-  const coverage = await loadContainerCoverage(supabase, containerId);
+  for (const entry of entries) {
+    const existing = entry.containerLineId
+      ? receipt.lines.find((line) => line.id === entry.containerLineId)
+      : existingLineByProduct.get(entry.productId);
 
+    if (existing) {
+      const totalForProduct = actualByProduct.get(entry.productId) ?? entry.receivedQty;
+      const { error: updateError } = await supabase
+        .from("container_lines")
+        .update({ received_qty: totalForProduct })
+        .eq("id", existing.id);
+
+      if (updateError) {
+        redirect(`/containers/${containerId}?error=${encodeURIComponent(updateError.message)}`);
+      }
+      continue;
+    }
+
+    // Unplanned arrivals are kept separate from the planned manifest: expected stays zero.
+    const { error: insertError } = await supabase.from("container_lines").insert({
+      container_id: containerId,
+      product_id: entry.productId,
+      ordered_qty: 0,
+      on_order_qty: 0,
+      received_qty: entry.receivedQty,
+      source_line_ref: UNPLANNED_RECEIPT_REF,
+    });
+
+    if (insertError) {
+      redirect(`/containers/${containerId}?error=${encodeURIComponent(insertError.message)}`);
+    }
+  }
+
+  // Inventory comes from actual counts only.
+  for (const [productId, receivedQty] of actualByProduct.entries()) {
+    if (receivedQty <= 0) continue;
+
+    const { data: existingRows } = await supabase
+      .from("inventory_transactions")
+      .select("delta")
+      .eq("product_id", productId)
+      .eq("bucket", "ON_FLOOR");
+
+    const beforeQty = (existingRows ?? []).reduce((sum, row) => sum + Number((row as { delta: number | null }).delta ?? 0), 0);
+
+    const { error: inventoryError } = await supabase.from("inventory_transactions").insert({
+      product_id: productId,
+      bucket: "ON_FLOOR",
+      delta: receivedQty,
+      before_qty: beforeQty,
+      after_qty: beforeQty + receivedQty,
+      reason: `Container ${containerNumber || "receipt"} received`,
+      source_type: "CONTAINER_RECEIVED",
+      source_event_key: `CONTAINER_RECEIVED:${containerId}:${productId}`,
+      container_id: containerId,
+    });
+
+    // A duplicate event key means this receipt already added the stock; anything else is a real failure.
+    if (inventoryError && inventoryError.code !== "23505") {
+      redirect(`/containers/${containerId}?error=${encodeURIComponent(inventoryError.message)}`);
+    }
+  }
+
+  const coverage = computeCoverage(receipt.demandByProduct, Object.fromEntries(actualByProduct));
   const lineIdsToUpdate = new Set<string>();
   const orderTimelineSkuMap = new Map<string, Set<string>>();
 
@@ -217,47 +312,6 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   }
 
   const waitingLineCount = coverage.rows.filter((row) => !row.willMarkInWarehouse).length;
-
-  // Receiving a container physically adds the units to the floor, so inventory must reflect the arrival.
-  for (const [productId, incomingQty] of coverage.incomingByProduct.entries()) {
-    if (incomingQty <= 0) continue;
-
-    const { data: existingRows } = await supabase
-      .from("inventory_transactions")
-      .select("delta")
-      .eq("product_id", productId)
-      .eq("bucket", "ON_FLOOR");
-
-    const beforeQty = (existingRows ?? []).reduce((sum, row) => sum + Number((row as { delta: number | null }).delta ?? 0), 0);
-
-    await supabase
-      .from("inventory_transactions")
-      .insert({
-        product_id: productId,
-        bucket: "ON_FLOOR",
-        delta: incomingQty,
-        before_qty: beforeQty,
-        after_qty: beforeQty + incomingQty,
-        reason: `Container ${containerNumber || "receipt"} received`,
-        source_type: "CONTAINER_RECEIVED",
-        source_event_key: `CONTAINER_RECEIVED:${containerId}:${productId}`,
-        container_id: containerId,
-      });
-  }
-
-  // Record what actually landed so later reads do not fall back to ordered quantities.
-  if (!hasExplicitReceipts) {
-    for (const line of typedContainerLines) {
-      if (!line.product_id) continue;
-      const receivedQty = Math.max(0, Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0));
-      if (receivedQty <= 0) continue;
-      await supabase
-        .from("container_lines")
-        .update({ received_qty: receivedQty })
-        .eq("container_id", containerId)
-        .eq("product_id", line.product_id);
-    }
-  }
 
   if (lineIdsToUpdate.size > 0) {
     const { error: updateLinesError } = await supabase
@@ -284,6 +338,42 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     });
   }
 
+  // Permanent reconciliation record of the variance.
+  const variance = Array.from(actualByProduct.entries()).map(([productId, actualQty]) => {
+    const planned = existingLineByProduct.get(productId);
+    const expectedQty = planned?.expectedQty ?? 0;
+    return {
+      product_id: productId,
+      sku: planned?.sku ?? null,
+      expected_qty: expectedQty,
+      received_qty: actualQty,
+      difference: actualQty - expectedQty,
+      unplanned: !planned,
+      note: noteByProduct.get(productId) ?? null,
+    };
+  });
+
+  const expectedTotal = receipt.lines.reduce((sum, line) => sum + line.expectedQty, 0);
+  const actualTotal = Array.from(actualByProduct.values()).reduce((sum, qty) => sum + qty, 0);
+  const shortTotal = variance.reduce((sum, row) => sum + Math.max(0, row.expected_qty - row.received_qty), 0);
+  const extraTotal = variance.reduce((sum, row) => sum + Math.max(0, row.received_qty - row.expected_qty), 0);
+
+  await supabase.from("audit_log").insert({
+    entity_type: "container",
+    entity_id: containerId,
+    action: "CONTAINER_RECEIPT_RECONCILED",
+    details: {
+      container_number: containerNumber || null,
+      expected_units: expectedTotal,
+      actual_units: actualTotal,
+      short_units: shortTotal,
+      extra_units: extraTotal,
+      line_count_marked_in_warehouse: lineIdsToUpdate.size,
+      line_count_waiting: waitingLineCount,
+      variance,
+    },
+  });
+
   const { error: containerUpdateError } = await supabase
     .from("containers")
     .update({ lifecycle_status: "RECEIVED" })
@@ -293,18 +383,6 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     redirect(`/containers/${containerId}?error=${encodeURIComponent(containerUpdateError.message)}`);
   }
 
-  await supabase.from("audit_log").insert({
-    entity_type: "container",
-    entity_id: containerId,
-    action: "CONTAINER_ACCEPTED_INTO_WAREHOUSE",
-    details: {
-      container_number: containerNumber || null,
-      line_count_marked_in_warehouse: lineIdsToUpdate.size,
-      line_count_waiting: waitingLineCount,
-      used_explicit_received_qty: hasExplicitReceipts,
-    },
-  });
-
   revalidatePath("/containers");
   revalidatePath(`/containers/${containerId}`);
   revalidatePath("/inventory");
@@ -312,7 +390,11 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath("/my-sales");
 
-  redirect(`/containers/${containerId}?success=${encodeURIComponent(`Container accepted. ${lineIdsToUpdate.size} line(s) moved to In Warehouse. ${waitingLineCount} line(s) remain waiting.`)}`);
+  redirect(
+    `/containers/${containerId}?success=${encodeURIComponent(
+      `Receipt recorded. ${actualTotal} unit(s) added to On Floor. ${lineIdsToUpdate.size} line(s) moved to In Warehouse, ${waitingLineCount} still waiting.`,
+    )}`,
+  );
 }
 
 export async function updateContainerArrivalDatesAction(formData: FormData) {

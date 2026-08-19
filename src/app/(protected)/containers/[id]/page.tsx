@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { updateContainerArrivalDatesAction } from "@/app/(protected)/containers/actions";
 import { requireUser } from "@/lib/auth";
-import { loadContainerCoverage } from "@/lib/containers/container-coverage";
+import { loadContainerReceipt } from "@/lib/containers/container-coverage";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { ReceiveContainerConfirmForm } from "./receive-container-confirm-form";
+import { ReceiveContainerWorkspace } from "./receive-container-workspace";
 
 type ContainerDetailRow = {
   id: string;
@@ -99,7 +99,7 @@ export default async function ContainerDetailPage({
       `)
       .eq("id", id)
       .maybeSingle(),
-    loadContainerCoverage(supabase, id),
+    loadContainerReceipt(supabase, id),
   ]);
 
   if (error || !containerData) {
@@ -122,9 +122,21 @@ export default async function ContainerDetailPage({
     allocatedByProduct.set(row.productId, (allocatedByProduct.get(row.productId) ?? 0) + row.coveredQty);
   }
 
-  const hasExplicitReceipts = coverage.hasExplicitReceipts;
+  const isReceived = coverage.isReceived;
   const eligibleLineIds = coverage.eligibleLineIds;
   const customerRows = coverage.rows;
+  const receivedQtyByProduct = new Map(coverage.lines.map((line) => [line.productId, line.receivedQty]));
+  const expectedTotal = coverage.lines.reduce((sum, line) => sum + line.expectedQty, 0);
+  const receivedTotal = coverage.lines.reduce((sum, line) => sum + line.receivedQty, 0);
+
+  const { data: productOptionRows } = isReceived
+    ? { data: [] }
+    : await supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true });
+
+  const manifestProductIds = new Set(coverage.lines.map((line) => line.productId));
+  const productOptions = ((productOptionRows ?? []) as Array<{ id: string; sku: string | null; canonical_name: string | null }>)
+    .filter((product) => !manifestProductIds.has(product.id))
+    .map((product) => ({ id: product.id, sku: product.sku, name: product.canonical_name }));
 
   return (
     <div className="space-y-6">
@@ -146,35 +158,102 @@ export default async function ContainerDetailPage({
         </div>
       </div>
 
+      {!isReceived ? (
+        <ReceiveContainerWorkspace
+          containerId={container.id}
+          containerNumber={container.container_number}
+          lines={coverage.lines.map((line) => ({
+            id: line.id,
+            productId: line.productId,
+            sku: line.sku,
+            productName: line.productName,
+            expectedQty: line.expectedQty,
+            assignedQty: line.assignedQty,
+            demandQty: line.demandQty,
+            isUnplanned: line.isUnplanned,
+          }))}
+          demandByProduct={coverage.demandByProduct}
+          productOptions={productOptions}
+        />
+      ) : (
+        <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold text-[#111827]">Receipt Reconciliation</h2>
+              <p className="mt-1 text-sm text-[#5a5a5a]">Actual received counts are authoritative and are retained for audit.</p>
+            </div>
+            <span className="rounded-full bg-[#e7f7ed] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">
+              Received
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Expected units</p><p className="text-2xl font-bold text-[#111827]">{expectedTotal}</p></div>
+            <div><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Received units</p><p className="text-2xl font-bold text-[#111827]">{receivedTotal}</p></div>
+            <div><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Variance</p><p className={`text-2xl font-bold ${receivedTotal - expectedTotal < 0 ? "text-[#b91c1c]" : receivedTotal - expectedTotal > 0 ? "text-[#b45309]" : "text-[#111827]"}`}>{receivedTotal - expectedTotal > 0 ? "+" : ""}{receivedTotal - expectedTotal}</p></div>
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-[720px] w-full divide-y divide-[#e5e7eb] text-sm">
+              <thead className="bg-[#f9fafb] text-left text-[#6b7280]">
+                <tr>
+                  <th className="px-3 py-3 font-semibold">SKU</th>
+                  <th className="px-3 py-3 font-semibold">Product</th>
+                  <th className="px-3 py-3 font-semibold">Expected</th>
+                  <th className="px-3 py-3 font-semibold">Received</th>
+                  <th className="px-3 py-3 font-semibold">Variance</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e5e7eb] bg-white">
+                {coverage.lines.map((line) => {
+                  const variance = line.receivedQty - line.expectedQty;
+                  const isMissing = line.receivedQty === 0 && line.expectedQty > 0;
+                  return (
+                    <tr key={line.id}>
+                      <td className="px-3 py-3 font-medium text-[#111827]">
+                        {line.sku}
+                        {line.isUnplanned ? (
+                          <span className="ml-2 rounded-full bg-[#fff7e6] px-2 py-0.5 text-[11px] font-semibold text-[#b45309]">Unplanned</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 text-[#4b5563]">{line.productName}</td>
+                      <td className="px-3 py-3">{line.expectedQty}</td>
+                      <td className="px-3 py-3">{line.receivedQty}</td>
+                      <td className="px-3 py-3">
+                        {variance === 0 ? (
+                          <span className="rounded-full bg-[#f3f4f6] px-2.5 py-1 text-xs font-semibold text-[#4b5563]">Match</span>
+                        ) : variance < 0 ? (
+                          <span className="rounded-full bg-[#fee2e2] px-2.5 py-1 text-xs font-semibold text-[#b91c1c]">{variance} {isMissing ? "MISSING" : "SHORT"}</span>
+                        ) : (
+                          <span className="rounded-full bg-[#fff7e6] px-2.5 py-1 text-xs font-semibold text-[#b45309]">+{variance} EXTRA</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-2xl font-semibold text-[#111827]">Customers On This Container</h2>
             <p className="mt-1 text-sm text-[#5a5a5a]">
-              Customers are matched to this container by product queue order. Receiving it marks fully covered lines as In Warehouse.
+              {isReceived
+                ? "Coverage below reflects the quantities actually received."
+                : "Forecast based on expected quantities. Final coverage is calculated from the counts you record above."}
             </p>
           </div>
-          {container.lifecycle_status !== "RECEIVED" ? (
-            <ReceiveContainerConfirmForm
-              containerId={container.id}
-              containerNumber={container.container_number}
-              eligibleLineCount={eligibleLineIds.size}
-              waitingLineCount={customerRows.filter((row) => !row.willMarkInWarehouse).length}
-              requireFullReceiptConfirmation={!hasExplicitReceipts}
-            />
-          ) : (
-            <span className="rounded-full bg-[#e7f7ed] px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">
-              Already Received
-            </span>
-          )}
         </div>
 
         <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
           <p>
-            This will mark Container {container.container_number} as Received and move {eligibleLineIds.size} eligible order lines to In Warehouse. {customerRows.filter((row) => !row.willMarkInWarehouse).length} other lines will remain waiting.
-          </p>
-          <p className="mt-1 text-xs text-[#64748b]">
-            Receipt mode: {hasExplicitReceipts ? "using Qty Received from container lines" : "using ordered quantity fallback because Qty Received is empty"}.
+            {isReceived
+              ? `${eligibleLineIds.size} order line(s) were covered by this container. ${customerRows.filter((row) => !row.willMarkInWarehouse).length} line(s) remain waiting.`
+              : `Based on expected quantities, ${eligibleLineIds.size} order line(s) would be covered and ${customerRows.filter((row) => !row.willMarkInWarehouse).length} would remain waiting.`}
           </p>
         </div>
 
@@ -242,7 +321,7 @@ export default async function ContainerDetailPage({
                 <tr>
                   <th className="px-3 py-3 font-semibold">SKU</th>
                   <th className="px-3 py-3 font-semibold">Product</th>
-                  <th className="px-3 py-3 font-semibold">Qty Ordered</th>
+                  <th className="px-3 py-3 font-semibold">Expected</th>
                   <th className="px-3 py-3 font-semibold">Qty Received</th>
                   <th className="px-3 py-3 font-semibold">Allocated</th>
                   <th className="px-3 py-3 font-semibold">Available to Sell</th>
@@ -251,9 +330,10 @@ export default async function ContainerDetailPage({
               <tbody className="divide-y divide-[#e5e7eb] bg-white">
                 {lines.length > 0 ? lines.map((line) => {
                   const ordered = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
-                  const received = Number(line.received_qty ?? 0);
+                  const received = line.product_id ? receivedQtyByProduct.get(line.product_id) ?? 0 : 0;
                   const allocated = line.product_id ? allocatedByProduct.get(line.product_id) ?? 0 : 0;
-                  const available = Math.max((hasExplicitReceipts ? received : ordered) - allocated, 0);
+                  // Only physically received units are sellable.
+                  const available = Math.max(received - allocated, 0);
 
                   return (
                     <tr key={line.id}>

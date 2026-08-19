@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { isOpenDemandLine } from "@/lib/demand/product-demand";
 import {
   getSuggestedAllocation,
   type OpenQueueLine,
@@ -1227,6 +1228,8 @@ export default async function OrderDetailPage({
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  // Only approved quantity can ship, so an unreviewed order has nothing to select.
+  const hasShippableLines = orderLines.some((line) => isOpenDemandLine(line));
   const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
@@ -1340,9 +1343,20 @@ export default async function OrderDetailPage({
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
-                <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
+                {hasShippableLines ? (
+                  <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
+                ) : (
+                  <span className="rounded-full bg-[#fff7e6] px-3 py-1.5 text-[#b45309]">Awaiting review</span>
+                )}
               </div>
             </div>
+
+            {!hasShippableLines ? (
+              <div className="mt-4 rounded-lg border border-[#f4d9a8] bg-[#fffaf0] p-3 text-sm text-[#8a5a00]">
+                Nothing can be shipped yet: these items are still <strong>pending review</strong>, so no approved quantity exists.
+                Approve the order in <Link href="/shipping-review" className="underline">Shipping Review</Link> first, then create the shipment.
+              </div>
+            ) : null}
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-[900px]">

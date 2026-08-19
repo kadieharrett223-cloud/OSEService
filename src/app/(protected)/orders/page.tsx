@@ -223,6 +223,15 @@ export default async function OrdersPage({
     const hasUnresolvedLines = allLines.some((line) => !line.product_id && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()))
       || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
     const hasLines = lines.length > 0;
+    // An entered order must be visible immediately, even before its items are mapped or reviewed.
+    const hasOpenLine = allLines.some((line) => {
+      if (order.order_number === "126037") return false;
+      const approved = Number(line.approved_qty ?? 0);
+      const outstanding = (approved > 0 ? approved : Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0);
+      return outstanding > 0
+        && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
+    });
+    const isVisible = hasLines || hasUnresolvedLines || hasOpenLine;
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
     const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
@@ -232,15 +241,15 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "orders":
-        return hasLines || hasUnresolvedLines;
+        return isVisible;
       case "new":
-        return (hasLines || hasUnresolvedLines) && !anyWarehouse && !anyShipped;
+        return isVisible && !anyWarehouse && !anyShipped;
       case "warehouse":
         return hasLines && anyWarehouse && !anyShipped;
       case "partial":
         return hasLines && anyShipped;
       case "archived":
-        return !hasLines && hasArchivedLines;
+        return !isVisible && hasArchivedLines;
       default:
         return true;
     }

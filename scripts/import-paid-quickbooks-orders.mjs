@@ -76,10 +76,9 @@ function buildProductMap(products, aliases) {
 }
 
 function planOrders(invoices, invoiceLines, existingOrders, productMap, cutoff) {
+  // source_invoice_id is the logical parent identity; provenance must not create a second order.
   const existingByInvoiceId = new Set(
-    existingOrders
-      .filter((row) => row.source_type === SOURCE_TYPE && row.source_invoice_id)
-      .map((row) => row.source_invoice_id),
+    existingOrders.filter((row) => row.source_invoice_id).map((row) => row.source_invoice_id),
   );
   const linesByInvoice = new Map();
   for (const line of invoiceLines) {

@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { planQuickbooksOrderRefresh, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
+import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -463,12 +464,12 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
 
   const [{ data: invoice, error: invoiceError }, { data: existing }] = await Promise.all([
     adminClient.from("qbo_invoices").select("id, qbo_invoice_id, invoice_number, customer_id, payment_status, invoice_date, total_amount").eq("id", invoiceId).maybeSingle(),
-    adminClient.from("shipping_orders").select("id, review_status").eq("source_invoice_id", invoiceId).limit(1),
+    adminClient.from("shipping_orders").select("id, review_status, source_type, source_system, created_at").eq("source_invoice_id", invoiceId).order("created_at", { ascending: true }),
   ]);
 
   if (invoiceError || !invoice) redirect(`/orders/new?error=${encodeURIComponent(invoiceError?.message ?? "QuickBooks invoice not found")}`);
 
-  const existingOrder = existing?.[0];
+  const existingOrder = resolveCanonicalOrderParent(existing ?? []);
   const resolution = resolveInvoiceOrder(existingOrder);
   if (resolution.action === "refresh") {
     await activateExistingQuickbooksOrder(adminClient, resolution.orderId, invoice);

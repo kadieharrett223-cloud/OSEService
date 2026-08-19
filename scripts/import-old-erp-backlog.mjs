@@ -574,20 +574,20 @@ async function upsertOrderBySourceKey(supabase, payload) {
   if (payload.source_invoice_id && payload.source_type) {
     const { data: existingByInvoice, error: existingByInvoiceError } = await supabase
       .from("shipping_orders")
-      .select("id")
+      .select("id, source_type, created_at")
       .eq("source_invoice_id", payload.source_invoice_id)
-      .eq("source_type", payload.source_type)
-      .maybeSingle();
+      .order("created_at", { ascending: true });
 
     if (existingByInvoiceError) {
       fail(`Could not query existing shipping order by invoice for ${payload.source_key}: ${existingByInvoiceError.message}`);
     }
 
-    if (existingByInvoice?.id) {
+    const canonicalExistingByInvoice = (existingByInvoice ?? []).find((row) => row.source_type === "QBO_INVOICE") ?? existingByInvoice?.[0];
+    if (canonicalExistingByInvoice?.id) {
       const { data: updated, error: updateError } = await supabase
         .from("shipping_orders")
         .update(payload)
-        .eq("id", existingByInvoice.id)
+        .eq("id", canonicalExistingByInvoice.id)
         .select("id")
         .single();
 

@@ -1031,6 +1031,21 @@ export default async function OrderDetailPage({
     if (line.product_id && !shippingLineByProductId.has(line.product_id)) shippingLineByProductId.set(line.product_id, line);
   }
 
+  const bestCanonicalLineMatch = (skuKey: string | null, description: string) => {
+    if (!skuKey) return null;
+    const descriptionKey = normalizeSkuKey(description);
+    return orderLines
+      .map((candidate) => {
+        const canonical = normalizeSkuKey(candidate.products?.canonical_name);
+        const directIndex = canonical?.indexOf(skuKey) ?? -1;
+        const descriptionIndex = descriptionKey?.indexOf(canonical ?? "") ?? -1;
+        if (!canonical || (directIndex < 0 && descriptionIndex < 0)) return null;
+        return { candidate, score: directIndex >= 0 ? directIndex : 10000 + descriptionIndex };
+      })
+      .filter((match): match is { candidate: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]; score: number } => Boolean(match))
+      .sort((left, right) => left.score - right.score)[0]?.candidate ?? null;
+  };
+
   const lineForInvoiceSku = (skuKey: string | null, description: string) => {
     if (!skuKey) return null;
     const direct = shippingLineBySkuKey.get(skuKey);
@@ -1041,11 +1056,7 @@ export default async function OrderDetailPage({
       if (byProduct) return byProduct;
     }
     // Old-ERP lines can retain a numeric SKU while the invoice uses the model code in its description.
-    return orderLines.find((candidate) => {
-      const canonical = normalizeSkuKey(candidate.products?.canonical_name);
-      const descriptionKey = normalizeSkuKey(description);
-      return Boolean(canonical && (canonical.includes(skuKey) || descriptionKey?.includes(canonical)));
-    }) ?? null;
+    return bestCanonicalLineMatch(skuKey, description);
   };
 
   const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
@@ -1059,9 +1070,11 @@ export default async function OrderDetailPage({
     const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
     // Invoice SKUs are model codes while order lines often carry old-ERP numbers, so fall back to
     // the resolved product before giving up on finding the operational line.
-    const shippingLine = (skuKey
+    const shippingLine = skuKey
       ? lineForInvoiceSku(skuKey, item.description)
-      : item.description === "Invoice line" ? null : orderLines[index] ?? null) ?? null;
+        ?? orderLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
+        ?? null
+      : item.description === "Invoice line" ? null : orderLines[index] ?? null;
     return {
       key: `${skuKey ?? "line"}-${index}`,
       sku: item.sku,
@@ -1262,7 +1275,12 @@ export default async function OrderDetailPage({
   const itemStockSummary = visibleItems.map((item) => {
     const supply = getItemSupplySnapshot(item);
     const needed = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
-    const fulfilled = Math.min(needed, Number(item.shippingLine?.fulfilled_qty ?? (item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0)));
+    const canonicalMatch = item.sku ? bestCanonicalLineMatch(normalizeSkuKey(item.sku), item.description) : null;
+    const fulfilled = Math.min(needed, Math.max(
+      Number(item.shippingLine?.fulfilled_qty ?? 0),
+      item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0,
+      Number(canonicalMatch?.fulfilled_qty ?? 0),
+    ));
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
     const status = item.isNonInventory

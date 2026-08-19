@@ -354,6 +354,12 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (linesError) redirect(`/orders/new?error=${encodeURIComponent(linesError.message)}`);
   if (!invoiceLines?.length) redirect(`/orders/new?error=This+invoice+has+no+imported+QuickBooks+lines`);
 
+  const aliasSkus = invoiceLines.map((line) => line.qbo_sku).filter((sku): sku is string => Boolean(sku));
+  const { data: aliasRows } = aliasSkus.length
+    ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
+    : { data: [] };
+  const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
+
   const { data: order, error: orderError } = await adminClient
     .from("shipping_orders")
     .insert({
@@ -369,7 +375,9 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
 
   if (orderError || !order?.id) redirect(`/orders/new?error=${encodeURIComponent(orderError?.message ?? "Unable to create order")}`);
 
-  const mappedInvoiceLines = invoiceLines.filter((line): line is typeof line & { product_id: string } => Boolean(line.product_id));
+  const mappedInvoiceLines = invoiceLines
+    .map((line) => ({ ...line, product_id: line.product_id ?? productIdByAlias.get(String(line.qbo_sku ?? "").trim().toUpperCase()) ?? null }))
+    .filter((line): line is typeof line & { product_id: string } => Boolean(line.product_id));
   const { error: lineError } = mappedInvoiceLines.length
     ? await adminClient.from("shipping_order_lines").insert(mappedInvoiceLines.map((line) => ({
     shipping_order_id: order.id,

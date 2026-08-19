@@ -358,7 +358,6 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
       order_number: invoice.invoice_number,
       source_type: "QBO_INVOICE",
       review_status: "APPROVED",
-      fulfillment_status: "PENDING",
       priority: "NORMAL",
       legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
       notes: "Entered from QuickBooks invoice lookup.",

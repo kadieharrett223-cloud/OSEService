@@ -15,13 +15,12 @@ export function ShipmentSelectionProvider({ children }: { children: React.ReactN
   function start() { setActive(true); setSelectedMap({}); }
   function cancel() { setActive(false); setSelectedMap({}); }
   function toggle(line: SelectionLine) {
-    if (line.inStock <= 0) return;
     setSelectedMap((current) => {
       if (current[line.id]) { const next = { ...current }; delete next[line.id]; return next; }
       return { ...current, [line.id]: { ...line, quantity: line.defaultQty } };
     });
   }
-  function setQuantity(id: string, quantity: number) { setSelectedMap((current) => current[id] ? { ...current, [id]: { ...current[id], quantity: Math.max(1, Math.min(current[id].remainingQty, current[id].inStock, quantity || 1)) } } : current); }
+  function setQuantity(id: string, quantity: number) { setSelectedMap((current) => current[id] ? { ...current, [id]: { ...current[id], quantity: Math.max(1, Math.min(current[id].remainingQty, quantity || 1)) } } : current); }
   return <SelectionContext.Provider value={{ active, selected, start, cancel, toggle, setQuantity }}>{children}</SelectionContext.Provider>;
 }
 
@@ -35,8 +34,8 @@ export function ShipmentSelectionButton({ pickupMode = false }: { pickupMode?: b
 export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
   const { active, selected, toggle, setQuantity } = useSelection();
   if (!active || line.remainingQty <= 0) return null;
-  const selectedLine = line.inStock > 0 ? selected.find((item) => item.id === line.id) : undefined;
-  return <span className="mr-2 inline-flex items-center gap-1 align-middle"><input type="checkbox" disabled={line.inStock <= 0} checked={Boolean(selectedLine)} onChange={() => toggle(line)} aria-label={`Include ${line.sku} in shipment`} />{selectedLine ? <input type="number" min="1" max={Math.min(line.remainingQty, line.inStock)} value={selectedLine.quantity} onChange={(event) => setQuantity(line.id, Number(event.target.value))} className="w-16 rounded border border-[#cbd5e1] px-1.5 py-1 text-xs" aria-label={`Quantity of ${line.sku}`} /> : null}{line.inStock <= 0 ? <span className="ml-1 text-[11px] font-medium text-[#b45309]">Waiting / not in stock</span> : null}</span>;
+  const selectedLine = selected.find((item) => item.id === line.id);
+  return <span className="mr-2 inline-flex items-center gap-1 align-middle"><input type="checkbox" checked={Boolean(selectedLine)} onChange={() => toggle(line)} aria-label={`Include ${line.sku} in shipment`} />{selectedLine ? <input type="number" min="1" max={line.remainingQty} value={selectedLine.quantity} onChange={(event) => setQuantity(line.id, Number(event.target.value))} className="w-16 rounded border border-[#cbd5e1] px-1.5 py-1 text-xs" aria-label={`Quantity of ${line.sku}`} /> : null}{line.inStock <= 0 ? <span className="ml-1 text-[11px] font-medium text-[#b45309]">Waiting / not in stock</span> : null}</span>;
 }
 
 export function ShipmentSelectionComposer({ orderId, pickupMode = false }: { orderId: string; pickupMode?: boolean }) {

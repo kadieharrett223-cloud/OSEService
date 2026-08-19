@@ -722,7 +722,7 @@ export default async function InventoryPage({
                 <th className="px-2 py-2.5">Sold</th>
                 <th className="px-2 py-2.5">Available Now</th>
                 <th className="px-2 py-2.5">Incoming</th>
-                <th className="px-2 py-2.5">Available Incoming</th>
+                <th className="px-2 py-2.5">Available/Incoming</th>
                 <th className="px-2 py-2.5">Next Arrival</th>
                 <th className="px-2 py-2.5">Customer List</th>
               </tr>

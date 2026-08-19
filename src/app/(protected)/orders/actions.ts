@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
+import { planQuickbooksOrderRefresh } from "@/lib/orders/quickbooks-refresh";
 
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -410,40 +411,27 @@ async function activateExistingQuickbooksOrder(
     : { data: [] };
   const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
 
-  const existingByInvoiceLine = new Map((orderLines ?? []).map((line) => [line.qbo_invoice_line_id, line]));
-  const touchedProductIds = new Set<string>();
+  const plan = planQuickbooksOrderRefresh(invoiceLines ?? [], orderLines ?? [], productIdByAlias);
+  for (const update of plan.updates) {
+    const { error } = await adminClient
+      .from("shipping_order_lines")
+      .update({
+        ordered_qty: update.ordered_qty,
+        approved_qty: update.approved_qty,
+        approval_status: update.approval_status,
+        product_id: update.product_id ?? undefined,
+      })
+      .eq("id", update.lineId);
+    if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  }
 
-  for (const invoiceLine of invoiceLines ?? []) {
-    const productId = invoiceLine.product_id
-      ?? productIdByAlias.get(String(invoiceLine.qbo_sku ?? "").trim().toUpperCase())
-      ?? null;
-    const existingLine = existingByInvoiceLine.get(invoiceLine.id);
-    const orderedQty = Number(invoiceLine.ordered_qty ?? 0);
-
-    if (existingLine) {
-      // Never disturb anything already shipped.
-      if (Number(existingLine.fulfilled_qty ?? 0) > 0) continue;
-      const { error } = await adminClient
-        .from("shipping_order_lines")
-        .update({
-          ordered_qty: orderedQty,
-          approved_qty: orderedQty,
-          approval_status: "APPROVED",
-          product_id: existingLine.product_id ?? productId,
-        })
-        .eq("id", existingLine.id);
-      if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
-      if (existingLine.product_id ?? productId) touchedProductIds.add((existingLine.product_id ?? productId) as string);
-      continue;
-    }
-
-    if (!productId) continue;
+  for (const insert of plan.inserts) {
     const { error } = await adminClient.from("shipping_order_lines").insert({
       shipping_order_id: orderId,
-      qbo_invoice_line_id: invoiceLine.id,
-      product_id: productId,
-      ordered_qty: orderedQty,
-      approved_qty: orderedQty,
+      qbo_invoice_line_id: insert.qboInvoiceLineId,
+      product_id: insert.productId,
+      ordered_qty: insert.orderedQty,
+      approved_qty: insert.orderedQty,
       fulfilled_qty: 0,
       cancelled_qty: 0,
       approval_status: "APPROVED",
@@ -451,11 +439,10 @@ async function activateExistingQuickbooksOrder(
       allocation_status: "UNALLOCATED",
       fulfillment_status: "PENDING",
       priority: "NORMAL",
-      source_event_key: `QBO_INVOICE_LINE:${invoice.qbo_invoice_id}:${invoiceLine.qbo_line_id}`,
-      legacy_item_code: invoiceLine.qbo_sku,
+      source_event_key: `QBO_INVOICE_LINE:${invoice.qbo_invoice_id}:${insert.qboLineId}`,
+      legacy_item_code: insert.qboSku,
     });
     if (error && error.code !== "23505") redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
-    touchedProductIds.add(productId);
   }
 
   await adminClient.from("shipping_orders").update({ review_status: "APPROVED" }).eq("id", orderId);
@@ -463,7 +450,7 @@ async function activateExistingQuickbooksOrder(
     message: `Order refreshed from QuickBooks invoice ${invoice.invoice_number ?? ""} and activated`,
   });
 
-  if (touchedProductIds.size > 0) await recalculateProductQueues(Array.from(touchedProductIds));
+  if (plan.productIds.length > 0) await recalculateProductQueues(plan.productIds);
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
 }

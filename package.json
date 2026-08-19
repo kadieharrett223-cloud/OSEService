@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm run test",
     "azure:export": "node --env-file=.env.local scripts/export-azure-cosmos.mjs",
     "import:denied-cancelled-history": "node scripts/import-old-erp-denied-cancelled-history.mjs",
     "report:old-erp-history-dry-run": "node scripts/classify-old-erp-history-dry-run.mjs",
@@ -30,12 +33,12 @@
     "sync:old-erp-opening-inventory:preview": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs",
     "sync:old-erp-opening-inventory:apply": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs --apply",
     "report:old-erp-order-parity": "node --env-file=.env.local scripts/report-old-erp-order-parity.mjs",
-    "sync:old-erp-order-priorities": "node --env-file=.env.local scripts/sync-old-erp-order-priorities.mjs"
-    ,"transfer:old-erp-accepted-customers:preview": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs"
-    ,"transfer:old-erp-accepted-customers:apply": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs --apply",
+    "sync:old-erp-order-priorities": "node --env-file=.env.local scripts/sync-old-erp-order-priorities.mjs",
+    "transfer:old-erp-accepted-customers:preview": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs",
+    "transfer:old-erp-accepted-customers:apply": "node --env-file=.env.local scripts/transfer-old-erp-accepted-customers.mjs --apply",
     "sync:old-erp-order-state:preview": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs",
-    "sync:old-erp-order-state:apply": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs --apply"
-    ,"report:old-erp-current-warehouse": "node scripts/report-old-erp-current-warehouse-orders.mjs"
+    "sync:old-erp-order-state:apply": "node --env-file=.env.local scripts/sync-old-erp-order-operational-state.mjs --apply",
+    "report:old-erp-current-warehouse": "node scripts/report-old-erp-current-warehouse-orders.mjs"
   },
   "dependencies": {
     "@azure/cosmos": "^4.10.0",
@@ -53,6 +56,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

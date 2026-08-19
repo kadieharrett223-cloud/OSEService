@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 
@@ -183,18 +184,7 @@ export default async function OrdersPage({
   });
 
   function operationalLines(order: OrderSummary) {
-    return (order.shipping_order_lines ?? []).filter((line) => {
-      const remaining = Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-      const sku = String(line.products?.sku ?? "").trim().toUpperCase();
-      const legacySku = String(line.legacy_item_code ?? "").trim().toUpperCase();
-      return Boolean(line.product_id)
-        && order.order_number !== "126037"
-        && !manualMappingSkus.has(sku)
-        && !manualMappingSkus.has(legacySku)
-        && ["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase())
-        && remaining > 0
-        && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
-    });
+    return classifyOrder(order, { manualMappingSkus }).operationalLines as OrderSummary["shipping_order_lines"];
   }
   const liveOrderIdByInvoice = new Map<string, string>();
   for (const order of allOrders) {
@@ -218,44 +208,7 @@ export default async function OrdersPage({
   }
 
   function matchesTab(order: OrderSummary, tabId: string) {
-    const lines = operationalLines(order);
-    const allLines = order.shipping_order_lines ?? [];
-    const hasUnresolvedLines = allLines.some((line) => !line.product_id && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()))
-      || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
-    const hasLines = lines.length > 0;
-    // Entering an invoice activates its order (review_status leaves PENDING_REVIEW). Historical bulk
-    // imports stay dormant until entered or proven current by reconciliation (an APPROVED line).
-    const isActivated = String(order.review_status ?? "").toUpperCase() !== "PENDING_REVIEW";
-    const hasOpenLine = allLines.some((line) => {
-      if (order.order_number === "126037") return false;
-      const approved = Number(line.approved_qty ?? 0);
-      const outstanding = (approved > 0 ? approved : Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0);
-      return outstanding > 0
-        && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
-    });
-    const isVisibleOperationalOrder = hasLines || (isActivated && (hasUnresolvedLines || hasOpenLine));
-    const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
-    const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
-    const isNewOrder = isVisibleOperationalOrder && !anyWarehouse && !anyShipped;
-    const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
-      !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
-      && line.fulfillment_status === "FULFILLED",
-    );
-
-    switch (tabId) {
-      case "orders":
-        return isVisibleOperationalOrder;
-      case "new":
-        return isNewOrder;
-      case "warehouse":
-        return hasLines && anyWarehouse && !anyShipped;
-      case "partial":
-        return hasLines && anyShipped;
-      case "archived":
-        return !isVisibleOperationalOrder && hasArchivedLines;
-      default:
-        return true;
-    }
+    return matchesOrderTab(classifyOrder(order, { manualMappingSkus }), tabId);
   }
 
   const orderSummaries = allOrders.filter((order) => {

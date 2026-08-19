@@ -1,0 +1,83 @@
+/**
+ * Decides what re-entering a QuickBooks invoice should change on an existing order.
+ *
+ * Kept free of database access so the rules — above all "never touch a line that already shipped"
+ * — can be tested directly.
+ */
+
+export type RefreshInvoiceLine = {
+  id: string;
+  qbo_line_id?: string | null;
+  product_id?: string | null;
+  ordered_qty?: number | null;
+  qbo_sku?: string | null;
+};
+
+export type RefreshOrderLine = {
+  id: string;
+  qbo_invoice_line_id?: string | null;
+  product_id?: string | null;
+  ordered_qty?: number | null;
+  approved_qty?: number | null;
+  fulfilled_qty?: number | null;
+};
+
+export type RefreshPlan = {
+  updates: Array<{ lineId: string; ordered_qty: number; approved_qty: number; approval_status: string; product_id: string | null }>;
+  inserts: Array<{ qboInvoiceLineId: string; productId: string; orderedQty: number; qboSku: string | null; qboLineId: string | null }>;
+  skippedShipped: string[];
+  skippedUnmapped: string[];
+  productIds: string[];
+};
+
+export function planQuickbooksOrderRefresh(
+  invoiceLines: RefreshInvoiceLine[],
+  orderLines: RefreshOrderLine[],
+  productIdByAlias: Map<string, string>,
+): RefreshPlan {
+  const existingByInvoiceLine = new Map(orderLines.map((line) => [line.qbo_invoice_line_id ?? "", line]));
+  const plan: RefreshPlan = { updates: [], inserts: [], skippedShipped: [], skippedUnmapped: [], productIds: [] };
+  const productIds = new Set<string>();
+
+  for (const invoiceLine of invoiceLines) {
+    const aliasKey = String(invoiceLine.qbo_sku ?? "").trim().toUpperCase();
+    const productId = invoiceLine.product_id ?? productIdByAlias.get(aliasKey) ?? null;
+    const orderedQty = Math.max(0, Number(invoiceLine.ordered_qty ?? 0));
+    const existing = existingByInvoiceLine.get(invoiceLine.id);
+
+    if (existing) {
+      // Shipped history is authoritative and must never be rewritten by a refresh.
+      if (Number(existing.fulfilled_qty ?? 0) > 0) {
+        plan.skippedShipped.push(existing.id);
+        continue;
+      }
+      const resolvedProductId = existing.product_id ?? productId;
+      plan.updates.push({
+        lineId: existing.id,
+        ordered_qty: orderedQty,
+        approved_qty: orderedQty,
+        approval_status: "APPROVED",
+        product_id: resolvedProductId,
+      });
+      if (resolvedProductId) productIds.add(resolvedProductId);
+      continue;
+    }
+
+    if (!productId) {
+      plan.skippedUnmapped.push(invoiceLine.id);
+      continue;
+    }
+
+    plan.inserts.push({
+      qboInvoiceLineId: invoiceLine.id,
+      productId,
+      orderedQty,
+      qboSku: invoiceLine.qbo_sku ?? null,
+      qboLineId: invoiceLine.qbo_line_id ?? null,
+    });
+    productIds.add(productId);
+  }
+
+  plan.productIds = Array.from(productIds);
+  return plan;
+}

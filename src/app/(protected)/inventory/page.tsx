@@ -104,6 +104,10 @@ type InventoryViewRow = {
   sortOrder: number;
   onFloor: number;
   openDemand: number;
+  onOrder: number;
+  unassignedDemand: number;
+  approvedDemand: number;
+  inWarehouseDemand: number;
   floorCommitted: number;
   availableNow: number;
   incoming: number;
@@ -492,6 +496,10 @@ export default async function InventoryPage({
       sortOrder: Number.MAX_SAFE_INTEGER,
       onFloor: 0,
       openDemand: 0,
+      onOrder: 0,
+      unassignedDemand: 0,
+      approvedDemand: 0,
+      inWarehouseDemand: 0,
       floorCommitted: 0,
       availableNow: 0,
       incoming: 0,
@@ -504,6 +512,10 @@ export default async function InventoryPage({
 
     group.onFloor += onFloorByProduct.get(product.id) ?? 0;
     group.openDemand += openDemandByProduct.get(product.id) ?? 0;
+    group.onOrder = group.incoming;
+    group.unassignedDemand += (queueByProduct.get(product.id) ?? []).filter((item) => item.assignedTo === "Unassigned").reduce((sum, item) => sum + item.openQty, 0);
+    group.approvedDemand += (queueByProduct.get(product.id) ?? []).reduce((sum, item) => sum + item.openQty, 0);
+    group.inWarehouseDemand += (queueByProduct.get(product.id) ?? []).reduce((sum, item) => sum + item.warehouseQty, 0);
     group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
     group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];
     group.productIds = [...group.productIds, product.id];
@@ -536,6 +548,7 @@ export default async function InventoryPage({
     }
     group.incomingContainers = Array.from(containersByNumber.values());
     group.incoming = group.incomingContainers.reduce((sum, container) => sum + container.qty, 0);
+    group.onOrder = group.incoming;
 
     canonicalGroups.set(canonicalKey, group);
   }
@@ -714,27 +727,27 @@ export default async function InventoryPage({
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="max-w-full overflow-x-auto">
-          <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
+          <table className="w-full min-w-[1180px] table-fixed border-collapse text-sm">
             <colgroup>
-              <col className="w-[280px]" />
-              <col className="w-[82px]" />
-              <col className="w-[78px]" />
-              <col className="w-[108px]" />
-              <col className="w-[92px]" />
-              <col className="w-[176px]" />
-              <col className="w-[128px]" />
-              <col className="w-[156px]" />
+              <col className="w-[310px]" />
+              <col className="w-[105px]" />
+              <col className="w-[105px]" />
+              <col className="w-[105px]" />
+              <col className="w-[125px]" />
+              <col className="w-[120px]" />
+              <col className="w-[155px]" />
+              <col className="w-[180px]" />
             </colgroup>
-            <thead>
-              <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                <th className="px-2 py-2.5">Item</th>
-                <th className="px-2 py-2.5">On Floor</th>
-                <th className="px-2 py-2.5">Sold</th>
-                <th className="px-2 py-2.5">Available Now</th>
-                <th className="px-2 py-2.5">Incoming</th>
-                <th className="px-2 py-2.5">Available/Incoming</th>
-                <th className="px-2 py-2.5">Next Arrival</th>
-                <th className="px-2 py-2.5">Customer List</th>
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-[#10233f] text-xs uppercase tracking-[0.08em] text-white shadow-sm">
+                <th className="border-r border-white/15 px-3 py-3 text-left">SKU / Product</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">On Order</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">Unassigned</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">Approved</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">In Warehouse</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">Open Demand</th>
+                <th className="border-r border-white/15 px-3 py-3 text-center">Next ETA</th>
+                <th className="px-3 py-3 text-right">Customer List</th>
               </tr>
             </thead>
             <tbody>
@@ -745,17 +758,18 @@ export default async function InventoryPage({
               ) : (
                 sections.map((section) => (
                   <Fragment key={section.name}>
-                    <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
-                      <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
+                    <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#cbd5e1] bg-[#e8eef7]">
+                      <th colSpan={8} scope="colgroup" className="px-3 py-2.5 text-left text-xs font-bold uppercase tracking-[0.1em] text-[#243b5a]">
                         {section.name}
                         <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>
                       </th>
                     </tr>
-                    {section.rows.map((row) => (
-                      <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
-                    <td className="px-2 py-3">
-                      <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#64748b]">
+                    {section.rows.map((row, rowIndex) => (
+                      <tr key={row.productId} className={`${rowIndex % 2 === 0 ? "bg-white" : "bg-[#f6f8fb]"} border-b border-[#dfe5ed] align-top`}>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3">
+                      <div className="font-bold leading-5 text-[#111827]" title={row.sku}>{row.sku}</div>
+                      <div className="mt-1 line-clamp-2 max-w-[290px] break-words text-xs leading-4 text-[#64748b]" title={row.productName}>{row.productName}</div>
+                      <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-[#64748b]">
                         {row.manufacturer ? (
                           <span className="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[#475569]">
                             {row.manufacturer}
@@ -781,25 +795,15 @@ export default async function InventoryPage({
                         groups={groupNames}
                       />
                     </td>
-                    <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.onFloor)}</td>
-                    <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.openDemand)}</td>
-                    <td className="whitespace-nowrap px-2 py-3 font-semibold text-[#16a34a]">
-                      {formatNumber(row.availableNow)}
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center font-semibold text-[#334155]">{formatNumber(row.onOrder)}</td>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center text-[#334155]">{formatNumber(row.unassignedDemand)}</td>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center font-semibold text-[#16804d]">{formatNumber(row.approvedDemand)}</td>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center font-semibold text-[#2563eb]">{formatNumber(row.inWarehouseDemand)}</td>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center font-bold text-[#1f2937]">{formatNumber(row.openDemand)}</td>
+                    <td className="border-r border-[#e5eaf1] px-3 py-3 text-center">
+                      {row.nextEta === "—" ? <span className="text-[#9ca3af]">—</span> : <span className="font-semibold text-[#b45309]">{row.nextEta}</span>}
                     </td>
-                    <td className="whitespace-nowrap px-2 py-3">
-                      <IncomingDropdown
-                        total={formatNumber(row.incoming)}
-                        containers={row.incomingContainers}
-                      />
-                    </td>
-                    <td className="px-2 py-3">
-                      <div className="font-semibold text-[#111827]">{formatNumber(row.availableAfterIncoming)}</div>
-                      {row.backorderedAfterIncoming > 0 ? (
-                        <div className="mt-1 text-xs font-semibold text-[#b45309]">Backordered {formatNumber(row.backorderedAfterIncoming)}</div>
-                      ) : null}
-                    </td>
-                    <td className="whitespace-nowrap px-2 py-3">{row.nextEta}</td>
-                    <td className="whitespace-nowrap px-2 py-3">
+                    <td className="px-3 py-3 text-right">
                       <CustomerDemandDropdown
                         productName={row.productName}
                         sku={row.sku}

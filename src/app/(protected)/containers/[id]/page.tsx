@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { updateContainerArrivalDatesAction } from "@/app/(protected)/containers/actions";
 import { requireUser } from "@/lib/auth";
+import { loadContainerCoverage } from "@/lib/containers/container-coverage";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { ReceiveContainerConfirmForm } from "./receive-container-confirm-form";
 
@@ -32,44 +33,6 @@ type ContainerDetailRow = {
   }>;
 };
 
-type ContainerAllocationPreview = {
-  id: string;
-  quantity: number | null;
-  product_id: string | null;
-  shipping_order_line_id: string | null;
-  shipping_order_lines?: {
-    id: string;
-    approved_qty: number | null;
-    fulfilled_qty: number | null;
-    warehouse_status: string | null;
-    queue_position_start: number | null;
-    products?: { sku: string | null; canonical_name: string | null } | null;
-    shipping_orders?: {
-      id: string;
-      qbo_invoices?: {
-        invoice_number: string | null;
-        customers?: {
-          company_name: string | null;
-          full_name: string | null;
-        } | null;
-      } | null;
-    } | null;
-  } | null;
-};
-
-type CustomerImpactRow = {
-  lineId: string;
-  orderId: string;
-  invoice: string;
-  customer: string;
-  sku: string;
-  allocationQty: number;
-  remainingQty: number;
-  queuePosition: number | null;
-  currentWarehouse: string;
-  willMarkInWarehouse: boolean;
-};
-
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -82,11 +45,6 @@ function formatCurrency(value: number | string | null | undefined) {
   const numeric = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(numeric)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(numeric);
-}
-
-function formatStatus(value: string | null | undefined) {
-  if (!value) return "Pending";
-  return value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function toDateInputValue(value: string | null | undefined) {
@@ -108,7 +66,7 @@ export default async function ContainerDetailPage({
   await requireUser();
   const supabase = getSupabaseAdmin();
 
-  const [{ data: containerData, error }, { data: allocationData }] = await Promise.all([
+  const [{ data: containerData, error }, coverage] = await Promise.all([
     supabase
       .from("containers")
       .select(`
@@ -141,32 +99,7 @@ export default async function ContainerDetailPage({
       `)
       .eq("id", id)
       .maybeSingle(),
-    supabase
-      .from("inventory_allocations")
-      .select(`
-        id,
-        quantity,
-        product_id,
-        shipping_order_line_id,
-        shipping_order_lines (
-          id,
-          approved_qty,
-          fulfilled_qty,
-          warehouse_status,
-          queue_position_start,
-          products (sku, canonical_name),
-          shipping_orders (
-            id,
-            qbo_invoices (
-              invoice_number,
-              customers (company_name, full_name)
-            )
-          )
-        )
-      `)
-      .eq("container_id", id)
-      .eq("source_type", "CONTAINER")
-      .eq("allocation_status", "ALLOCATED"),
+    loadContainerCoverage(supabase, id),
   ]);
 
   if (error || !containerData) {
@@ -183,95 +116,15 @@ export default async function ContainerDetailPage({
     products: { sku: string | null; canonical_name: string | null } | null;
   }>;
 
-  const allocationRows = (allocationData ?? []) as ContainerAllocationPreview[];
-  const hasExplicitReceipts = lines.some((line) => Number(line.received_qty ?? 0) > 0);
-
-  const availableByProduct = new Map<string, number>();
-  for (const line of lines) {
-    const productId = line.product_id ?? null;
-    if (!productId) continue;
-    const received = Number(line.received_qty ?? 0);
-    const fallback = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
-    const available = hasExplicitReceipts ? Math.max(received, 0) : Math.max(fallback, 0);
-    if (available <= 0) continue;
-    availableByProduct.set(productId, (availableByProduct.get(productId) ?? 0) + available);
+  const allocatedByProduct = new Map<string, number>();
+  for (const row of coverage.rows) {
+    if (row.coveredQty <= 0) continue;
+    allocatedByProduct.set(row.productId, (allocatedByProduct.get(row.productId) ?? 0) + row.coveredQty);
   }
 
-  const groupedByProduct = new Map<string, ContainerAllocationPreview[]>();
-  for (const allocation of allocationRows) {
-    if (!allocation.product_id || !allocation.shipping_order_lines?.id) continue;
-    const rows = groupedByProduct.get(allocation.product_id) ?? [];
-    rows.push(allocation);
-    groupedByProduct.set(allocation.product_id, rows);
-  }
-
-  const eligibleLineIds = new Set<string>();
-  for (const [productId, allocations] of groupedByProduct.entries()) {
-    let available = availableByProduct.get(productId) ?? 0;
-    if (available <= 0) continue;
-
-    const sorted = [...allocations].sort((a, b) => {
-      const aPos = a.shipping_order_lines?.queue_position_start ?? Number.MAX_SAFE_INTEGER;
-      const bPos = b.shipping_order_lines?.queue_position_start ?? Number.MAX_SAFE_INTEGER;
-      return aPos - bPos;
-    });
-
-    for (const allocation of sorted) {
-      const line = allocation.shipping_order_lines;
-      if (!line?.id) continue;
-
-      if (["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"].includes(line.warehouse_status ?? "")) {
-        continue;
-      }
-
-      const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-      if (remainingQty <= 0) continue;
-
-      const allocatedQty = Math.max(0, Number(allocation.quantity ?? 0));
-      const requiredQty = Math.min(remainingQty, allocatedQty);
-      if (requiredQty <= 0) continue;
-
-      if (available >= requiredQty) {
-        eligibleLineIds.add(line.id);
-        available -= requiredQty;
-      }
-    }
-  }
-
-  const customerRows = allocationRows
-    .map((allocation) => {
-      const line = allocation.shipping_order_lines;
-      if (!line?.id) return null;
-
-      const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
-        ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
-        ?? "Customer pending";
-
-      const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
-      const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-
-      const row: CustomerImpactRow = {
-        lineId: line.id,
-        orderId: line.shipping_orders?.id ?? "",
-        invoice,
-        customer,
-        sku: line.products?.sku ?? line.products?.canonical_name ?? "SKU pending",
-        allocationQty: Math.max(0, Number(allocation.quantity ?? 0)),
-        remainingQty,
-        queuePosition: line.queue_position_start ?? null,
-        currentWarehouse: formatStatus(line.warehouse_status),
-        willMarkInWarehouse: eligibleLineIds.has(line.id),
-      };
-
-      return row;
-    })
-    .filter((row): row is CustomerImpactRow => Boolean(row))
-    .sort((a, b) => {
-      const aPos = a.queuePosition ?? Number.MAX_SAFE_INTEGER;
-      const bPos = b.queuePosition ?? Number.MAX_SAFE_INTEGER;
-      if (aPos !== bPos) return aPos - bPos;
-      return a.customer.localeCompare(b.customer);
-    });
+  const hasExplicitReceipts = coverage.hasExplicitReceipts;
+  const eligibleLineIds = coverage.eligibleLineIds;
+  const customerRows = coverage.rows;
 
   return (
     <div className="space-y-6">
@@ -298,7 +151,7 @@ export default async function ContainerDetailPage({
           <div>
             <h2 className="text-2xl font-semibold text-[#111827]">Customers On This Container</h2>
             <p className="mt-1 text-sm text-[#5a5a5a]">
-              Accepting this container marks only applicable allocated lines as In Warehouse based on received quantities.
+              Customers are matched to this container by product queue order. Receiving it marks fully covered lines as In Warehouse.
             </p>
           </div>
           {container.lifecycle_status !== "RECEIVED" ? (
@@ -333,7 +186,7 @@ export default async function ContainerDetailPage({
                 <th className="px-3 py-3 font-semibold">Invoice</th>
                 <th className="px-3 py-3 font-semibold">Customer</th>
                 <th className="px-3 py-3 font-semibold">SKU</th>
-                <th className="px-3 py-3 font-semibold">Allocated on Container</th>
+                <th className="px-3 py-3 font-semibold">Covered by Container</th>
                 <th className="px-3 py-3 font-semibold">Qty Remaining</th>
                 <th className="px-3 py-3 font-semibold">Current Warehouse</th>
                 <th className="px-3 py-3 font-semibold">Will Mark In Warehouse</th>
@@ -344,17 +197,22 @@ export default async function ContainerDetailPage({
               {customerRows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-3 py-8 text-center text-[#6b7280]">
-                    No customer allocations are currently tied to this container.
+                    No open customer orders are waiting on the products in this container.
                   </td>
                 </tr>
               ) : (
                 customerRows.map((row, idx) => (
-                  <tr key={`${row.lineId}-${idx}`}>
+                  <tr key={`${row.lineId}-${idx}`} className={row.coveredQty > 0 ? "bg-[#f8fbff]" : undefined}>
                     <td className="px-3 py-3">{row.queuePosition ?? "—"}</td>
                     <td className="px-3 py-3">{row.invoice}</td>
-                    <td className="px-3 py-3 font-medium text-[#111827]">{row.customer}</td>
+                    <td className="px-3 py-3 font-medium text-[#111827]">
+                      {row.customer}
+                      {row.isAssigned ? (
+                        <span className="ml-2 rounded-full bg-[#eef2ff] px-2 py-0.5 text-[11px] font-semibold text-[#3730a3]">Assigned</span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-3">{row.sku}</td>
-                    <td className="px-3 py-3">{row.allocationQty}</td>
+                    <td className="px-3 py-3">{row.coveredQty > 0 ? row.coveredQty : "—"}</td>
                     <td className="px-3 py-3">{row.remainingQty}</td>
                     <td className="px-3 py-3">{row.currentWarehouse}</td>
                     <td className="px-3 py-3">
@@ -394,8 +252,8 @@ export default async function ContainerDetailPage({
                 {lines.length > 0 ? lines.map((line) => {
                   const ordered = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
                   const received = Number(line.received_qty ?? 0);
-                  const allocated = 0;
-                  const available = Math.max(received - allocated, 0);
+                  const allocated = line.product_id ? allocatedByProduct.get(line.product_id) ?? 0 : 0;
+                  const available = Math.max((hasExplicitReceipts ? received : ordered) - allocated, 0);
 
                   return (
                     <tr key={line.id}>

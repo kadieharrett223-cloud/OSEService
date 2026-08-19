@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { loadContainerCoverage } from "@/lib/containers/container-coverage";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 function emptyToNull(value: FormDataEntryValue | null) {
@@ -163,25 +164,6 @@ type ContainerLineAvailability = {
   received_qty: number | null;
 };
 
-type ContainerAllocationRow = {
-  id: string;
-  quantity: number | null;
-  product_id: string | null;
-  shipping_order_line_id: string | null;
-  shipping_order_lines?: {
-    id: string;
-    shipping_order_id: string;
-    approved_qty: number | null;
-    fulfilled_qty: number | null;
-    warehouse_status: string | null;
-    queue_position_start: number | null;
-    products?: {
-      sku: string | null;
-      canonical_name: string | null;
-    } | null;
-  } | null;
-};
-
 export async function acceptContainerToWarehouseAction(formData: FormData) {
   await requireUser();
   const supabase = getSupabaseAdmin();
@@ -220,97 +202,62 @@ export async function acceptContainerToWarehouseAction(formData: FormData) {
     redirect(`/containers/${containerId}?error=${encodeURIComponent("Enter received quantities first, or confirm full receipt for this container.")}`);
   }
 
-  const availableByProduct = new Map<string, number>();
-  for (const line of typedContainerLines) {
-    if (!line.product_id) continue;
-    const received = Number(line.received_qty ?? 0);
-    const fallback = Number(line.ordered_qty ?? line.on_order_qty ?? 0);
-    const available = hasExplicitReceipts ? Math.max(received, 0) : Math.max(fallback, 0);
-    if (available <= 0) continue;
-    availableByProduct.set(line.product_id, (availableByProduct.get(line.product_id) ?? 0) + available);
-  }
-
-  const { data: allocationRows, error: allocationError } = await supabase
-    .from("inventory_allocations")
-    .select(`
-      id,
-      quantity,
-      product_id,
-      shipping_order_line_id,
-      shipping_order_lines (
-        id,
-        shipping_order_id,
-        approved_qty,
-        fulfilled_qty,
-        warehouse_status,
-        queue_position_start,
-        products (sku, canonical_name)
-      )
-    `)
-    .eq("container_id", containerId)
-    .eq("source_type", "CONTAINER")
-    .eq("allocation_status", "ALLOCATED");
-
-  if (allocationError) {
-    redirect(`/containers/${containerId}?error=${encodeURIComponent(allocationError.message)}`);
-  }
-
-  const typedAllocations = (allocationRows ?? []) as ContainerAllocationRow[];
-  const groupedByProduct = new Map<string, ContainerAllocationRow[]>();
-
-  for (const allocation of typedAllocations) {
-    if (!allocation.product_id || !allocation.shipping_order_lines?.id) continue;
-    const rows = groupedByProduct.get(allocation.product_id) ?? [];
-    rows.push(allocation);
-    groupedByProduct.set(allocation.product_id, rows);
-  }
+  const coverage = await loadContainerCoverage(supabase, containerId);
 
   const lineIdsToUpdate = new Set<string>();
   const orderTimelineSkuMap = new Map<string, Set<string>>();
 
-  for (const [productId, allocations] of groupedByProduct.entries()) {
-    let available = availableByProduct.get(productId) ?? 0;
-    if (available <= 0) continue;
-
-    const sorted = [...allocations].sort((a, b) => {
-      const aPos = a.shipping_order_lines?.queue_position_start ?? Number.MAX_SAFE_INTEGER;
-      const bPos = b.shipping_order_lines?.queue_position_start ?? Number.MAX_SAFE_INTEGER;
-      return aPos - bPos;
-    });
-
-    for (const allocation of sorted) {
-      const line = allocation.shipping_order_lines;
-      if (!line?.id) continue;
-
-      if (["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP", "PARTIALLY_FULFILLED", "FULFILLED"].includes(line.warehouse_status ?? "")) {
-        continue;
-      }
-
-      const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-      if (remainingQty <= 0) continue;
-
-      const allocatedQty = Math.max(0, Number(allocation.quantity ?? 0));
-      const requiredQty = Math.min(remainingQty, allocatedQty);
-      if (requiredQty <= 0) continue;
-
-      if (available >= requiredQty) {
-        lineIdsToUpdate.add(line.id);
-        const orderId = line.shipping_order_id;
-        const sku = line.products?.sku ?? line.products?.canonical_name ?? "SKU";
-        const skuSet = orderTimelineSkuMap.get(orderId) ?? new Set<string>();
-        skuSet.add(sku);
-        orderTimelineSkuMap.set(orderId, skuSet);
-        available -= requiredQty;
-      }
-    }
+  for (const row of coverage.rows) {
+    if (!row.willMarkInWarehouse) continue;
+    lineIdsToUpdate.add(row.lineId);
+    if (!row.orderId) continue;
+    const skuSet = orderTimelineSkuMap.get(row.orderId) ?? new Set<string>();
+    skuSet.add(row.sku);
+    orderTimelineSkuMap.set(row.orderId, skuSet);
   }
 
-  const uniqueAllocLineIds = new Set(
-    typedAllocations
-      .map((allocation) => allocation.shipping_order_lines?.id)
-      .filter((value): value is string => Boolean(value)),
-  );
-  const waitingLineCount = Array.from(uniqueAllocLineIds).filter((id) => !lineIdsToUpdate.has(id)).length;
+  const waitingLineCount = coverage.rows.filter((row) => !row.willMarkInWarehouse).length;
+
+  // Receiving a container physically adds the units to the floor, so inventory must reflect the arrival.
+  for (const [productId, incomingQty] of coverage.incomingByProduct.entries()) {
+    if (incomingQty <= 0) continue;
+
+    const { data: existingRows } = await supabase
+      .from("inventory_transactions")
+      .select("delta")
+      .eq("product_id", productId)
+      .eq("bucket", "ON_FLOOR");
+
+    const beforeQty = (existingRows ?? []).reduce((sum, row) => sum + Number((row as { delta: number | null }).delta ?? 0), 0);
+
+    await supabase
+      .from("inventory_transactions")
+      .insert({
+        product_id: productId,
+        bucket: "ON_FLOOR",
+        delta: incomingQty,
+        before_qty: beforeQty,
+        after_qty: beforeQty + incomingQty,
+        reason: `Container ${containerNumber || "receipt"} received`,
+        source_type: "CONTAINER_RECEIVED",
+        source_event_key: `CONTAINER_RECEIVED:${containerId}:${productId}`,
+        container_id: containerId,
+      });
+  }
+
+  // Record what actually landed so later reads do not fall back to ordered quantities.
+  if (!hasExplicitReceipts) {
+    for (const line of typedContainerLines) {
+      if (!line.product_id) continue;
+      const receivedQty = Math.max(0, Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0));
+      if (receivedQty <= 0) continue;
+      await supabase
+        .from("container_lines")
+        .update({ received_qty: receivedQty })
+        .eq("container_id", containerId)
+        .eq("product_id", line.product_id);
+    }
+  }
 
   if (lineIdsToUpdate.size > 0) {
     const { error: updateLinesError } = await supabase

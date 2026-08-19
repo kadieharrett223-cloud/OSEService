@@ -1476,9 +1476,16 @@ export default async function OrderDetailPage({
                           && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
                       }) ?? null
                       : null;
+                    const indexedShipmentLine = orderLines[rowIndex] ?? orderRecord.shipping_order_lines?.[rowIndex] ?? null;
+                    const indexedOpenShipmentLine = indexedShipmentLine
+                      && Number(indexedShipmentLine.approved_qty ?? 0) > Number(indexedShipmentLine.fulfilled_qty ?? 0)
+                      && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(indexedShipmentLine.fulfillment_status ?? "").toUpperCase())
+                      ? indexedShipmentLine
+                      : null;
                     const lineRemainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : 0;
                     const shipmentLine = (line && lineRemainingQty > 0 ? line : fallbackShipmentLine)
                       ?? line
+                      ?? indexedOpenShipmentLine
                       ?? orderRecord.shipping_order_lines?.[rowIndex]
                       ?? null;
                     const remainingQty = shipmentLine

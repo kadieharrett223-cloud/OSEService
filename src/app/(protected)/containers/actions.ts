@@ -299,12 +299,12 @@ export async function receiveContainerAction(formData: FormData) {
   }
 
   const coverage = computeCoverage(receipt.demandByProduct, Object.fromEntries(actualByProduct));
-  const lineIdsToUpdate = new Set<string>();
+  const coveredLineIds = new Set<string>();
   const orderTimelineSkuMap = new Map<string, Set<string>>();
 
   for (const row of coverage.rows) {
     if (!row.willMarkInWarehouse) continue;
-    lineIdsToUpdate.add(row.lineId);
+    coveredLineIds.add(row.lineId);
     if (!row.orderId) continue;
     const skuSet = orderTimelineSkuMap.get(row.orderId) ?? new Set<string>();
     skuSet.add(row.sku);
@@ -313,27 +313,17 @@ export async function receiveContainerAction(formData: FormData) {
 
   const waitingLineCount = coverage.rows.filter((row) => !row.willMarkInWarehouse).length;
 
-  if (lineIdsToUpdate.size > 0) {
-    const { error: updateLinesError } = await supabase
-      .from("shipping_order_lines")
-      .update({ warehouse_status: "IN_WAREHOUSE" })
-      .in("id", Array.from(lineIdsToUpdate));
-
-    if (updateLinesError) {
-      redirect(`/containers/${containerId}?error=${encodeURIComponent(updateLinesError.message)}`);
-    }
-  }
-
+  // Receiving stock never sets warehouse_status: "In Warehouse" is a manual instruction to prepare an order for shipment.
   for (const [orderId, skuSet] of orderTimelineSkuMap.entries()) {
     const skuSummary = Array.from(skuSet).join(", ");
     await supabase.from("audit_log").insert({
       entity_type: "shipping_order",
       entity_id: orderId,
-      action: "CONTAINER_INVENTORY_MOVED_TO_WAREHOUSE",
+      action: "CONTAINER_INVENTORY_RECEIVED",
       details: {
         container_id: containerId,
         container_number: containerNumber || null,
-        message: `Container ${containerNumber || "(unknown)"} received - ${skuSummary} inventory now in warehouse`,
+        message: `Container ${containerNumber || "(unknown)"} received - ${skuSummary} stock is now available for this order`,
       },
     });
   }
@@ -368,7 +358,7 @@ export async function receiveContainerAction(formData: FormData) {
       actual_units: actualTotal,
       short_units: shortTotal,
       extra_units: extraTotal,
-      line_count_marked_in_warehouse: lineIdsToUpdate.size,
+      line_count_covered: coveredLineIds.size,
       line_count_waiting: waitingLineCount,
       variance,
     },
@@ -392,7 +382,7 @@ export async function receiveContainerAction(formData: FormData) {
 
   redirect(
     `/containers/${containerId}?success=${encodeURIComponent(
-      `Receipt recorded. ${actualTotal} unit(s) added to On Floor. ${lineIdsToUpdate.size} line(s) moved to In Warehouse, ${waitingLineCount} still waiting.`,
+      `Receipt recorded. ${actualTotal} unit(s) added to On Floor. ${coveredLineIds.size} order line(s) now have stock available, ${waitingLineCount} still waiting.`,
     )}`,
   );
 }

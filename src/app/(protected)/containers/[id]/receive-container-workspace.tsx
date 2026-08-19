@@ -433,8 +433,8 @@ export function ReceiveContainerWorkspace({
           </div>
 
           <p className="mt-3 text-xs text-[#64748b]">
-            Confirming writes received quantities, adds {actualTotal} unit(s) to On Floor, and recalculates customer coverage from
-            the actual counts.
+            Confirming writes received quantities and adds {actualTotal} unit(s) to On Floor. Orders are not moved to In Warehouse —
+            that stays a manual step for your warehouse team.
           </p>
 
           <form action={receiveContainerAction} className="mt-4 flex flex-wrap justify-end gap-2">

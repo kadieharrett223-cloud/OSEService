@@ -243,7 +243,7 @@ export default async function ContainerDetailPage({
             <h2 className="text-2xl font-semibold text-[#111827]">Customers On This Container</h2>
             <p className="mt-1 text-sm text-[#5a5a5a]">
               {isReceived
-                ? "Coverage below reflects the quantities actually received."
+                ? "Coverage below reflects the quantities actually received. Moving an order to In Warehouse stays a manual step."
                 : "Forecast based on expected quantities. Final coverage is calculated from the counts you record above."}
             </p>
           </div>
@@ -252,8 +252,8 @@ export default async function ContainerDetailPage({
         <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
           <p>
             {isReceived
-              ? `${eligibleLineIds.size} order line(s) were covered by this container. ${customerRows.filter((row) => !row.willMarkInWarehouse).length} line(s) remain waiting.`
-              : `Based on expected quantities, ${eligibleLineIds.size} order line(s) would be covered and ${customerRows.filter((row) => !row.willMarkInWarehouse).length} would remain waiting.`}
+              ? `${eligibleLineIds.size} order line(s) have stock covered by this container. ${customerRows.filter((row) => !row.willMarkInWarehouse).length} line(s) remain waiting.`
+              : `Based on expected quantities, ${eligibleLineIds.size} order line(s) would have stock covered and ${customerRows.filter((row) => !row.willMarkInWarehouse).length} would remain waiting.`}
           </p>
         </div>
 
@@ -268,7 +268,7 @@ export default async function ContainerDetailPage({
                 <th className="px-3 py-3 font-semibold">Covered by Container</th>
                 <th className="px-3 py-3 font-semibold">Qty Remaining</th>
                 <th className="px-3 py-3 font-semibold">Current Warehouse</th>
-                <th className="px-3 py-3 font-semibold">Will Mark In Warehouse</th>
+                <th className="px-3 py-3 font-semibold">Stock Covered</th>
                 <th className="px-3 py-3 font-semibold">Open</th>
               </tr>
             </thead>

@@ -223,7 +223,9 @@ export default async function OrdersPage({
     const hasUnresolvedLines = allLines.some((line) => !line.product_id && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()))
       || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
     const hasLines = lines.length > 0;
-    // An entered order must be visible immediately, even before its items are mapped or reviewed.
+    // Entering an invoice activates its order (review_status leaves PENDING_REVIEW). Historical bulk
+    // imports stay dormant until entered or proven current by reconciliation (an APPROVED line).
+    const isActivated = String(order.review_status ?? "").toUpperCase() !== "PENDING_REVIEW";
     const hasOpenLine = allLines.some((line) => {
       if (order.order_number === "126037") return false;
       const approved = Number(line.approved_qty ?? 0);
@@ -231,7 +233,8 @@ export default async function OrdersPage({
       return outstanding > 0
         && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
     });
-    const isVisible = hasLines || hasUnresolvedLines || hasOpenLine;
+    const isVisibleOperationalOrder = hasLines || (isActivated && (hasUnresolvedLines || hasOpenLine));
+    const isNewOrder = isVisibleOperationalOrder && !anyWarehouse && !anyShipped;
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
     const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
@@ -241,15 +244,15 @@ export default async function OrdersPage({
 
     switch (tabId) {
       case "orders":
-        return isVisible;
+        return isVisibleOperationalOrder;
       case "new":
-        return isVisible && !anyWarehouse && !anyShipped;
+        return isNewOrder;
       case "warehouse":
         return hasLines && anyWarehouse && !anyShipped;
       case "partial":
         return hasLines && anyShipped;
       case "archived":
-        return !isVisible && hasArchivedLines;
+        return !isVisibleOperationalOrder && hasArchivedLines;
       default:
         return true;
     }

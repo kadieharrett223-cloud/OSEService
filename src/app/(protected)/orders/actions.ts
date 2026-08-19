@@ -384,6 +384,90 @@ export async function moveOrderBackToOrdersAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=${encodeURIComponent(`${movableLines.length} item${movableLines.length === 1 ? "" : "s"} moved back to Orders`)}`);
 }
 
+/**
+ * Re-entering an invoice refreshes the existing order from current QuickBooks data and activates it
+ * as an operational order. Historical imports stay dormant until this happens, so entering an
+ * invoice never creates a duplicate and never bulk-activates the rest of the backlog.
+ */
+async function activateExistingQuickbooksOrder(
+  adminClient: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+  invoice: { id: string; qbo_invoice_id: string | null; invoice_number: string | null },
+) {
+  const { data: invoiceLines } = await adminClient
+    .from("qbo_invoice_lines")
+    .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku")
+    .eq("qbo_invoice_id", invoice.id);
+
+  const { data: orderLines } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, qbo_invoice_line_id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .eq("shipping_order_id", orderId);
+
+  const aliasSkus = (invoiceLines ?? []).map((line) => line.qbo_sku).filter((sku): sku is string => Boolean(sku));
+  const { data: aliasRows } = aliasSkus.length
+    ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
+    : { data: [] };
+  const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
+
+  const existingByInvoiceLine = new Map((orderLines ?? []).map((line) => [line.qbo_invoice_line_id, line]));
+  const touchedProductIds = new Set<string>();
+
+  for (const invoiceLine of invoiceLines ?? []) {
+    const productId = invoiceLine.product_id
+      ?? productIdByAlias.get(String(invoiceLine.qbo_sku ?? "").trim().toUpperCase())
+      ?? null;
+    const existingLine = existingByInvoiceLine.get(invoiceLine.id);
+    const orderedQty = Number(invoiceLine.ordered_qty ?? 0);
+
+    if (existingLine) {
+      // Never disturb anything already shipped.
+      if (Number(existingLine.fulfilled_qty ?? 0) > 0) continue;
+      const { error } = await adminClient
+        .from("shipping_order_lines")
+        .update({
+          ordered_qty: orderedQty,
+          approved_qty: orderedQty,
+          approval_status: "APPROVED",
+          product_id: existingLine.product_id ?? productId,
+        })
+        .eq("id", existingLine.id);
+      if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+      if (existingLine.product_id ?? productId) touchedProductIds.add((existingLine.product_id ?? productId) as string);
+      continue;
+    }
+
+    if (!productId) continue;
+    const { error } = await adminClient.from("shipping_order_lines").insert({
+      shipping_order_id: orderId,
+      qbo_invoice_line_id: invoiceLine.id,
+      product_id: productId,
+      ordered_qty: orderedQty,
+      approved_qty: orderedQty,
+      fulfilled_qty: 0,
+      cancelled_qty: 0,
+      approval_status: "APPROVED",
+      warehouse_status: "ON_FLOOR",
+      allocation_status: "UNALLOCATED",
+      fulfillment_status: "PENDING",
+      priority: "NORMAL",
+      source_event_key: `QBO_INVOICE_LINE:${invoice.qbo_invoice_id}:${invoiceLine.qbo_line_id}`,
+      legacy_item_code: invoiceLine.qbo_sku,
+    });
+    if (error && error.code !== "23505") redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+    touchedProductIds.add(productId);
+  }
+
+  await adminClient.from("shipping_orders").update({ review_status: "APPROVED" }).eq("id", orderId);
+  await writeOrderActivity(adminClient, orderId, "ORDER_REFRESHED_FROM_QUICKBOOKS", {
+    message: `Order refreshed from QuickBooks invoice ${invoice.invoice_number ?? ""} and activated`,
+  });
+
+  if (touchedProductIds.size > 0) await recalculateProductQueues(Array.from(touchedProductIds));
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+}
+
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");
@@ -392,11 +476,16 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
 
   const [{ data: invoice, error: invoiceError }, { data: existing }] = await Promise.all([
     adminClient.from("qbo_invoices").select("id, qbo_invoice_id, invoice_number, customer_id, payment_status, invoice_date, total_amount").eq("id", invoiceId).maybeSingle(),
-    adminClient.from("shipping_orders").select("id").eq("source_invoice_id", invoiceId).limit(1),
+    adminClient.from("shipping_orders").select("id, review_status").eq("source_invoice_id", invoiceId).limit(1),
   ]);
 
   if (invoiceError || !invoice) redirect(`/orders/new?error=${encodeURIComponent(invoiceError?.message ?? "QuickBooks invoice not found")}`);
-  if (existing?.[0]?.id) redirect(`/orders/${existing[0].id}?message=This+QuickBooks+invoice+is+already+in+New+%2F+Review`);
+
+  const existingOrder = existing?.[0];
+  if (existingOrder?.id) {
+    await activateExistingQuickbooksOrder(adminClient, existingOrder.id, invoice);
+    redirect(`/orders/${existingOrder.id}?message=Order+refreshed+from+QuickBooks`);
+  }
 
   const { data: customer } = invoice.customer_id
     ? await adminClient.from("customers").select("full_name, company_name").eq("id", invoice.customer_id).maybeSingle()

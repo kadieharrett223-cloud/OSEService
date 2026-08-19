@@ -7,6 +7,7 @@ import {
   type ProductContainerSupply,
 } from "@/lib/fulfillment/suggested-allocation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import {
   addOrderNoteAction,
   deleteOrderAttachmentAction,
@@ -711,7 +712,7 @@ export default async function OrderDetailPage({
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
     hasOrderShipmentsTables
-      ? supabase.from("order_shipments").select(`id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
+      ? supabase.from("order_shipments").select(`id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
       : Promise.resolve({ data: [] as ShipmentEntry[] }),
   ]);
 
@@ -838,21 +839,16 @@ export default async function OrderDetailPage({
   const shipmentLog = [...shipments, ...historicalShipments.values()];
   const editableShipmentLinesByShipment = new Map<string, Array<{ id: string; sku: string; productName: string | null; currentQty: number; maxQty: number }>>();
   for (const shipment of shipments) {
-    const currentByLine = new Map<string, number>();
-    for (const shipmentLine of shipment.lines ?? []) currentByLine.set(shipmentLine.shipping_order_line_id, (currentByLine.get(shipmentLine.shipping_order_line_id) ?? 0) + Number(shipmentLine.quantity ?? 0));
-    const editableLines = orderLines
-      .map((line) => {
-        const currentQty = currentByLine.get(line.id) ?? 0;
-        const remainingOutsideShipment = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-        return {
-          id: line.id,
-          sku: line.products?.sku ?? "Item",
-          productName: line.products?.canonical_name ?? null,
-          currentQty,
-          maxQty: currentQty + remainingOutsideShipment,
-        };
-      })
-      .filter((line) => line.maxQty > 0 || line.currentQty > 0);
+    const editableLines = buildShipmentEditLineState(
+      orderLines.map((line) => ({
+        id: line.id,
+        sku: line.products?.sku ?? "Item",
+        productName: line.products?.canonical_name ?? null,
+        approvedQty: Number(line.approved_qty ?? 0),
+        fulfilledQty: Number(line.fulfilled_qty ?? 0),
+      })),
+      (shipment.lines ?? []).map((line) => ({ shipping_order_line_id: line.shipping_order_line_id, quantity: Number(line.quantity ?? 0) })),
+    );
     editableShipmentLinesByShipment.set(shipment.id, editableLines);
   }
   const noteCount = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED").length;

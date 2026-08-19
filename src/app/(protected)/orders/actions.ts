@@ -1128,6 +1128,126 @@ export async function completeOrderShipmentAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Shipment+completed`);
 }
 
+export async function updateOrderShipmentAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const shipmentId = getString(formData, "shipment_id");
+  const shipmentDate = getString(formData, "shipment_date");
+  const carrier = getString(formData, "carrier");
+  const trackingNumber = getString(formData, "tracking_number");
+  const notes = getString(formData, "shipment_notes");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !shipmentId) redirect(`/orders/${orderId ?? ""}?error=Missing+shipment+reference`);
+
+  const payload: Record<string, string | null> = {
+    carrier: carrier?.trim() || null,
+    tracking_number: trackingNumber?.trim() || null,
+    notes: notes?.trim() || null,
+  };
+  if (shipmentDate) payload.shipped_at = `${shipmentDate}T12:00:00.000Z`;
+
+  const { error } = await adminClient
+    .from("order_shipments")
+    .update(payload as never)
+    .eq("id", shipmentId)
+    .eq("shipping_order_id", orderId);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_UPDATED", {
+    shipment_id: shipmentId,
+    tracking_number: payload.tracking_number,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Shipment+updated#shipments`);
+}
+
+/** Adds a line that was missed when the shipment was created, keeping stock and history in step. */
+export async function addOrderShipmentLineAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const shipmentId = getString(formData, "shipment_id");
+  const lineId = getString(formData, "line_id");
+  const quantity = getPositiveNumber(formData, "quantity");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !shipmentId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Select+an+item+to+add`);
+  if (quantity <= 0) redirect(`/orders/${orderId}?error=Quantity+must+be+greater+than+zero`);
+
+  const { data: shipmentRow } = await adminClient
+    .from("order_shipments")
+    .select("id, shipment_number, shipped_at, carrier, tracking_number")
+    .eq("id", shipmentId)
+    .eq("shipping_order_id", orderId)
+    .maybeSingle();
+  const shipment = shipmentRow as unknown as {
+    id: string;
+    shipment_number: string;
+    shipped_at: string;
+    carrier: string | null;
+    tracking_number: string | null;
+  } | null;
+  if (!shipment) redirect(`/orders/${orderId}?error=Shipment+not+found`);
+
+  const { data: line } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, approved_qty, fulfilled_qty")
+    .eq("id", lineId)
+    .eq("shipping_order_id", orderId)
+    .maybeSingle();
+  if (!line) redirect(`/orders/${orderId}?error=That+item+does+not+belong+to+this+order`);
+
+  const alreadyFulfilled = Number(line.fulfilled_qty ?? 0);
+  const approved = Number(line.approved_qty ?? 0);
+  const nextFulfilled = alreadyFulfilled + quantity;
+  if (nextFulfilled > approved) redirect(`/orders/${orderId}?error=Quantity+exceeds+the+remaining+amount`);
+
+  const sourceEventKey = `ORDER_SHIPMENT_EDIT:${shipmentId}:${lineId}`;
+  const { error: shipmentLineError } = await adminClient
+    .from("order_shipment_lines")
+    .insert({ shipment_id: shipmentId, shipping_order_line_id: lineId, quantity } as never);
+  if (shipmentLineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentLineError.message)}`);
+
+  const { error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .update({
+      fulfilled_qty: nextFulfilled,
+      fulfillment_status: nextFulfilled >= approved ? "FULFILLED" : "PARTIALLY_FULFILLED",
+      warehouse_status: nextFulfilled >= approved ? "FULFILLED" : "PARTIALLY_FULFILLED",
+    })
+    .eq("id", lineId);
+  if (lineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError.message)}`);
+
+  await adminClient.from("fulfillments").insert({
+    shipping_order_line_id: lineId,
+    fulfilled_qty: quantity,
+    fulfilled_at: shipment.shipped_at,
+    shipment_number: shipment.shipment_number,
+    carrier: shipment.carrier,
+    tracking_number: shipment.tracking_number,
+    reason: "Item added to existing shipment",
+    source_event_key: sourceEventKey,
+    fulfillment_type: "SHIPMENT",
+  } as never);
+
+  await recordFulfillmentInventory(adminClient, lineId, line.product_id, quantity, sourceEventKey, user.id);
+  if (line.product_id) await recalculateProductQueues([line.product_id]);
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_LINE_ADDED", {
+    shipment_id: shipmentId,
+    line_id: lineId,
+    ship_qty: quantity,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Item+added+to+shipment#shipments`);
+}
+
 export async function uploadOrderAttachmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "order_id");

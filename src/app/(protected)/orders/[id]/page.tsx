@@ -9,6 +9,7 @@ import {
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   addOrderNoteAction,
+  addOrderShipmentLineAction,
   deleteOrderAttachmentAction,
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
@@ -16,6 +17,7 @@ import {
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
+  updateOrderShipmentAction,
   updateOrderOperationsAction,
   overrideProductQueuePositionAction,
   uploadOrderAttachmentAction,
@@ -826,6 +828,14 @@ export default async function OrderDetailPage({
     }
   }
   const shipmentLog = [...shipments, ...historicalShipments.values()];
+  // Items still owing quantity can be added to a shipment that missed them.
+  const shipmentAddableLines = orderLines
+    .filter((line) => Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) > 0)
+    .map((line) => ({
+      id: line.id,
+      sku: line.products?.sku ?? "Item",
+      remainingQty: Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)),
+    }));
 
   const noteCount = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED").length;
 
@@ -1002,6 +1012,11 @@ export default async function OrderDetailPage({
     }
   }
 
+  const shippingLineByProductId = new Map<string, NonNullable<OrderDetailRow["shipping_order_lines"]>[number]>();
+  for (const line of orderLines) {
+    if (line.product_id && !shippingLineByProductId.has(line.product_id)) shippingLineByProductId.set(line.product_id, line);
+  }
+
   const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
     sku: line.products?.sku ?? null,
     description: line.products?.canonical_name ?? line.products?.sku ?? "Line item",
@@ -1010,10 +1025,12 @@ export default async function OrderDetailPage({
     isNonInventory: false,
   }))).map((item, index) => {
     const skuKey = normalizeSkuKey(item.sku);
-    const shippingLine = skuKey
-      ? shippingLineBySkuKey.get(skuKey) ?? null
-      : item.description === "Invoice line" ? null : orderLines[index] ?? null;
     const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
+    // Invoice SKUs are model codes while order lines often carry old-ERP numbers, so fall back to
+    // the resolved product before giving up on finding the operational line.
+    const shippingLine = (skuKey
+      ? shippingLineBySkuKey.get(skuKey) ?? (resolvedProduct ? shippingLineByProductId.get(resolvedProduct.id) ?? null : null)
+      : item.description === "Invoice line" ? null : orderLines[index] ?? null) ?? null;
     return {
       key: `${skuKey ?? "line"}-${index}`,
       sku: item.sku,
@@ -1213,9 +1230,11 @@ export default async function OrderDetailPage({
     const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
     const status = item.isNonInventory
       ? "N/A"
-      : fulfilled >= needed
-      ? "Fulfilled"
-      : inStock >= needed
+      : fulfilled >= needed && needed > 0
+      ? "Shipped"
+      : fulfilled > 0
+        ? "Partially Shipped"
+        : inStock >= needed
         ? "In Stock"
         : supply.suggestion?.source_type === "CONTAINER"
           ? "Incoming"
@@ -1292,9 +1311,15 @@ export default async function OrderDetailPage({
           </div>
           <div className="flex shrink-0 items-center gap-4">
             <div className="text-right">
-              <p className="text-4xl font-bold leading-none text-[#16a34a]">{totalUnitsInStock} / {totalUnitsNeeded}</p>
-              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">In Stock</p>
-              <p className="mt-1 text-xs font-medium text-[#b45309]">{Math.max(0, totalUnitsNeeded - totalUnitsInStock - totalUnitsShipped)} still waiting</p>
+              <p className="text-4xl font-bold leading-none text-[#16a34a]">{totalUnitsShipped} / {totalUnitsNeeded}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">Shipped</p>
+              {totalUnitsShipped < totalUnitsNeeded ? (
+                <p className="mt-1 text-xs font-medium text-[#b45309]">
+                  {Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining · {totalUnitsInStock} in stock
+                </p>
+              ) : (
+                <p className="mt-1 text-xs font-medium text-[#1b7a43]">Order complete</p>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1567,6 +1592,52 @@ export default async function OrderDetailPage({
                   ) : null}
 
                   {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex btn-secondary text-xs">View Tracking</a> : null}
+
+                  {!shipment.id.startsWith("historical-") ? (
+                    <details className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-3">
+                      <summary className="cursor-pointer list-none text-xs font-semibold text-[#2563eb]">Edit shipment</summary>
+
+                      <form action={updateOrderShipmentAction} className="mt-3 grid gap-2 sm:grid-cols-2">
+                        <input type="hidden" name="orderId" value={orderRecord.id} />
+                        <input type="hidden" name="shipment_id" value={shipment.id} />
+                        <label className="text-xs font-semibold text-[#64748b]">Ship date
+                          <input type="date" name="shipment_date" defaultValue={String(shipment.shipped_at ?? "").slice(0, 10)} className="input mt-1" />
+                        </label>
+                        <label className="text-xs font-semibold text-[#64748b]">Carrier
+                          <input name="carrier" defaultValue={shipment.carrier ?? ""} className="input mt-1" />
+                        </label>
+                        <label className="text-xs font-semibold text-[#64748b]">Tracking / PRO number
+                          <input name="tracking_number" defaultValue={shipment.tracking_number ?? ""} className="input mt-1" />
+                        </label>
+                        <label className="text-xs font-semibold text-[#64748b]">Notes
+                          <input name="shipment_notes" defaultValue={shipment.notes ?? ""} className="input mt-1" />
+                        </label>
+                        <div className="sm:col-span-2 flex justify-end">
+                          <button type="submit" className="btn-secondary text-xs">Save details</button>
+                        </div>
+                      </form>
+
+                      {shipmentAddableLines.length > 0 ? (
+                        <form action={addOrderShipmentLineAction} className="mt-3 flex flex-wrap items-end gap-2 border-t border-[#eef2f7] pt-3">
+                          <input type="hidden" name="orderId" value={orderRecord.id} />
+                          <input type="hidden" name="shipment_id" value={shipment.id} />
+                          <label className="text-xs font-semibold text-[#64748b]">Add missed item
+                            <select name="line_id" className="input mt-1 text-xs" required>
+                              {shipmentAddableLines.map((addable) => (
+                                <option key={addable.id} value={addable.id}>{addable.sku} · {addable.remainingQty} remaining</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-xs font-semibold text-[#64748b]">Qty
+                            <input type="number" name="quantity" min="1" defaultValue={1} className="input mt-1 w-20 text-xs" required />
+                          </label>
+                          <button type="submit" className="btn-secondary text-xs">Add to shipment</button>
+                        </form>
+                      ) : (
+                        <p className="mt-3 border-t border-[#eef2f7] pt-3 text-xs text-[#64748b]">Every item on this order has been shipped.</p>
+                      )}
+                    </details>
+                  ) : null}
                 </div>
               ))}
               {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}

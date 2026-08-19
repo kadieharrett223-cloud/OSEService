@@ -1074,6 +1074,12 @@ export default async function OrderDetailPage({
     };
   });
 
+  const fulfilledByProductId = new Map<string, number>();
+  for (const line of orderLines) {
+    if (!line.product_id) continue;
+    fulfilledByProductId.set(line.product_id, (fulfilledByProductId.get(line.product_id) ?? 0) + Number(line.fulfilled_qty ?? 0));
+  }
+
   const visibleLineCount = visibleItems.length;
   const visibleOrderedTotal = visibleItems.reduce((sum, item) => sum + item.orderedQty, 0);
   const visibleOpenTotal = visibleItems.reduce((sum, item) => {
@@ -1256,7 +1262,7 @@ export default async function OrderDetailPage({
   const itemStockSummary = visibleItems.map((item) => {
     const supply = getItemSupplySnapshot(item);
     const needed = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
-    const fulfilled = Math.min(needed, Number(item.shippingLine?.fulfilled_qty ?? 0));
+    const fulfilled = Math.min(needed, Number(item.shippingLine?.fulfilled_qty ?? (item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0)));
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
     const status = item.isNonInventory

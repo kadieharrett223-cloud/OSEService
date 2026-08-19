@@ -234,9 +234,9 @@ export default async function OrdersPage({
         && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
     });
     const isVisibleOperationalOrder = hasLines || (isActivated && (hasUnresolvedLines || hasOpenLine));
-    const isNewOrder = isVisibleOperationalOrder && !anyWarehouse && !anyShipped;
     const anyWarehouse = lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP");
     const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || line.fulfillment_status === "PARTIALLY_FULFILLED");
+    const isNewOrder = isVisibleOperationalOrder && !anyWarehouse && !anyShipped;
     const hasArchivedLines = allLines.length > 0 && allLines.some((line) => Boolean(line.product_id)) && allLines.every((line) =>
       !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
       && line.fulfillment_status === "FULFILLED",

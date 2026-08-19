@@ -1335,15 +1335,13 @@ export default async function OrderDetailPage({
   }, 0);
 
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
-  const eligibleInventoryRows = itemStockSummary.filter(({ item }) => !item.isNonInventory && Boolean(item.productId));
-  const fulfilledInventoryRows = eligibleInventoryRows.filter(({ needed, fulfilled }) => fulfilled > 0 && needed === 0).length;
-  const totalEligibleInventoryRows = eligibleInventoryRows.length;
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
-  const overallStatus = fulfilledInventoryRows >= totalEligibleInventoryRows && totalEligibleInventoryRows > 0
+  const overallStatus = totalUnitsNeeded === 0 && totalEligibleInventoryUnits > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
       ? "Partially Shipped"
@@ -1389,36 +1387,32 @@ export default async function OrderDetailPage({
         <div className="rounded-lg border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</div>
       ) : null}
 
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d50917]">Working Order</p>
-            <h1 className="mt-1 truncate text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"} <span className="font-normal text-[#64748b]">— Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span></h1>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h1 className="truncate text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</h1>
+              <span className="text-lg text-[#64748b]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
-              <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">Priority: {highestPriority(orderLines.map((line) => line.priority))}</span>
-              <span className="rounded-full bg-[#eef2ff] px-2.5 py-1 text-[#3730a3]">Fulfillment: {orderRecord.fulfillment_method === "WILL_CALL" ? "Will Call" : "Ship"}</span>
-              <span className="text-[#64748b]">Order date {formatDate(orderRecord.created_at)}</span>
+              <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))} Priority</span>
+              <span className="rounded-full bg-[#f1f5f9] px-2.5 py-1 text-[#475569]">{hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
+              <span className={`rounded-full px-2.5 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
             </div>
-            <p className="mt-2 truncate text-sm text-[#64748b]">{orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
+            <p className="mt-3 truncate text-sm text-[#64748b]">Order date {formatDate(orderRecord.created_at)} · {orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"} · {contactAddress}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-4">
-            <div className="text-right">
-              <p className="text-4xl font-bold leading-none text-[#16a34a]">{fulfilledInventoryRows} / {totalEligibleInventoryRows}</p>
-              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">Fulfilled eligible items</p>
-              {fulfilledInventoryRows < totalEligibleInventoryRows ? (
-                <p className="mt-1 text-xs font-medium text-[#b45309]">
-                  {Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining · {totalUnitsInStock} in stock
-                </p>
-              ) : (
-                <p className="mt-1 text-xs font-medium text-[#1b7a43]">Order complete</p>
-              )}
-            </div>
+          <div className="flex shrink-0 items-center gap-6 rounded-xl bg-[#f8fafc] px-5 py-3">
+            <div><p className="text-2xl font-bold text-[#111827]">{totalEligibleInventoryUnits}</p><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Ordered</p></div>
+            <div><p className="text-2xl font-bold text-[#0f766e]">{totalUnitsShipped}</p><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Shipped</p></div>
+            <div><p className="text-2xl font-bold text-[#b45309]">{totalUnitsNeeded}</p><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Remaining</p></div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap items-center justify-between gap-3 border-t border-[#eef2f7] pt-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Order Status</div>
+            <div className="flex flex-wrap items-center gap-2">
             {shippingOrderColumnSet.has("fulfillment_method") ? (
-              <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 rounded-xl border border-[#e5e7eb] bg-white p-2">
+              <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <label htmlFor="warehouse_state" className="text-xs font-semibold text-[#64748b]">Warehouse</label>
                 <AutoSubmitSelect id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
@@ -1446,6 +1440,7 @@ export default async function OrderDetailPage({
               </details>
             ) : null}
             <Link href="/orders" className="btn-secondary inline-flex">Back to orders</Link>
+            </div>
           </div>
         </div>
       </div>

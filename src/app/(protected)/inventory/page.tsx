@@ -64,6 +64,7 @@ type QueueLine = {
   source_record_id?: string | null;
   shipping_orders?: {
     id: string;
+    duplicate_of_order_id?: string | null;
     created_at?: string | null;
     first_payment_at?: string | null;
     order_number?: string | null;
@@ -240,6 +241,9 @@ export default async function InventoryPage({
   const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
   const firstPaymentColumnAvailable = !firstPaymentColumnError;
   const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
+  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
+  const duplicateParentColumnAvailable = !duplicateParentColumnError;
+  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
 
   const [
     productsResult,
@@ -276,6 +280,7 @@ export default async function InventoryPage({
         source_record_id,
         shipping_orders (
           id,
+          ${duplicateParentField}
           created_at,
           fulfillment_method,
           ${shippingOrderPaymentField}
@@ -326,7 +331,8 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-  const dedupedQueueLineRows = dedupeDemandLines(queueLineRows);
+  const activeQueueLineRows = queueLineRows.filter((line) => !line.shipping_orders?.duplicate_of_order_id);
+  const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

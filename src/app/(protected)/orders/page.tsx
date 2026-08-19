@@ -25,6 +25,7 @@ type OrderSummary = {
   id: string;
   order_number: string | null;
   source_type: string | null;
+  duplicate_of_order_id?: string | null;
   notes: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
@@ -68,7 +69,7 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function buildOrdersSelect() {
+function buildOrdersSelect(includeDuplicateField: boolean) {
   const orderFields = [
     "id",
     "order_number",
@@ -77,6 +78,7 @@ function buildOrdersSelect() {
     "review_status",
     "created_at",
   ];
+  if (includeDuplicateField) orderFields.splice(3, 0, "duplicate_of_order_id");
   return `
     ${orderFields.join(",\n      ")},
     customers (company_name, full_name),
@@ -110,7 +112,8 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  const ordersSelect = buildOrdersSelect();
+  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
+  const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
 
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

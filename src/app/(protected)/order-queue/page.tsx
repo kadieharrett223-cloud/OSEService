@@ -19,6 +19,7 @@ type QueueEntry = {
   } | null;
   shipping_orders?: {
     id: string;
+    duplicate_of_order_id?: string | null;
     order_number: string | null;
     legacy_customer_name: string | null;
     qbo_invoices?: {
@@ -60,6 +61,9 @@ function formatDate(value: string | null | undefined) {
 export default async function OrderQueuePage() {
   await requireUser();
   const supabase = getSupabaseAdmin();
+  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
+  const duplicateParentColumnAvailable = !duplicateParentColumnError;
+  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
   const { data: queueRows, error } = await supabase
     .from("shipping_order_lines")
     .select(`
@@ -76,6 +80,7 @@ export default async function OrderQueuePage() {
       products (sku, canonical_name),
       shipping_orders (
         id,
+        ${duplicateParentField}
         order_number,
         legacy_customer_name,
         qbo_invoices (
@@ -88,8 +93,9 @@ export default async function OrderQueuePage() {
     .order("queue_position_start", { ascending: true, nullsFirst: false });
 
   const queueEntries = (queueRows ?? []) as QueueEntry[];
-  const openDemand = queueEntries.reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-  const lineIds = queueEntries.map((line) => line.id);
+  const activeQueueEntries = queueEntries.filter((line) => !line.shipping_orders?.duplicate_of_order_id);
+  const openDemand = activeQueueEntries.reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
+  const lineIds = activeQueueEntries.map((line) => line.id);
   const { data: allocationRows } = lineIds.length
     ? await supabase
         .from("inventory_allocations")
@@ -133,7 +139,7 @@ export default async function OrderQueuePage() {
         </div>
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-[#6b7280]">Active lines</p>
-          <p className="mt-2 text-3xl font-semibold text-[#111827]">{queueEntries.length}</p>
+          <p className="mt-2 text-3xl font-semibold text-[#111827]">{activeQueueEntries.length}</p>
         </div>
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-[#6b7280]">Priority mix</p>
@@ -146,15 +152,15 @@ export default async function OrderQueuePage() {
           <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">Unable to load the open order queue right now.</div>
         ) : null}
 
-        {!error && queueEntries.length === 0 ? (
+        {!error && activeQueueEntries.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] p-6 text-sm text-[#6b7280]">
             No approved open orders are available yet.
           </div>
         ) : null}
 
-        {!error && queueEntries.length > 0 ? (
+        {!error && activeQueueEntries.length > 0 ? (
           <div className="space-y-3">
-            {queueEntries.map((line) => {
+            {activeQueueEntries.map((line) => {
               const productName = line.products?.canonical_name ?? line.products?.sku ?? "Unmapped product";
               const customerName = line.shipping_orders?.qbo_invoices?.customers?.company_name
                 ?? line.shipping_orders?.qbo_invoices?.customers?.full_name

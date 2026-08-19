@@ -28,6 +28,7 @@ export type ClassificationOrder = {
   order_number?: string | null;
   source_type?: string | null;
   review_status?: string | null;
+  duplicate_of_order_id?: string | null;
   shipping_order_lines?: ClassificationLine[] | null;
 };
 
@@ -57,6 +58,19 @@ export function classifyOrder(
   const manualMappingSkus = options.manualMappingSkus ?? new Set<string>();
   const allLines = order.shipping_order_lines ?? [];
   const isExcluded = EXCLUDED_ORDER_NUMBERS.includes(String(order.order_number ?? ""));
+  const isHistoricalDuplicate = Boolean(order.duplicate_of_order_id);
+
+  if (isHistoricalDuplicate) {
+    return {
+      operationalLines: [],
+      isActivated: false,
+      isVisibleOperationalOrder: false,
+      isNewOrder: false,
+      isWarehouseOrder: false,
+      isPartiallyShippedOrder: false,
+      isArchivedOrder: false,
+    };
+  }
 
   const operationalLines = allLines.filter((line) => {
     const remaining = Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));

@@ -12,7 +12,7 @@ type QueueLine = {
   fulfillment_status: string | null;
   priority: string | null;
   queue_position_override: number | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null } | null;
 };
 
 /** Manual overrides win, then earliest payment, then order age. */
@@ -59,13 +59,15 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   const supabase = getSupabaseAdmin();
   const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
   const shippingOrderPaymentField = firstPaymentColumnError ? "" : ", first_payment_at";
+  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
+  const duplicateParentField = duplicateParentColumnError ? "" : ", duplicate_of_order_id";
 
   // Paged: a single request is capped at 1000 rows, which would leave later lines un-numbered.
   const data: unknown[] = [];
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField})`)
+      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField})`)
       .in("product_id", uniqueProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);
@@ -78,6 +80,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   const linesByProduct = new Map<string, QueueLine[]>();
   for (const rawLine of data ?? []) {
     const line = rawLine as unknown as QueueLine;
+    if (line.shipping_orders?.duplicate_of_order_id) continue;
     if (!line.product_id || !isActiveQueueLine(line)) continue;
     const rows = linesByProduct.get(line.product_id) ?? [];
     rows.push(line);

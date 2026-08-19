@@ -264,7 +264,7 @@ export async function adjustProductStockAction(formData: FormData) {
     before_qty: current,
     after_qty: target,
     reason: `Manual adjustment by ${user.fullName ?? "admin"}: ${note}`,
-    source_type: "MANUAL_ADJUSTMENT",
+    source_type: "ADJUSTMENT",
     source_event_key: `manual:${productId}:${Date.now()}`,
   });
 

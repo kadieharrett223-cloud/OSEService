@@ -191,7 +191,7 @@ export default async function ContainerDetailPage({
     const productId = line.product_id ?? null;
     if (!productId) continue;
     const received = Number(line.received_qty ?? 0);
-    const fallback = Number(line.ordered_qty ?? line.on_order_qty ?? 0);
+    const fallback = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
     const available = hasExplicitReceipts ? Math.max(received, 0) : Math.max(fallback, 0);
     if (available <= 0) continue;
     availableByProduct.set(productId, (availableByProduct.get(productId) ?? 0) + available);
@@ -392,7 +392,7 @@ export default async function ContainerDetailPage({
               </thead>
               <tbody className="divide-y divide-[#e5e7eb] bg-white">
                 {lines.length > 0 ? lines.map((line) => {
-                  const ordered = Number(line.ordered_qty ?? 0);
+                  const ordered = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
                   const received = Number(line.received_qty ?? 0);
                   const allocated = 0;
                   const available = Math.max(received - allocated, 0);

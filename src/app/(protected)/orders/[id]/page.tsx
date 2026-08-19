@@ -323,7 +323,11 @@ function cleanAddressForHeader(address: string | null | undefined, phone: string
 }
 
 function normalizeSkuKey(value: string | null | undefined) {
-  const normalized = String(value ?? "").trim().replace(/\s*\(deleted\)\s*$/i, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const cleaned = String(value ?? "")
+    .trim()
+    .replace(/\s*\(deleted[^)]*\)\s*$/i, "")
+    .replace(/[-\s]+\d+$/g, "");
+  const normalized = cleaned.toUpperCase().replace(/[^A-Z0-9]/g, "");
   return normalized || null;
 }
 

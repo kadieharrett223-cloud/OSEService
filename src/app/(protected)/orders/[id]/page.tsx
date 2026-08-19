@@ -1332,12 +1332,15 @@ export default async function OrderDetailPage({
   }, 0);
 
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
+  const eligibleInventoryRows = itemStockSummary.filter(({ item }) => !item.isNonInventory && Boolean(item.productId));
+  const fulfilledInventoryRows = eligibleInventoryRows.filter(({ needed, fulfilled }) => fulfilled > 0 && needed === 0).length;
+  const totalEligibleInventoryRows = eligibleInventoryRows.length;
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
-  const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0
+  const overallStatus = fulfilledInventoryRows >= totalEligibleInventoryRows && totalEligibleInventoryRows > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
       ? "Partially Shipped"
@@ -1399,9 +1402,9 @@ export default async function OrderDetailPage({
           </div>
           <div className="flex shrink-0 items-center gap-4">
             <div className="text-right">
-              <p className="text-4xl font-bold leading-none text-[#16a34a]">{totalUnitsShipped} / {totalUnitsNeeded}</p>
-              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">Shipped</p>
-              {totalUnitsShipped < totalUnitsNeeded ? (
+              <p className="text-4xl font-bold leading-none text-[#16a34a]">{fulfilledInventoryRows} / {totalEligibleInventoryRows}</p>
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.1em] text-[#64748b]">Fulfilled eligible items</p>
+              {fulfilledInventoryRows < totalEligibleInventoryRows ? (
                 <p className="mt-1 text-xs font-medium text-[#b45309]">
                   {Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining · {totalUnitsInStock} in stock
                 </p>

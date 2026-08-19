@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planQuickbooksOrderRefresh, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
+import { planQuickbooksOrderRefresh, resolveInvoiceOrder, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
 
@@ -69,5 +69,49 @@ describe("re-entering a QuickBooks invoice", () => {
     );
 
     expect(plan.productIds.sort()).toEqual(["product-1", "product-2"]);
+  });
+
+  // Case 6: entering an invoice that already exists must reuse it.
+  it("reuses the existing order instead of creating a duplicate", () => {
+    expect(resolveInvoiceOrder({ id: "order-1" })).toEqual({ action: "refresh", orderId: "order-1" });
+  });
+
+  it("only creates an order when the invoice has never been entered", () => {
+    expect(resolveInvoiceOrder(null)).toEqual({ action: "create" });
+    expect(resolveInvoiceOrder(undefined)).toEqual({ action: "create" });
+  });
+
+  // Case 7: a refresh carries current QuickBooks data, never newer ERP operational state.
+  it("never writes warehouse, fulfilment or shipped quantity fields", () => {
+    const plan = planQuickbooksOrderRefresh([invoiceLine()], [orderLine()], aliases);
+
+    for (const update of plan.updates) {
+      expect(Object.keys(update).sort()).toEqual(["approval_status", "approved_qty", "lineId", "ordered_qty", "product_id"]);
+      expect(update).not.toHaveProperty("warehouse_status");
+      expect(update).not.toHaveProperty("fulfillment_status");
+      expect(update).not.toHaveProperty("fulfilled_qty");
+    }
+  });
+
+  it("does not reactivate demand that was already fulfilled", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ ordered_qty: 3 })],
+      [orderLine({ approved_qty: 3, fulfilled_qty: 3 })],
+      aliases,
+    );
+
+    expect(plan.updates).toHaveLength(0);
+    expect(plan.inserts).toHaveLength(0);
+    expect(plan.skippedShipped).toEqual(["order-line-1"]);
+  });
+
+  it("keeps an existing product mapping rather than remapping a live line", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ product_id: "product-different" })],
+      [orderLine({ product_id: "product-existing" })],
+      aliases,
+    );
+
+    expect(plan.updates[0]?.product_id).toBe("product-existing");
   });
 });

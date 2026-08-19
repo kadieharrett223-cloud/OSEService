@@ -30,6 +30,15 @@ export type RefreshPlan = {
   productIds: string[];
 };
 
+export type InvoiceOrderResolution =
+  | { action: "refresh"; orderId: string }
+  | { action: "create" };
+
+/** An invoice already in the system is always reused, so entering it can never create a duplicate. */
+export function resolveInvoiceOrder(existingOrder: { id: string } | null | undefined): InvoiceOrderResolution {
+  return existingOrder?.id ? { action: "refresh", orderId: existingOrder.id } : { action: "create" };
+}
+
 export function planQuickbooksOrderRefresh(
   invoiceLines: RefreshInvoiceLine[],
   orderLines: RefreshOrderLine[],

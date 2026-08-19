@@ -95,8 +95,7 @@ describe("orders visibility and activation", () => {
     expect(partial.isPartiallyShippedOrder).toBe(true);
   });
 
-  it("excludes lines whose SKU is awaiting manual mapping from operational demand", () => {
-    const result = classifyOrder(
+  it("excludes lines whose SKU is awaiting manual mapping from operational demand", () => {    const result = classifyOrder(
       order({ review_status: "PENDING_REVIEW", shipping_order_lines: [line({ products: { sku: "JVCJ-6" } })] }),
       { manualMappingSkus: new Set(["JVCJ-6"]) },
     );
@@ -105,8 +104,32 @@ describe("orders visibility and activation", () => {
     expect(result.isVisibleOperationalOrder).toBe(false);
   });
 
-  it("maps classifications onto the correct tabs", () => {
-    const active = classifyOrder(order());
+  it("classifies a part-shipped order as Partially Shipped and never New", () => {
+    // One unit shipped, one still owed: it must leave New and appear as partially shipped.
+    const result = classifyOrder(order({
+      shipping_order_lines: [
+        line({ approved_qty: 2, fulfilled_qty: 1, fulfillment_status: "PARTIALLY_FULFILLED" }),
+        line({ approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    }));
+
+    expect(result.isPartiallyShippedOrder).toBe(true);
+    expect(result.isNewOrder).toBe(false);
+    expect(result.isVisibleOperationalOrder).toBe(true);
+  });
+
+  it("keeps a refreshed order in New only while remaining demand exists", () => {
+    const withDemand = classifyOrder(order({ shipping_order_lines: [line({ approved_qty: 2, fulfilled_qty: 0 })] }));
+    expect(withDemand.isNewOrder).toBe(true);
+
+    const fullyShipped = classifyOrder(order({
+      shipping_order_lines: [line({ approved_qty: 2, fulfilled_qty: 2, fulfillment_status: "FULFILLED" })],
+    }));
+    expect(fullyShipped.isNewOrder).toBe(false);
+    expect(fullyShipped.isArchivedOrder).toBe(true);
+  });
+
+  it("maps classifications onto the correct tabs", () => {    const active = classifyOrder(order());
     expect(matchesOrderTab(active, "orders")).toBe(true);
     expect(matchesOrderTab(active, "new")).toBe(true);
     expect(matchesOrderTab(active, "archived")).toBe(false);

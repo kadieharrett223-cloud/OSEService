@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
-import { planQuickbooksOrderRefresh } from "@/lib/orders/quickbooks-refresh";
+import { planQuickbooksOrderRefresh, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -469,9 +469,10 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (invoiceError || !invoice) redirect(`/orders/new?error=${encodeURIComponent(invoiceError?.message ?? "QuickBooks invoice not found")}`);
 
   const existingOrder = existing?.[0];
-  if (existingOrder?.id) {
-    await activateExistingQuickbooksOrder(adminClient, existingOrder.id, invoice);
-    redirect(`/orders/${existingOrder.id}?message=Order+refreshed+from+QuickBooks`);
+  const resolution = resolveInvoiceOrder(existingOrder);
+  if (resolution.action === "refresh") {
+    await activateExistingQuickbooksOrder(adminClient, resolution.orderId, invoice);
+    redirect(`/orders/${resolution.orderId}?message=Order+refreshed+from+QuickBooks`);
   }
 
   const { data: customer } = invoice.customer_id

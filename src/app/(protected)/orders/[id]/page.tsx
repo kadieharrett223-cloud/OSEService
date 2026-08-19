@@ -587,7 +587,8 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
         container_id,
         containers (id, container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
       )
-    )`,
+    )`
+    ,
   );
 
   return columns.join(",\n        ");

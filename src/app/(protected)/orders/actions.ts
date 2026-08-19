@@ -360,7 +360,6 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
       review_status: "APPROVED",
       priority: "NORMAL",
       legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
-      notes: "Entered from QuickBooks invoice lookup.",
     })
     .select("id")
     .single();

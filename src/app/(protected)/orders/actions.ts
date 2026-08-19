@@ -1127,7 +1127,6 @@ export async function completeOrderShipmentAction(formData: FormData) {
     .eq("id", shipmentId)
     .eq("shipping_order_id", orderId);
   if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
-  await adminClient.from("order_shipments").update({ created_by: user.id } as never).eq("id", shipmentId).is("created_by", null);
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
   revalidatePath("/orders");
   revalidatePath("/inventory");
@@ -1159,7 +1158,7 @@ export async function editOrderShipmentAction(formData: FormData) {
     p_carrier: carrier || null,
     p_tracking_number: trackingNumber || null,
     p_notes: notes || null,
-    p_actor_id: user.id,
+    p_actor_id: null,
     p_lines: lines,
   } as never);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);

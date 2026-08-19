@@ -323,12 +323,21 @@ function cleanAddressForHeader(address: string | null | undefined, phone: string
 }
 
 function normalizeSkuKey(value: string | null | undefined) {
-  const cleaned = String(value ?? "")
-    .trim()
-    .replace(/\s*\(deleted[^)]*\)\s*$/i, "")
-    .replace(/[-\s]+\d+$/g, "");
-  const normalized = cleaned.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const normalized = String(value ?? "").trim().replace(/\s*\(deleted\)\s*$/i, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return normalized || null;
+}
+
+/**
+ * QBO sometimes sends variants like "4PC-6-1 (deleted-1)"; keep real numeric SKUs intact.
+ * We trim the trailing counter only when a deleted marker is present.
+ */
+function normalizeInvoiceSkuKey(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const hasDeletedMarker = /\(deleted/i.test(raw);
+  let cleaned = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim();
+  if (hasDeletedMarker) cleaned = cleaned.replace(/[-\s]*\d+$/g, "").trim();
+  return normalizeSkuKey(cleaned);
 }
 
 function metricStatusClass(value: string | null | undefined) {
@@ -1070,7 +1079,7 @@ export default async function OrderDetailPage({
     amount: null,
     isNonInventory: false,
   }))).map((item, index) => {
-    const skuKey = normalizeSkuKey(item.sku);
+    const skuKey = normalizeInvoiceSkuKey(item.sku) ?? normalizeSkuKey(item.sku);
     const resolvedProduct = skuKey ? productMap.get(skuKey) ?? null : null;
     // Invoice SKUs are model codes while order lines often carry old-ERP numbers, so fall back to
     // the resolved product before giving up on finding the operational line.
@@ -1460,7 +1469,7 @@ export default async function OrderDetailPage({
                     const fallbackShipmentLine = item.productId
                       ? orderLines.find((candidate) => {
                         const candidateSku = normalizeSkuKey(candidate.legacy_item_code);
-                        const itemSku = normalizeSkuKey(item.sku);
+                        const itemSku = normalizeInvoiceSkuKey(item.sku) ?? normalizeSkuKey(item.sku);
                         const skuMatches = Boolean(candidateSku && itemSku && (candidateSku === itemSku || candidateSku === itemSku.replace(/1$/, "") || itemSku === candidateSku.replace(/1$/, "")));
                         return (candidate.product_id === item.productId || skuMatches)
                           && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0)

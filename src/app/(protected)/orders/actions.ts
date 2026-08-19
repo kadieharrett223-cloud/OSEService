@@ -95,7 +95,8 @@ async function recordFulfillmentInventory(
   sourceEventKey: string,
   actorId?: string | null,
 ) {
-  if (!productId || quantity <= 0) return;
+  if (!productId) throw new Error("Cannot record shipment inventory without a mapped product");
+  if (quantity <= 0) return;
 
   const { data: floorRows, error: floorError } = await supabase
     .from("inventory_transactions")
@@ -105,7 +106,7 @@ async function recordFulfillmentInventory(
   if (floorError) throw new Error(floorError.message);
 
   const currentFloor = (floorRows ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
-  const floorAfter = Math.max(0, currentFloor - quantity);
+  const floorAfter = currentFloor - quantity;
   const floorEvent = await supabase.from("inventory_transactions").upsert({
     product_id: productId,
     bucket: "ON_FLOOR",
@@ -1043,6 +1044,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   }>;
 
   if (selectedLines.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Selected+line+does+not+belong+to+this+order`);
+  if (selectedLines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+ship+an+unmapped+product+line`);
 
   const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;

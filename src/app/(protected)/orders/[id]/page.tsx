@@ -857,6 +857,7 @@ export default async function OrderDetailPage({
         id: line.id,
         sku: line.products?.sku ?? "Item",
         productName: line.products?.canonical_name ?? null,
+        orderedQty: Number(line.ordered_qty ?? 0),
         approvedQty: Number(line.approved_qty ?? 0),
         fulfilledQty: Number(line.fulfilled_qty ?? 0),
       })),
@@ -1287,23 +1288,24 @@ export default async function OrderDetailPage({
 
   const itemStockSummary = visibleItems.map((item) => {
     const supply = getItemSupplySnapshot(item);
-    const needed = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
+    const orderedQty = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
     const canonicalMatch = item.sku ? bestCanonicalLineMatch(normalizeSkuKey(item.sku), item.description) : null;
-    const fulfilled = Math.min(needed, Math.max(
+    const fulfilled = Math.min(orderedQty, Math.max(
       Number(item.shippingLine?.fulfilled_qty ?? 0),
       item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0,
       Number(canonicalMatch?.fulfilled_qty ?? 0),
     ));
+    const needed = Math.max(0, orderedQty - fulfilled);
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
-    const inStock = Math.min(Math.max(0, needed - fulfilled), floorAvailable) + fulfilled;
+    const inStock = Math.min(needed, floorAvailable);
     const status = item.isNonInventory
       ? "N/A"
-      : fulfilled >= needed && needed > 0
+      : needed === 0 && orderedQty > 0
       ? "Shipped"
       : fulfilled > 0
         ? "Partially Shipped"
         : inStock >= needed
-        ? "In Stock"
+        ? "Ready"
         : supply.suggestion?.source_type === "CONTAINER"
           ? "Incoming"
           : inStock > 0
@@ -1315,9 +1317,9 @@ export default async function OrderDetailPage({
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
-  const totalUnitsShipped = Math.min(totalUnitsNeeded, orderLines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0));
+  const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
-  const hasShippableLines = orderLines.some((line) => Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) > Number(line.fulfilled_qty ?? 0));
+  const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
   const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
@@ -1447,8 +1449,8 @@ export default async function OrderDetailPage({
 
             {!hasShippableLines ? (
               <div className="mt-4 rounded-lg border border-[#f4d9a8] bg-[#fffaf0] p-3 text-sm text-[#8a5a00]">
-                Nothing can be shipped yet: these items are still <strong>pending review</strong>, so no approved quantity exists.
-                Approve the order in <Link href="/shipping-review" className="underline">Shipping Review</Link> first, then create the shipment.
+                There are no remaining physical inventory lines available for shipment selection.
+                Service lines and lines without a valid product mapping must be resolved before they can be shipped.
               </div>
             ) : null}
 
@@ -1457,7 +1459,7 @@ export default async function OrderDetailPage({
                 <div className="grid grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
                   <span>Qty Needed</span>
-                  <span>In Stock</span>
+                  <span>Available</span>
                   <span>Coming From</span>
                   <span>ETA</span>
                   <span>Status</span>
@@ -1501,7 +1503,7 @@ export default async function OrderDetailPage({
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock }} /> : null}
+                            {shipmentLine && !item.isNonInventory ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>

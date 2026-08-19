@@ -2,6 +2,7 @@ export type ShipmentEditOrderLine = {
   id: string;
   sku: string;
   productName: string | null;
+  orderedQty?: number;
   approvedQty: number;
   fulfilledQty: number;
 };
@@ -33,7 +34,7 @@ export function buildShipmentEditLineState(
   return orderLines
     .map((line) => {
       const currentQty = savedQtyByLine.get(line.id) ?? 0;
-      const remainingOutsideShipment = Math.max(0, line.approvedQty - line.fulfilledQty);
+      const remainingOutsideShipment = Math.max(0, Math.max(line.approvedQty, line.orderedQty ?? 0) - line.fulfilledQty);
       return {
         ...line,
         currentQty,

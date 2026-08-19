@@ -216,13 +216,17 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
 
   if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
 
+  if ((lines ?? []).length === 0) {
+    redirect(`/orders/${orderId}?error=This+order+has+no+mapped+operational+lines.+Map+the+QuickBooks+SKUs+before+moving+items+to+the+warehouse.`);
+  }
+
   const openLines = (lines ?? []).filter((line) =>
     line.product_id
     && Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
     && line.fulfillment_status !== "FULFILLED"
     && line.fulfillment_status !== "CANCELLED",
   );
-  if (openLines.length === 0) redirect(`/orders/${orderId}?error=This+order+has+no+open+items+to+move+to+the+warehouse`);
+  if (openLines.length === 0) redirect(`/orders/${orderId}?error=This+order+has+no+open+mapped+items+to+move+to+the+warehouse`);
 
   const { error: updateError } = await adminClient
     .from("shipping_order_lines")

@@ -85,6 +85,61 @@ async function writeOrderActivity(
   });
 }
 
+async function recordFulfillmentInventory(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  lineId: string,
+  productId: string | null,
+  quantity: number,
+  sourceEventKey: string,
+  actorId?: string | null,
+) {
+  if (!productId || quantity <= 0) return;
+
+  const { data: floorRows, error: floorError } = await supabase
+    .from("inventory_transactions")
+    .select("delta")
+    .eq("product_id", productId)
+    .eq("bucket", "ON_FLOOR");
+  if (floorError) throw new Error(floorError.message);
+
+  const currentFloor = (floorRows ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
+  const floorAfter = Math.max(0, currentFloor - quantity);
+  const floorEvent = await supabase.from("inventory_transactions").upsert({
+    product_id: productId,
+    bucket: "ON_FLOOR",
+    delta: floorAfter - currentFloor,
+    before_qty: currentFloor,
+    after_qty: floorAfter,
+    reason: "Fulfillment completed",
+    source_type: "FULFILLMENT",
+    source_event_key: `${sourceEventKey}:ON_FLOOR`,
+    shipping_order_line_id: lineId,
+    actor_id: actorId ?? null,
+  }, { onConflict: "source_type,source_event_key", ignoreDuplicates: true });
+  if (floorEvent.error) throw new Error(floorEvent.error.message);
+
+  const { data: soldRows, error: soldError } = await supabase
+    .from("inventory_transactions")
+    .select("delta")
+    .eq("product_id", productId)
+    .eq("bucket", "SOLD");
+  if (soldError) throw new Error(soldError.message);
+  const currentSold = (soldRows ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
+  const soldEvent = await supabase.from("inventory_transactions").upsert({
+    product_id: productId,
+    bucket: "SOLD",
+    delta: quantity,
+    before_qty: currentSold,
+    after_qty: currentSold + quantity,
+    reason: "Fulfillment completed",
+    source_type: "FULFILLMENT",
+    source_event_key: `${sourceEventKey}:SOLD`,
+    shipping_order_line_id: lineId,
+    actor_id: actorId ?? null,
+  }, { onConflict: "source_type,source_event_key", ignoreDuplicates: true });
+  if (soldEvent.error) throw new Error(soldEvent.error.message);
+}
+
 async function syncOrderSummaryState(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   orderId: string,
@@ -803,6 +858,12 @@ export async function markOrderLineShippedAction(formData: FormData) {
   }
 
   try {
+    await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, shipQty, `SHIPMENT:${shipmentNumber}:${lineId}`);
+  } catch (inventoryError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(inventoryError instanceof Error ? inventoryError.message : "Unable to update inventory")}`);
+  }
+
+  try {
     await syncOrderSummaryState(adminClient, orderId, trackingNumber, carrier || null);
   } catch (orderUpdateError) {
     const message = orderUpdateError instanceof Error ? orderUpdateError.message : "Unable to update order summary state";
@@ -857,6 +918,11 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
     if (update.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(update.error.message)}`);
     const event = await adminClient.from("fulfillments").insert({ shipping_order_line_id: line.id, fulfilled_qty: pickupQty, fulfilled_at: pickedAt, reason: "Order line picked up", source_event_key: `PICKUP:${pickupId}:${line.id}`, fulfillment_type: "PICKUP", actor_id: user.id } as never);
     if (event.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(event.error.message)}`);
+    try {
+      await recordFulfillmentInventory(adminClient, line.id, line.product_id, pickupQty, `PICKUP:${pickupId}:${line.id}`, user.id);
+    } catch (inventoryError) {
+      redirect(`/orders/${orderId}?error=${encodeURIComponent(inventoryError instanceof Error ? inventoryError.message : "Unable to update inventory")}`);
+    }
     if (line.product_id) await recalculateProductQueues([line.product_id]);
   }
   const pickupTable = adminClient.from("order_pickups") as any;
@@ -927,6 +993,11 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
       source_event_key: crypto.randomUUID(),
     });
     if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
+    try {
+      await recordFulfillmentInventory(adminClient, line.id, line.product_id, remaining, `SHIPMENT:${shipmentNumber}:${line.id}`);
+    } catch (inventoryError) {
+      redirect(`/orders/${orderId}?error=${encodeURIComponent(inventoryError instanceof Error ? inventoryError.message : "Unable to update inventory")}`);
+    }
   }
 
   try {

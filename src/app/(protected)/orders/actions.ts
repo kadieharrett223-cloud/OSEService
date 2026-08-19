@@ -268,7 +268,7 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
 
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
     .eq("shipping_order_id", orderId);
 
   if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
@@ -751,6 +751,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const lineRow = line as {
     id: string;
     product_id: string;
+    ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
   } | null;
@@ -1025,7 +1026,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const { data: lines, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
 
@@ -1034,23 +1035,20 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   const selectedLines = (lines ?? []) as Array<{
     id: string;
     product_id: string | null;
+    ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
     approval_status: string | null;
     fulfillment_status: string | null;
   }>;
 
-  if (selectedLines.length !== selectedIds.length || selectedLines.some((line) => {
-    const remaining = Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0);
-    return !line.product_id || remaining <= 0 || !["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase()) || line.fulfillment_status === "CANCELLED";
-  })) {
-    redirect(`/orders/${orderId}?error=Only+mapped+open+inventory+items+can+be+shipped`);
-  }
+  if (selectedLines.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Selected+line+does+not+belong+to+this+order`);
 
   const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;
   for (const line of selectedLines) {
-    const remaining = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const remaining = Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0));
+    if (remaining <= 0) continue;
     const { error: updateError } = await adminClient.from("shipping_order_lines").update({
       fulfilled_qty: Number(line.fulfilled_qty ?? 0) + remaining,
       fulfillment_status: "FULFILLED",

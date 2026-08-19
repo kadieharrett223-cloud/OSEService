@@ -1316,8 +1316,8 @@ export default async function OrderDetailPage({
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = Math.min(totalUnitsNeeded, orderLines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0));
-  // Only approved quantity can ship, so an unreviewed order has nothing to select.
-  const hasShippableLines = orderLines.some((line) => isOpenDemandLine(line));
+  // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
+  const hasShippableLines = orderLines.some((line) => Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) > Number(line.fulfilled_qty ?? 0));
   const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
@@ -1472,24 +1472,24 @@ export default async function OrderDetailPage({
                         const itemSku = normalizeInvoiceSkuKey(item.sku) ?? normalizeSkuKey(item.sku);
                         const skuMatches = Boolean(candidateSku && itemSku && (candidateSku === itemSku || candidateSku === itemSku.replace(/1$/, "") || itemSku === candidateSku.replace(/1$/, "")));
                         return (candidate.product_id === item.productId || skuMatches)
-                          && Number(candidate.approved_qty ?? 0) > Number(candidate.fulfilled_qty ?? 0)
+                          && Math.max(Number(candidate.approved_qty ?? 0), Number(candidate.ordered_qty ?? 0)) > Number(candidate.fulfilled_qty ?? 0)
                           && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
                       }) ?? null
                       : null;
                     const indexedShipmentLine = orderLines[rowIndex] ?? orderRecord.shipping_order_lines?.[rowIndex] ?? null;
                     const indexedOpenShipmentLine = indexedShipmentLine
-                      && Number(indexedShipmentLine.approved_qty ?? 0) > Number(indexedShipmentLine.fulfilled_qty ?? 0)
+                      && Math.max(Number(indexedShipmentLine.approved_qty ?? 0), Number(indexedShipmentLine.ordered_qty ?? 0)) > Number(indexedShipmentLine.fulfilled_qty ?? 0)
                       && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(indexedShipmentLine.fulfillment_status ?? "").toUpperCase())
                       ? indexedShipmentLine
                       : null;
-                    const lineRemainingQty = line ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)) : 0;
+                    const lineRemainingQty = line ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0)) : 0;
                     const shipmentLine = (line && lineRemainingQty > 0 ? line : fallbackShipmentLine)
                       ?? line
                       ?? indexedOpenShipmentLine
                       ?? orderRecord.shipping_order_lines?.[rowIndex]
                       ?? null;
                     const remainingQty = shipmentLine
-                      ? Math.max(0, Number(shipmentLine.approved_qty ?? 0) - Number(shipmentLine.fulfilled_qty ?? 0))
+                      ? Math.max(0, Math.max(Number(shipmentLine.approved_qty ?? 0), Number(shipmentLine.ordered_qty ?? 0)) - Number(shipmentLine.fulfilled_qty ?? 0))
                       : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;

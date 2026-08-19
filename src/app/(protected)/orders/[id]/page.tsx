@@ -1277,7 +1277,8 @@ export default async function OrderDetailPage({
 
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
-  const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
+  const totalUnitsShipped = Math.min(totalUnitsNeeded, orderLines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0));
   // Only approved quantity can ship, so an unreviewed order has nothing to select.
   const hasShippableLines = orderLines.some((line) => isOpenDemandLine(line));
   const overallStatus = totalUnitsShipped >= totalUnitsNeeded && totalUnitsNeeded > 0

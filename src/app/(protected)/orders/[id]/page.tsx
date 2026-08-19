@@ -721,6 +721,24 @@ export default async function OrderDetailPage({
     return <div className="p-6">Order not found.</div>;
   }
 
+  if ((orderRecord.shipping_order_lines ?? []).length === 0) {
+    const invoiceNumber = orderRecord.qbo_invoices?.invoice_number ?? orderRecord.order_number ?? "—";
+    const customerName = orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending";
+    return (
+      <div className="space-y-6">
+        <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
+          This order has no mapped operational lines yet. Map the QuickBooks products before assigning inventory, moving items to Warehouse, or creating a shipment.
+        </div>
+        <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d50917]">Working Order</p>
+          <h1 className="mt-1 text-2xl font-semibold text-[#111827]">{customerName} <span className="font-normal text-[#64748b]">— Invoice #{invoiceNumber}</span></h1>
+          <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. Product mapping is required before warehouse fulfillment can begin.</p>
+          <div className="mt-4 flex flex-wrap gap-2"><Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link><Link href="/orders" className="btn-secondary">Back to orders</Link></div>
+        </section>
+      </div>
+    );
+  }
+
   let quickbooksSnapshot = (orderRecord.qbo_invoices as QuickbooksInvoiceSnapshot | null | undefined) ?? null;
   if (!quickbooksSnapshot && orderRecord.order_number) {
     const { data: fallbackInvoice } = await supabase

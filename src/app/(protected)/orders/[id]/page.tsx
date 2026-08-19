@@ -1031,6 +1031,23 @@ export default async function OrderDetailPage({
     if (line.product_id && !shippingLineByProductId.has(line.product_id)) shippingLineByProductId.set(line.product_id, line);
   }
 
+  const lineForInvoiceSku = (skuKey: string | null, description: string) => {
+    if (!skuKey) return null;
+    const direct = shippingLineBySkuKey.get(skuKey);
+    if (direct) return direct;
+    const resolved = productMap.get(skuKey);
+    if (resolved) {
+      const byProduct = shippingLineByProductId.get(resolved.id);
+      if (byProduct) return byProduct;
+    }
+    // Old-ERP lines can retain a numeric SKU while the invoice uses the model code in its description.
+    return orderLines.find((candidate) => {
+      const canonical = normalizeSkuKey(candidate.products?.canonical_name);
+      const descriptionKey = normalizeSkuKey(description);
+      return Boolean(canonical && (canonical.includes(skuKey) || descriptionKey?.includes(canonical)));
+    }) ?? null;
+  };
+
   const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
     sku: line.products?.sku ?? null,
     description: line.products?.canonical_name ?? line.products?.sku ?? "Line item",
@@ -1043,7 +1060,7 @@ export default async function OrderDetailPage({
     // Invoice SKUs are model codes while order lines often carry old-ERP numbers, so fall back to
     // the resolved product before giving up on finding the operational line.
     const shippingLine = (skuKey
-      ? shippingLineBySkuKey.get(skuKey) ?? (resolvedProduct ? shippingLineByProductId.get(resolvedProduct.id) ?? null : null)
+      ? lineForInvoiceSku(skuKey, item.description)
       : item.description === "Invoice line" ? null : orderLines[index] ?? null) ?? null;
     return {
       key: `${skuKey ?? "line"}-${index}`,

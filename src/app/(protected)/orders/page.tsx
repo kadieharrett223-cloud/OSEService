@@ -163,7 +163,12 @@ export default async function OrdersPage({
   const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
     ...order,
     shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
-  }));
+  })).sort((left, right) => {
+    const leftCreated = Date.parse(left.created_at) || 0;
+    const rightCreated = Date.parse(right.created_at) || 0;
+    if (leftCreated !== rightCreated) return rightCreated - leftCreated;
+    return right.id.localeCompare(left.id);
+  });
 
   function operationalLines(order: OrderSummary) {
     return (order.shipping_order_lines ?? []).filter((line) => {

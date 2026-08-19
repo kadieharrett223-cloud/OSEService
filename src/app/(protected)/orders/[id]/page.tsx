@@ -668,11 +668,6 @@ export default async function OrderDetailPage({
   const { error, message } = await searchParams;
 
   const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
-    "promised_ship_date",
-    "shipping_method",
-    "notes",
-    "tracking_number",
-    "carrier",
     "fulfillment_method",
   ]);
   const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);

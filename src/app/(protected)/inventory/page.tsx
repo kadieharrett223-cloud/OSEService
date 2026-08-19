@@ -10,6 +10,7 @@ import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown"
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { CLOSED_DEMAND_STATES, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -67,6 +68,7 @@ type QueueLine = {
     first_payment_at?: string | null;
     order_number?: string | null;
     legacy_customer_name: string | null;
+    fulfillment_method?: "SHIP" | "WILL_CALL" | null;
     qbo_invoices?: {
       invoice_number: string | null;
       customers?: {
@@ -121,6 +123,10 @@ type InventoryViewRow = {
     position: string;
     lineId: string;
     openQty: number;
+    warehouseQty: number;
+    waitingQty: number;
+    inWarehouse: boolean;
+    willCall: boolean;
     approvedQty: number;
     shippedQty: number;
     invoice: string;
@@ -271,6 +277,7 @@ export default async function InventoryPage({
         shipping_orders (
           id,
           created_at,
+          fulfillment_method,
           ${shippingOrderPaymentField}
           order_number,
           legacy_customer_name,
@@ -416,6 +423,11 @@ export default async function InventoryPage({
       ?? line.shipping_orders?.qbo_invoices?.customers?.full_name
       ?? line.shipping_orders?.legacy_customer_name
       ?? "Customer pending";
+    const warehouseDisplay = getWarehouseDemandDisplay({
+      openQty,
+      warehouseStatus: line.warehouse_status,
+      willCall: line.shipping_orders?.fulfillment_method === "WILL_CALL",
+    });
 
     const row = {
       position: line.queue_position_start != null
@@ -423,6 +435,10 @@ export default async function InventoryPage({
         : "—",
       lineId: line.id,
       openQty,
+      warehouseQty: warehouseDisplay.warehouseQty,
+      waitingQty: warehouseDisplay.waitingQty,
+      inWarehouse: warehouseDisplay.inWarehouse,
+      willCall: warehouseDisplay.willCall,
       approvedQty: Math.max(0, Number(line.approved_qty ?? 0)),
       shippedQty: Math.max(0, Number(line.fulfilled_qty ?? 0)),
       invoice,
@@ -539,6 +555,10 @@ export default async function InventoryPage({
           continue;
         }
         existing.openQty += item.openQty;
+        existing.warehouseQty += item.warehouseQty;
+        existing.waitingQty += item.waitingQty;
+        existing.inWarehouse = existing.inWarehouse || item.inWarehouse;
+        existing.willCall = existing.willCall || item.willCall;
         existing.qty += item.qty;
         existing.approvedQty += item.approvedQty;
         existing.shippedQty += item.shippedQty;

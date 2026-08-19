@@ -13,6 +13,10 @@ type CustomerQueueItem = {
   approvedQty: number;
   shippedQty: number;
   openQty: number;
+  warehouseQty: number;
+  waitingQty: number;
+  inWarehouse: boolean;
+  willCall: boolean;
   priority: string;
   assignedTo: string;
   expectedAvailability: string;
@@ -161,11 +165,15 @@ export function CustomerDemandDropdown({
           ) : (
             <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
               {customerQueue.map((item, index) => (
-                <div key={`${item.orderId}-${item.invoice}-${index}`} className="grid gap-3 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs sm:grid-cols-[minmax(0,1.4fr)_minmax(150px,1fr)_auto] sm:items-center">
+                <div key={`${item.orderId}-${item.invoice}-${index}`} className={`grid gap-3 rounded-lg border p-3 text-xs sm:grid-cols-[minmax(0,1.4fr)_minmax(150px,1fr)_auto] sm:items-center ${item.inWarehouse ? "border-[#93c5fd] bg-[#eff6ff]" : item.willCall ? "border-[#f5c26b] bg-[#fffbeb]" : "border-[#e2e8f0] bg-[#f8fafc]"}`}>
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                     <div className="mt-1 text-[#64748b]">First Paid: {item.firstPaymentAt ? new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not recorded"}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}
+                      {item.willCall ? <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#92400e]">WILL CALL</span> : null}
+                    </div>
                   </div>
                   <div className="text-[#475569]">
                     {item.shippedQty > 0 ? (
@@ -178,6 +186,8 @@ export function CustomerDemandDropdown({
                     ) : (
                       <div>Qty <span className="font-semibold text-[#1e293b]">{item.qty}</span> · {item.priority}</div>
                     )}
+                    {item.inWarehouse ? <div className="mt-1 font-semibold text-[#1d4ed8]">Preparing for shipment</div> : null}
+                    {item.warehouseQty > 0 && item.waitingQty > 0 ? <div className="mt-1 font-medium text-[#475569]">{item.warehouseQty} In Warehouse · {item.waitingQty} Waiting</div> : null}
                     <div className="mt-1 truncate text-[#64748b]">{item.assignedTo} · {item.status}</div>
                     <div className="mt-1 truncate font-medium text-[#475569]">{item.expectedAvailability}</div>
                   </div>

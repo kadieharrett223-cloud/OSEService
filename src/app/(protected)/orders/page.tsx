@@ -294,7 +294,6 @@ export default async function OrdersPage({
           </div>
           <div className="flex gap-2">
             <Link href="/orders/new" className="btn-primary inline-flex">Enter QuickBooks Order</Link>
-            <Link href="/schedule" className="btn-secondary inline-flex">Open Schedule</Link>
           </div>
         </div>
       </div>

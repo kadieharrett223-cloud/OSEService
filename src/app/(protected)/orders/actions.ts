@@ -552,7 +552,6 @@ export async function updateOrderScheduleAction(formData: FormData) {
     shipping_method: payload.shipping_method ?? null,
   });
 
-  revalidatePath("/schedule");
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Schedule+updated`);
@@ -881,7 +880,6 @@ export async function markOrderLineShippedAction(formData: FormData) {
   revalidatePath("/orders");
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
-  revalidatePath("/schedule");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Shipment+recorded`);
 }

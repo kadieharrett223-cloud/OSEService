@@ -38,7 +38,6 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/orders", label: "Orders", matchPath: "/orders", icon: "OR" },
       { href: "/orders?tab=warehouse", label: "Warehouse", matchPath: "/orders", matchQuery: "tab=warehouse", icon: "WH" },
-      { href: "/schedule", label: "Schedule", matchPath: "/schedule", icon: "SC" },
     ],
   },
   {

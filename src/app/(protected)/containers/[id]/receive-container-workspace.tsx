@@ -42,6 +42,80 @@ function differenceLabel(expected: number, actual: number) {
   return { text: `+${difference} EXTRA`, tone: "bg-[#fff7e6] text-[#b45309]" };
 }
 
+function ProductSearch({
+  options,
+  value,
+  onSelect,
+}: {
+  options: ProductOption[];
+  value: string;
+  onSelect: (productId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const selected = options.find((option) => option.id === value) ?? null;
+
+  const matches = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [];
+    return options
+      .filter((option) => `${option.sku ?? ""} ${option.name ?? ""}`.toLowerCase().includes(term))
+      .slice(0, 8);
+  }, [options, query]);
+
+  if (selected) {
+    return (
+      <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#d1d5db] px-2 py-1">
+        <span className="min-w-0 flex-1 truncate text-sm font-normal text-[#111827]">
+          {selected.sku ?? "SKU pending"} — {selected.name ?? ""}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 text-xs font-semibold text-[#2563eb] hover:underline"
+          onClick={() => {
+            onSelect("");
+            setQuery("");
+          }}
+        >
+          Change
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative mt-1">
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search SKU or product…"
+        className="w-full rounded-lg border border-[#d1d5db] px-2 py-1 text-sm font-normal"
+        aria-label="Search for a product to add"
+      />
+      {matches.length > 0 ? (
+        <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-[#d1d5db] bg-white shadow-lg">
+          {matches.map((option) => (
+            <li key={option.id}>
+              <button
+                type="button"
+                className="block w-full px-2 py-1.5 text-left text-sm font-normal hover:bg-[#f1f5f9]"
+                onClick={() => {
+                  onSelect(option.id);
+                  setQuery("");
+                }}
+              >
+                <span className="font-medium text-[#111827]">{option.sku ?? "SKU pending"}</span>{" "}
+                <span className="text-[#64748b]">{option.name ?? ""}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : query.trim() ? (
+        <p className="mt-1 text-xs font-normal text-[#64748b]">No matching products.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function ReceiveContainerWorkspace({
   containerId,
   containerNumber,
@@ -254,25 +328,18 @@ export function ReceiveContainerWorkspace({
           <div className="mt-3 grid gap-3">
             {extras.map((extra) => (
               <div key={extra.key} className="grid gap-2 rounded-lg border border-[#e5e7eb] bg-white p-3 md:grid-cols-[2fr_1fr_2fr_auto]">
-                <label className="text-xs font-semibold text-[#64748b]">
+                <div className="text-xs font-semibold text-[#64748b]">
                   Product / SKU
-                  <select
+                  <ProductSearch
+                    options={productOptions}
                     value={extra.productId}
-                    onChange={(event) =>
+                    onSelect={(productId) =>
                       setExtras((current) =>
-                        current.map((item) => (item.key === extra.key ? { ...item, productId: event.target.value } : item)),
+                        current.map((item) => (item.key === extra.key ? { ...item, productId } : item)),
                       )
                     }
-                    className="mt-1 w-full rounded-lg border border-[#d1d5db] px-2 py-1 text-sm"
-                  >
-                    <option value="">Select a product…</option>
-                    {productOptions.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.sku ?? "SKU pending"} — {product.name ?? ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
                 <label className="text-xs font-semibold text-[#64748b]">
                   Actual received
                   <input

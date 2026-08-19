@@ -336,15 +336,14 @@ export default async function OrdersPage({
 
         {orderSummaries.length > 0 ? (
           <div className="overflow-x-auto rounded-xl border border-[#e5e7eb]">
-            <table className="w-full min-w-[1040px] text-left text-sm">
+            <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="bg-[#f8fafc]">
                 <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
                   <th className="px-3 py-3">Order / Customer</th>
                   <th className="px-3 py-3">Ordered</th>
-                  <th className="px-3 py-3">In Stock</th>
-                  <th className="px-3 py-3">In Warehouse</th>
                   <th className="px-3 py-3">Shipped</th>
                   <th className="px-3 py-3">Remaining</th>
+                  <th className="px-3 py-3">Remaining Status</th>
                   <th className="px-3 py-3">Order Date</th>
                   <th className="px-3 py-3 text-right">Actions</th>
                 </tr>
@@ -367,8 +366,23 @@ export default async function OrdersPage({
               const warehouseQty = lines
                 .filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
                 .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-              const shippedQty = (order.shipping_order_lines ?? []).reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
+              const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
               const remainingQty = Math.max(0, totalQty - shippedQty);
+              const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
+              const remainingAvailable = Math.min(
+                Math.max(0, remainingQty - remainingInWarehouse),
+                Math.max(0, inStockQty - warehouseQty),
+              );
+              const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable);
+              const remainingStatusParts: string[] = [];
+              if (remainingAvailable > 0) remainingStatusParts.push(`${remainingAvailable} available`);
+              if (remainingInWarehouse > 0) remainingStatusParts.push(`${remainingInWarehouse} in warehouse`);
+              if (remainingWaiting > 0) remainingStatusParts.push(`${remainingWaiting} waiting`);
+              const remainingStatus = remainingQty === 0
+                ? "Complete"
+                : remainingStatusParts.length > 0
+                  ? remainingStatusParts.join(" · ")
+                  : "Not in stock";
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
                   <td className="px-3 py-3">
@@ -376,15 +390,9 @@ export default async function OrdersPage({
                     <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
                   </td>
                   <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
-                  <td className="px-3 py-3 font-semibold text-[#15803d]">{inStockQty} / {totalQty}</td>
-                  <td className="px-3 py-3 font-semibold text-[#c2410c]">{warehouseQty} / {totalQty}</td>
-                  <td className="px-3 py-3">
-                    <span className="font-semibold text-[#0f766e]">{shippedQty} / {totalQty}</span>
-                    {shippedQty > 0 && remainingQty > 0 ? (
-                      <div className="mt-1 text-xs font-semibold text-[#b45309]">{remainingQty} remaining</div>
-                    ) : null}
-                  </td>
+                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{shippedQty} of {totalQty}</td>
                   <td className="px-3 py-3 font-semibold text-[#b45309]">{remainingQty}</td>
+                  <td className="px-3 py-3 font-semibold text-[#334155]">{remainingStatus}</td>
                   <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">

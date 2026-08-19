@@ -1537,13 +1537,36 @@ export default async function OrderDetailPage({
               {shipmentLog.map((shipment) => (
                 <div key={shipment.id} className="rounded-xl border border-[#e2e8f0] bg-[#fafbfc] p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div><h3 className="font-semibold text-[#111827]">{shipment.shipment_number}</h3><p className="mt-1 text-xs text-[#64748b]">{formatDateTime(shipment.shipped_at)} · SHIPPED</p></div>
-                    <p className="text-sm font-semibold text-[#334155]">{shipment.carrier ?? "Carrier pending"}{shipment.tracking_number ? ` · ${shipment.tracking_number}` : ""}</p>
+                    <div>
+                      <h3 className="font-semibold text-[#111827]">{shipment.shipment_number}</h3>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">Shipped {formatDateTime(shipment.shipped_at)}</p>
+                    </div>
+                    <div className="text-right text-sm">
+                      <p className="font-semibold text-[#334155]">{shipment.carrier ?? "Carrier pending"}</p>
+                      <p className="mt-0.5 text-xs text-[#64748b]">{shipment.tracking_number ? `Tracking ${shipment.tracking_number}` : "No tracking number"}</p>
+                    </div>
                   </div>
-                  <ul className="mt-3 list-disc pl-5 text-sm text-[#475569]">{(shipment.lines ?? []).map((line) => <li key={line.shipping_order_line_id}>{line.shipping_order_lines?.products?.sku ?? "Item"} × {line.quantity ?? 0}</li>)}</ul>
-                  {shipment.notes ? <p className="mt-2 text-xs text-[#64748b]">Notes: {shipment.notes}</p> : null}
+
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Items in this shipment</p>
+                  <ul className="mt-1 divide-y divide-[#eef2f7] text-sm text-[#334155]">
+                    {(shipment.lines ?? []).length > 0
+                      ? (shipment.lines ?? []).map((line, index) => (
+                        <li key={`${line.shipping_order_line_id}-${index}`} className="flex items-center justify-between py-1.5">
+                          <span>{line.shipping_order_lines?.products?.sku ?? "Item"}</span>
+                          <span className="font-semibold">× {line.quantity ?? 0}</span>
+                        </li>
+                      ))
+                      : <li className="py-1.5 text-[#64748b]">No item detail recorded for this shipment.</li>}
+                  </ul>
+
+                  {shipment.notes ? (
+                    <div className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-2.5">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Notes</p>
+                      <p className="mt-1 text-sm text-[#334155]">{shipment.notes}</p>
+                    </div>
+                  ) : null}
+
                   {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex btn-secondary text-xs">View Tracking</a> : null}
-                  {hasOrderAttachmentsTable && !shipment.id.startsWith("historical-") ? <form action={uploadOrderAttachmentAction} className="mt-3 flex flex-wrap items-end gap-2" encType="multipart/form-data"><input type="hidden" name="order_id" value={orderRecord.id} /><input type="hidden" name="shipment_id" value={shipment.id} /><label className="text-xs font-semibold text-[#64748b]">Shipment documents<input type="file" name="attachments" multiple className="mt-1 block text-xs" /></label><select name="document_type" className="input text-xs"><option value="BOL">BOL</option><option value="PACKING_LIST">Packing list</option><option value="PHOTO">Photo</option><option value="OTHER">Other</option></select><button type="submit" className="btn-secondary text-xs">Attach</button></form> : null}
                 </div>
               ))}
               {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}

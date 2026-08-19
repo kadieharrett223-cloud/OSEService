@@ -3,7 +3,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { completeOrderShipmentAction, markOrderLinesPickedUpAction } from "../actions";
 
-type SelectionLine = { id: string; sku: string; remainingQty: number; defaultQty: number; inStock: number };
+type SelectionLine = { id: string; sku: string; remainingQty: number; defaultQty: number; inStock: number; isReserved: boolean };
 type SelectedLine = SelectionLine & { quantity: number };
 type ContextValue = { active: boolean; selected: SelectedLine[]; start: () => void; cancel: () => void; toggle: (line: SelectionLine) => void; setQuantity: (id: string, quantity: number) => void };
 const SelectionContext = createContext<ContextValue | null>(null);
@@ -35,7 +35,7 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
   const { active, selected, toggle, setQuantity } = useSelection();
   if (!active) return null;
   const selectedLine = selected.find((item) => item.id === line.id);
-  return <span className="mr-2 inline-flex items-center gap-1 align-middle" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><button type="button" aria-pressed={Boolean(selectedLine)} aria-label={`Include ${line.sku} in shipment`} onPointerDown={(event) => { event.stopPropagation(); toggle(line); }} onClick={(event) => event.stopPropagation()} className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}>{selectedLine ? "✓" : ""}</button>{selectedLine ? <input type="number" min="1" max={line.remainingQty} value={selectedLine.quantity} onClick={(event) => event.stopPropagation()} onChange={(event) => setQuantity(line.id, Number(event.target.value))} className="w-16 rounded border border-[#cbd5e1] px-1.5 py-1 text-xs" aria-label={`Quantity of ${line.sku}`} /> : null}{line.inStock <= 0 ? <span className="ml-1 text-[11px] font-medium text-[#b45309]">Waiting / not in stock</span> : null}</span>;
+  return <span className="mr-2 inline-flex items-center gap-1 align-middle" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}><button type="button" aria-pressed={Boolean(selectedLine)} aria-label={`Include ${line.sku} in shipment`} onPointerDown={(event) => { event.stopPropagation(); toggle(line); }} onClick={(event) => event.stopPropagation()} className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}>{selectedLine ? "✓" : ""}</button>{selectedLine ? <input type="number" min="1" max={line.remainingQty} value={selectedLine.quantity} onClick={(event) => event.stopPropagation()} onChange={(event) => setQuantity(line.id, Number(event.target.value))} className="w-16 rounded border border-[#cbd5e1] px-1.5 py-1 text-xs" aria-label={`Quantity of ${line.sku}`} /> : null}{line.inStock <= 0 && !line.isReserved ? <span className="ml-1 text-[11px] font-medium text-[#b45309]">Inventory shortage: shipping {line.defaultQty} with 0 available</span> : null}</span>;
 }
 
 export function ShipmentSelectionComposer({ orderId, pickupMode = false }: { orderId: string; pickupMode?: boolean }) {

@@ -1109,12 +1109,6 @@ export default async function OrderDetailPage({
 
   const visibleLineCount = visibleItems.length;
   const visibleOrderedTotal = visibleItems.reduce((sum, item) => sum + item.orderedQty, 0);
-  const visibleOpenTotal = visibleItems.reduce((sum, item) => {
-    if (item.shippingLine) return sum + Math.max(0, Number(item.shippingLine.approved_qty ?? 0) - Number(item.shippingLine.fulfilled_qty ?? 0));
-    return sum + Math.max(0, item.orderedQty);
-  }, 0);
-  const visibleShippedTotal = visibleItems.reduce((sum, item) => sum + Number(item.shippingLine?.fulfilled_qty ?? 0), 0);
-  const visibleUnallocatedCount = visibleItems.filter((item) => !item.isNonInventory && (item.shippingLine?.inventory_allocations?.length ?? 0) === 0).length;
 
   const lineSkuById = new Map(orderLines.map((line) => [line.id, line.products?.sku ?? "Item"]));
   const containerNumberById = new Map(containerOptions.map((container) => [container.id, container.container_number ?? "Container"]));
@@ -1151,6 +1145,17 @@ export default async function OrderDetailPage({
 
     const line = item.shippingLine;
     const itemStatus = deriveItemStatus(item);
+    const warehouseStatus = String(line?.warehouse_status ?? "").toUpperCase();
+
+    if (line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(warehouseStatus) && (line.inventory_allocations?.length ?? 0) === 0) {
+      return {
+        comingFrom: "Warehouse",
+        availability: "Reserved for this order",
+        fulfillment: "Preparing",
+        action: "Manage",
+        suggestion: null,
+      };
+    }
 
     if (line && (line.inventory_allocations?.length ?? 0) > 0) {
       const allocations = line.inventory_allocations ?? [];
@@ -1226,7 +1231,7 @@ export default async function OrderDetailPage({
     }
 
     const remainingQty = line
-      ? Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0))
+      ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0))
       : Math.max(0, item.orderedQty);
 
     if (!line || remainingQty <= 0) {
@@ -1304,6 +1309,8 @@ export default async function OrderDetailPage({
       ? "Shipped"
       : fulfilled > 0
         ? "Partially Shipped"
+        : supply.fulfillment === "Preparing"
+          ? "Preparing"
         : inStock >= needed
         ? "Ready"
         : supply.suggestion?.source_type === "CONTAINER"
@@ -1313,6 +1320,16 @@ export default async function OrderDetailPage({
             : "Waiting";
     return { item, supply, needed, inStock, fulfilled, status };
   });
+
+  const visibleOpenTotal = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
+  const visibleShippedTotal = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  const visibleBackorderedTotal = itemStockSummary.reduce((sum, row) => sum + Math.max(0, row.needed - row.inStock), 0);
+  const visibleUnallocatedCount = itemStockSummary.reduce((sum, row) => {
+    if (row.item.isNonInventory || row.needed <= 0 || row.inStock > 0) return sum;
+    if ((row.item.shippingLine?.inventory_allocations?.length ?? 0) > 0) return sum;
+    if (row.supply.suggestion?.source_type === "CONTAINER") return sum;
+    return sum + row.needed;
+  }, 0);
 
   const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
@@ -1331,7 +1348,7 @@ export default async function OrderDetailPage({
           : "Waiting for Inventory";
 
   const shipReadyItems = itemStockSummary
-    .filter(({ item, status }) => Boolean(item.shippingLine?.product_id) && Boolean(item.shippingLine) && status === "In Stock")
+    .filter(({ item, status }) => Boolean(item.shippingLine?.product_id) && Boolean(item.shippingLine) && status === "Ready")
     .map(({ item }) => ({
       id: item.shippingLine!.id,
       label: item.description,
@@ -1503,7 +1520,7 @@ export default async function OrderDetailPage({
                       <details key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !item.isNonInventory ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock }} /> : null}
+                            {shipmentLine && !item.isNonInventory ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
@@ -1745,7 +1762,7 @@ export default async function OrderDetailPage({
               <div className="flex items-center justify-between gap-3"><span>Line Items</span><span className="font-semibold text-[#111827]">{visibleLineCount}</span></div>
               <div className="flex items-center justify-between gap-3"><span>Open Quantity</span><span className="font-semibold text-[#111827]">{visibleOpenTotal}</span></div>
               <div className="flex items-center justify-between gap-3"><span>Shipped Quantity</span><span className="font-semibold text-[#111827]">{visibleShippedTotal}</span></div>
-              <div className="flex items-center justify-between gap-3"><span>Backordered</span><span className="font-semibold text-[#b91c1c]">{visibleOpenTotal}</span></div>
+              <div className="flex items-center justify-between gap-3"><span>Backordered</span><span className="font-semibold text-[#b91c1c]">{visibleBackorderedTotal}</span></div>
               <div className="flex items-center justify-between gap-3"><span>Unallocated</span><span className="font-semibold text-[#b91c1c]">{visibleUnallocatedCount}</span></div>
               <div className="border-t border-[#eef2f7] pt-2 flex items-center justify-between gap-3"><span>Total</span><span className="font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</span></div>
             </div>

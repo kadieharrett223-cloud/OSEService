@@ -23,6 +23,7 @@ import {
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { AutoSubmitSelect } from "./auto-submit-select";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
+import { ShipmentHistoryCard } from "./shipment-history-card";
 import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionComposer, ShipmentSelectionProvider } from "./shipment-selection";
 
 type OrderDetailRow = {
@@ -835,8 +836,25 @@ export default async function OrderDetailPage({
     }
   }
   const shipmentLog = [...shipments, ...historicalShipments.values()];
-  // Items still owing quantity can be added to a shipment that missed them.
-
+  const editableShipmentLinesByShipment = new Map<string, Array<{ id: string; sku: string; productName: string | null; currentQty: number; maxQty: number }>>();
+  for (const shipment of shipments) {
+    const currentByLine = new Map<string, number>();
+    for (const shipmentLine of shipment.lines ?? []) currentByLine.set(shipmentLine.shipping_order_line_id, (currentByLine.get(shipmentLine.shipping_order_line_id) ?? 0) + Number(shipmentLine.quantity ?? 0));
+    const editableLines = orderLines
+      .map((line) => {
+        const currentQty = currentByLine.get(line.id) ?? 0;
+        const remainingOutsideShipment = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+        return {
+          id: line.id,
+          sku: line.products?.sku ?? "Item",
+          productName: line.products?.canonical_name ?? null,
+          currentQty,
+          maxQty: currentQty + remainingOutsideShipment,
+        };
+      })
+      .filter((line) => line.maxQty > 0 || line.currentQty > 0);
+    editableShipmentLinesByShipment.set(shipment.id, editableLines);
+  }
   const noteCount = activities.filter((activity) => activity.action === "ORDER_NOTE_ADDED").length;
 
   const lineHistoryById = activities.reduce<Record<string, OrderActivityEntry[]>>((acc, activity) => {
@@ -1560,44 +1578,7 @@ export default async function OrderDetailPage({
             </div>
             <div className="mt-4 space-y-3">
               {shipmentLog.map((shipment) => (
-                <div key={shipment.id} className="rounded-xl border border-[#e2e8f0] bg-[#fafbfc] p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold text-[#111827]">{shipment.shipment_number}</h3>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">Shipped {formatDateTime(shipment.shipped_at)}</p>
-                      {shipment.creator?.full_name ? <p className="mt-1 text-xs text-[#64748b]">Recorded by {shipment.creator.full_name}</p> : null}
-                    </div>
-                    <div className="text-right text-sm">
-                      <p className="font-semibold text-[#334155]">{shipment.carrier ?? "Carrier pending"}</p>
-                      <p className="mt-0.5 text-xs text-[#64748b]">{shipment.tracking_number ? `Tracking ${shipment.tracking_number}` : "No tracking number"}</p>
-                    </div>
-                  </div>
-
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Items in this shipment</p>
-                  <ul className="mt-1 divide-y divide-[#eef2f7] text-sm text-[#334155]">
-                    {(shipment.lines ?? []).length > 0
-                      ? (shipment.lines ?? []).map((line, index) => (
-                        <li key={`${line.shipping_order_line_id}-${index}`} className="flex items-center justify-between py-1.5">
-                          <span>
-                            <span className="font-semibold">{line.shipping_order_lines?.products?.sku ?? "Item"}</span>
-                            {line.shipping_order_lines?.products?.canonical_name ? <span className="ml-2 text-[#64748b]">{line.shipping_order_lines.products.canonical_name}</span> : null}
-                          </span>
-                          <span className="font-semibold">× {line.quantity ?? 0}</span>
-                        </li>
-                      ))
-                      : <li className="py-1.5 text-[#64748b]">No item detail recorded for this shipment.</li>}
-                  </ul>
-
-                  {shipment.notes ? (
-                    <div className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-2.5">
-                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Notes</p>
-                      <p className="mt-1 text-sm text-[#334155]">{shipment.notes}</p>
-                    </div>
-                  ) : null}
-
-                  {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex btn-secondary text-xs">View Tracking</a> : null}
-                  {shipment.document_count ? <a href="#documents" className="mt-3 inline-flex btn-secondary text-xs">Documents: {shipment.document_count}</a> : null}
-                </div>
+                <ShipmentHistoryCard key={shipment.id} orderId={orderRecord.id} shipment={shipment} editableLines={editableShipmentLinesByShipment.get(shipment.id) ?? []} />
               ))}
               {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}
             </div>

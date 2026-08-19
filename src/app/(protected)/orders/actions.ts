@@ -1097,7 +1097,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 }
 
 export async function completeOrderShipmentAction(formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
   const orderId = getString(formData, "orderId");
   const shipmentDate = getString(formData, "shipment_date");
   const idempotencyKey = getString(formData, "idempotency_key");
@@ -1120,12 +1120,53 @@ export async function completeOrderShipmentAction(formData: FormData) {
     p_lines: lines,
   } as never);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  await adminClient.from("order_shipments").update({ created_by: user.id } as never).eq("id", shipmentId).is("created_by", null);
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
   revalidatePath("/orders");
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Shipment+completed`);
+}
+
+export async function editOrderShipmentAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const shipmentId = getString(formData, "shipment_id");
+  const shipmentDate = getString(formData, "shipment_date");
+  const carrier = getString(formData, "carrier");
+  const trackingNumber = getString(formData, "tracking_number");
+  const notes = getString(formData, "shipment_notes");
+  const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !shipmentId || !shipmentDate) redirect(`/orders/${orderId ?? ""}?error=Shipment+and+ship+date+are+required`);
+
+  const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
+  if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
+
+  const { data: editedShipmentId, error } = await adminClient.rpc("edit_order_shipment", {
+    p_shipment_id: shipmentId,
+    p_order_id: orderId,
+    p_shipped_at: `${shipmentDate}T12:00:00.000Z`,
+    p_carrier: carrier || null,
+    p_tracking_number: trackingNumber || null,
+    p_notes: notes || null,
+    p_actor_id: user.id,
+    p_lines: lines,
+  } as never);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_EDITED", {
+    shipment_id: editedShipmentId ?? shipmentId,
+    line_count: selectedIds.length,
+    message: `Shipment edited by ${user.fullName ?? "employee"}`,
+  });
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Shipment+updated#shipments`);
 }
 
 export async function updateOrderShipmentAction(formData: FormData) {

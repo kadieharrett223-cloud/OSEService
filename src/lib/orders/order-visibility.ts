@@ -111,6 +111,7 @@ export function classifyOrder(
   const hasArchivedLines = allLines.length > 0
     && allLines.some((line) => Boolean(line.product_id))
     && allLines.every((line) => upper(line.fulfillment_status) === "FULFILLED");
+  const isCompletedServiceOnlyOrder = allLines.length === 0 && upper(order.review_status) === "FULFILLED";
 
   return {
     operationalLines,
@@ -119,7 +120,7 @@ export function classifyOrder(
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
     isPartiallyShippedOrder: hasOperationalLines && anyShipped,
-    isArchivedOrder: !isVisibleOperationalOrder && hasArchivedLines,
+    isArchivedOrder: (!isVisibleOperationalOrder && hasArchivedLines) || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };
 }

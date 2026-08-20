@@ -19,6 +19,7 @@ import {
   updateOrderScheduleAction,
   updateOrderOperationsAction,
   overrideProductQueuePositionAction,
+  completeServiceOnlyOrderAction,
   uploadOrderAttachmentAction,
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
@@ -772,7 +773,8 @@ export default async function OrderDetailPage({
   if ((orderRecord.shipping_order_lines ?? []).length === 0) {
     const invoiceNumber = orderRecord.qbo_invoices?.invoice_number ?? orderRecord.order_number ?? "—";
     const customerName = orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending";
-    const hasPhysicalInvoiceLine = parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload).some((item) => !item.isNonInventory && item.qty > 0);
+    const serviceItems = parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload);
+    const hasPhysicalInvoiceLine = serviceItems.some((item) => !item.isNonInventory && item.qty > 0);
     return (
       <div className="space-y-6">
         <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
@@ -783,8 +785,9 @@ export default async function OrderDetailPage({
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d50917]">Working Order</p>
           <h1 className="mt-1 text-2xl font-semibold text-[#111827]">{customerName} <span className="font-normal text-[#64748b]">— Invoice #{invoiceNumber}</span></h1>
-          <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. {hasPhysicalInvoiceLine ? "Product mapping is required before warehouse fulfillment can begin." : "It remains available as invoice history without entering physical fulfillment workflows."}</p>
-          <div className="mt-4 flex flex-wrap gap-2">{hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : null}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
+          <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. {hasPhysicalInvoiceLine ? "Product mapping is required before warehouse fulfillment can begin." : "Complete this service invoice when the work has been performed."}</p>
+          {!hasPhysicalInvoiceLine ? <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3"><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">QuickBooks Invoice Lines</p><ul className="mt-2 space-y-1 text-sm text-[#334155]">{serviceItems.map((item, index) => <li key={`${item.sku ?? "service"}-${index}`}>{item.sku ?? "Service"} · {item.description} · Qty {item.qty}</li>)}</ul></div> : null}
+          <div className="mt-4 flex flex-wrap gap-2">{hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
         </section>
       </div>
     );

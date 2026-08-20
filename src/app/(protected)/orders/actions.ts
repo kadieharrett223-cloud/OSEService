@@ -57,6 +57,35 @@ function getPositiveNumber(formData: FormData, key: string) {
   return raw;
 }
 
+function isNonInventoryQboLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
+  const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
+  const description = String(line.source_description ?? "").trim().toLowerCase();
+  return sku === "note" || sku.startsWith("note:")
+    || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
+}
+
+export async function completeServiceOnlyOrderAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
+  const { data: order } = await adminClient.from("shipping_orders").select("id,source_invoice_id").eq("id", orderId).maybeSingle();
+  if (!order?.source_invoice_id) redirect(`/orders/${orderId}?error=Order+not+found`);
+  const [{ data: operationalLines }, { data: invoiceLines }] = await Promise.all([
+    adminClient.from("shipping_order_lines").select("id").eq("shipping_order_id", orderId),
+    adminClient.from("qbo_invoice_lines").select("qbo_sku,source_description,ordered_qty").eq("qbo_invoice_id", order.source_invoice_id),
+  ]);
+  if ((operationalLines ?? []).length > 0 || (invoiceLines ?? []).some((line) => Number(line.ordered_qty ?? 0) > 0 && !isNonInventoryQboLine(line))) {
+    redirect(`/orders/${orderId}?error=Physical+items+must+be+mapped+and+fulfilled+through+the+normal+workflow`);
+  }
+  const { error } = await adminClient.from("shipping_orders").update({ review_status: "FULFILLED" } as never).eq("id", orderId);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  await writeOrderActivity(adminClient, orderId, "SERVICE_ONLY_ORDER_COMPLETED", { message: "Service-only invoice completed without inventory movement" });
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Service+invoice+completed`);
+}
+
 async function isVoidedQuickBooksOrder(supabase: ReturnType<typeof getSupabaseAdmin>, orderId: string) {
   const { data } = await supabase
     .from("shipping_orders")

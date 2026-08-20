@@ -62,9 +62,12 @@ type QueueLine = {
   legacy_item_code?: string | null;
   qbo_invoice_line_id?: string | null;
   source_record_id?: string | null;
+  logical_demand_key?: string | null;
   shipping_orders?: {
     id: string;
+    source_invoice_id?: string | null;
     duplicate_of_order_id?: string | null;
+    cancellation_status?: string | null;
     created_at?: string | null;
     first_payment_at?: string | null;
     order_number?: string | null;
@@ -281,6 +284,7 @@ export default async function InventoryPage({
         source_record_id,
         shipping_orders (
           id,
+          source_invoice_id,
           ${duplicateParentField}
           created_at,
           fulfillment_method,
@@ -333,8 +337,44 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-  const activeQueueLineRows = queueLineRows.filter((line) =>
+  const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
+  const productIdByAliasKey = new Map<string, string>();
+  for (const product of productRows) {
+    if (product.sku) productIdByAliasKey.set(normalizeSkuKey(product.sku), product.id);
+  }
+  for (const alias of productAliasRows) {
+    if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
+  }
+  const { data: qboLineRows } = sourceInvoiceIds.length
+    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id").in("qbo_invoice_id", sourceInvoiceIds)
+    : { data: [] };
+  const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
+  for (const qboLine of (qboLineRows ?? []) as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null }>) {
+    const qboProductId = qboLine.product_id ?? productIdByAliasKey.get(normalizeSkuKey(qboLine.qbo_sku)) ?? null;
+    const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeSkuKey(qboLine.qbo_sku)}`;
+    const candidates = qboCandidatesByParentProduct.get(key) ?? [];
+    candidates.push(qboLine);
+    qboCandidatesByParentProduct.set(key, candidates);
+  }
+  const bridgedQueueLineRows = queueLineRows.map((line) => {
+    const parentFields = {
+      parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
+      parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+      parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
+    };
+    if (line.qbo_invoice_line_id || !line.shipping_orders?.source_invoice_id || !line.product_id) return { ...line, ...parentFields };
+    const productKey = `${line.shipping_orders.source_invoice_id}|${line.product_id}`;
+    const directCandidates = qboCandidatesByParentProduct.get(productKey) ?? [];
+    const skuCandidates = (qboLineRows ?? []).filter((qboLine) => {
+      const row = qboLine as { qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null };
+      return row.qbo_invoice_id === line.shipping_orders?.source_invoice_id && normalizeSkuKey(row.qbo_sku) === normalizeSkuKey(line.legacy_item_code);
+    });
+    const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
+    return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };
+  });
+  const activeQueueLineRows = bridgedQueueLineRows.filter((line) =>
     !line.shipping_orders?.duplicate_of_order_id
+    && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
   const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);

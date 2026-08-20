@@ -19,6 +19,10 @@ export type DemandLineLike = {
   fulfillment_status?: string | null;
   qbo_invoice_line_id?: string | null;
   source_record_id?: string | null;
+  logical_demand_key?: string | null;
+  parent_duplicate_of_order_id?: string | null;
+  parent_cancellation_status?: string | null;
+  parent_qbo_voided?: boolean;
 };
 
 export function openQtyOf(line: DemandLineLike) {
@@ -28,6 +32,7 @@ export function openQtyOf(line: DemandLineLike) {
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
+  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
   return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
 }
@@ -38,6 +43,7 @@ export function isOpenDemandLine(line: DemandLineLike) {
  */
 export function demandLineIdentity(line: DemandLineLike) {
   if (line.qbo_invoice_line_id) return `QBO_LINE:${line.qbo_invoice_line_id}`;
+  if (line.logical_demand_key) return `QBO_LINE:${line.logical_demand_key}`;
   if (line.source_record_id) return `SOURCE:${line.source_record_id}`;
   return `LINE:${line.id}`;
 }
@@ -48,7 +54,9 @@ export function dedupeDemandLines<T extends DemandLineLike>(lines: T[]): T[] {
   for (const line of lines) {
     const key = demandLineIdentity(line);
     const existing = byIdentity.get(key);
-    if (!existing || openQtyOf(line) > openQtyOf(existing)) byIdentity.set(key, line);
+    const lineIsReserved = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String((line as DemandLineLike & { warehouse_status?: string | null }).warehouse_status ?? "").toUpperCase());
+    const existingIsReserved = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String((existing as (DemandLineLike & { warehouse_status?: string | null }) | undefined)?.warehouse_status ?? "").toUpperCase());
+    if (!existing || openQtyOf(line) > openQtyOf(existing) || (openQtyOf(line) === openQtyOf(existing) && lineIsReserved && !existingIsReserved)) byIdentity.set(key, line);
   }
   return Array.from(byIdentity.values());
 }

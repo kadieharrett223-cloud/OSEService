@@ -29,6 +29,7 @@ export type ClassificationOrder = {
   source_type?: string | null;
   review_status?: string | null;
   duplicate_of_order_id?: string | null;
+  cancellation_status?: string | null;
   shipping_order_lines?: ClassificationLine[] | null;
   qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null } | null;
 };
@@ -41,6 +42,7 @@ export type OrderClassification = {
   isWarehouseOrder: boolean;
   isPartiallyShippedOrder: boolean;
   isArchivedOrder: boolean;
+  isCancelled: boolean;
 };
 
 const upper = (value: unknown) => String(value ?? "").trim().toUpperCase();
@@ -60,7 +62,16 @@ export function classifyOrder(
   const allLines = order.shipping_order_lines ?? [];
   const isExcluded = EXCLUDED_ORDER_NUMBERS.includes(String(order.order_number ?? ""));
   const isVoided = upper(order.qbo_invoices?.raw_payload?.PrivateNote) === "VOIDED";
+  const isCancelled = upper(order.cancellation_status) === "CANCELLED";
   const isHistoricalDuplicate = Boolean(order.duplicate_of_order_id);
+
+  if (isCancelled) {
+    return {
+      operationalLines: [], isActivated: false, isVisibleOperationalOrder: false,
+      isNewOrder: false, isWarehouseOrder: false, isPartiallyShippedOrder: false,
+      isArchivedOrder: false, isCancelled: true,
+    };
+  }
 
   if (isHistoricalDuplicate || isVoided) {
     return {
@@ -71,6 +82,7 @@ export function classifyOrder(
       isWarehouseOrder: false,
       isPartiallyShippedOrder: false,
       isArchivedOrder: false,
+      isCancelled: false,
     };
   }
 
@@ -108,6 +120,7 @@ export function classifyOrder(
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
     isPartiallyShippedOrder: hasOperationalLines && anyShipped,
     isArchivedOrder: !isVisibleOperationalOrder && hasArchivedLines,
+    isCancelled: false,
   };
 }
 
@@ -123,6 +136,8 @@ export function matchesOrderTab(classification: OrderClassification, tabId: stri
       return classification.isPartiallyShippedOrder;
     case "archived":
       return classification.isArchivedOrder;
+    case "cancelled":
+      return classification.isCancelled;
     default:
       return true;
   }

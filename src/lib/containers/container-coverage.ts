@@ -50,6 +50,9 @@ type OpenOrderLineRow = {
   fulfillment_status?: string | null;
   qbo_invoice_line_id?: string | null;
   source_record_id?: string | null;
+  parent_duplicate_of_order_id?: string | null;
+  parent_cancellation_status?: string | null;
+  parent_qbo_voided?: boolean;
   warehouse_status: string | null;
   queue_position_start: number | null;
   created_at: string;
@@ -59,7 +62,9 @@ type OpenOrderLineRow = {
     order_number: string | null;
     legacy_customer_name: string | null;
     customers?: { company_name: string | null; full_name: string | null } | null;
-    qbo_invoices?: { invoice_number: string | null } | null;
+    duplicate_of_order_id?: string | null;
+    cancellation_status?: string | null;
+    qbo_invoices?: { invoice_number: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null;
   } | null;
 };
 
@@ -107,6 +112,7 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
             fulfillment_status,
             qbo_invoice_line_id,
             source_record_id,
+            shipping_order_id,
             warehouse_status,
             queue_position_start,
             created_at,
@@ -114,9 +120,11 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
             shipping_orders (
               id,
               order_number,
+              duplicate_of_order_id,
+              cancellation_status,
               legacy_customer_name,
               customers (company_name, full_name),
-              qbo_invoices (invoice_number)
+              qbo_invoices (invoice_number, raw_payload)
             )
           `)
           .in("product_id", productIds)
@@ -134,7 +142,13 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
   const demandByProduct: DemandByProduct = {};
   for (const productId of productIds) demandByProduct[productId] = [];
 
-  for (const line of dedupeDemandLines((openLineRows ?? []) as unknown as OpenOrderLineRow[])) {
+  const activeOpenLines = ((openLineRows ?? []) as unknown as OpenOrderLineRow[]).map((line) => ({
+    ...line,
+    parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
+    parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+    parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
+  }));
+  for (const line of dedupeDemandLines(activeOpenLines)) {
     if (!line.product_id || !demandByProduct[line.product_id]) continue;
     if (IN_WAREHOUSE_STATUSES.includes(line.warehouse_status ?? "")) continue;
     if (!isOpenDemandLine(line)) continue;

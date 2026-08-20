@@ -26,6 +26,7 @@ type OrderSummary = {
   order_number: string | null;
   source_type: string | null;
   duplicate_of_order_id?: string | null;
+  cancellation_status?: string | null;
   notes: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
@@ -77,6 +78,7 @@ function buildOrdersSelect(includeDuplicateField: boolean) {
     "source_type",
     "legacy_customer_name",
     "review_status",
+    "cancellation_status",
     "created_at",
   ];
   if (includeDuplicateField) orderFields.splice(3, 0, "duplicate_of_order_id");
@@ -240,6 +242,7 @@ export default async function OrdersPage({
     warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
     partial: allOrders.filter((order) => matchesTab(order, "partial")).length,
     archived: allOrders.filter((order) => matchesTab(order, "archived")).length,
+    cancelled: allOrders.filter((order) => matchesTab(order, "cancelled")).length,
   };
 
   const tabs = [
@@ -248,6 +251,7 @@ export default async function OrdersPage({
     { id: "warehouse", label: "In Warehouse" },
     { id: "partial", label: "Partially Shipped" },
     { id: "archived", label: "Archived" },
+    { id: "cancelled", label: "Cancelled" },
   ];
 
   return (

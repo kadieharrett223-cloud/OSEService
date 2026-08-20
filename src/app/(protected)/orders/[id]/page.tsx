@@ -19,7 +19,6 @@ import {
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
   moveOrderLineBackToOrdersAction,
-  remapOrderLineProductAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
@@ -942,9 +941,6 @@ export default async function OrderDetailPage({
       .select("product_id, alias, products (id, sku, canonical_name)"),
   ]);
 
-  const assignableProducts = [...(productRows ?? [])]
-    .sort((left, right) => String(left.sku ?? left.canonical_name ?? "").localeCompare(String(right.sku ?? right.canonical_name ?? "")));
-
   const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
   for (const product of productRows ?? []) {
     const skuKey = normalizeSkuKey(product.sku);
@@ -1564,6 +1560,8 @@ export default async function OrderDetailPage({
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
+                            ) : item.isNonInventory ? (
+                              <span className="inline-flex rounded-lg border border-[#e5e7eb] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">No inventory mapping</span>
                             ) : item.productId ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2e8] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">Mapped</span>
                             ) : (
@@ -1571,7 +1569,7 @@ export default async function OrderDetailPage({
                                 href={`/product-mappings?source_sku=${encodeURIComponent(item.sku ?? "")}&source_description=${encodeURIComponent(item.description)}&order_id=${encodeURIComponent(orderRecord.id)}`}
                                 className="inline-flex rounded-lg border border-[#f1d3a4] bg-[#fff8ec] px-3 py-2 text-xs font-semibold text-[#915b12]"
                               >
-                                Map / Override
+                                Map SKU
                               </Link>
                             )}
                           </span>
@@ -1591,27 +1589,11 @@ export default async function OrderDetailPage({
                             <h3 className="text-sm font-semibold text-[#111827]">1. Inventory / Allocation</h3>
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
                               <div><span className="font-medium text-[#64748b]">Item:</span> {item.sku ?? "—"} · {item.description}</div>
-                              <div><span className="font-medium text-[#64748b]">Product mapping:</span> {line.products?.sku ?? "Unmapped"}{line.products?.canonical_name ? ` · ${line.products.canonical_name}` : ""}</div>
                               <div><span className="font-medium text-[#64748b]">Currently assigned:</span> {line.inventory_allocations?.[0]?.source_type === "CONTAINER" ? containerNumberById.get(line.inventory_allocations[0].container_id ?? "") ?? "Container" : line.inventory_allocations?.[0]?.source_type === "FLOOR" ? "Warehouse / Floor" : "Not assigned"}</div>
                               <div><span className="font-medium text-[#64748b]">Derived coverage:</span> {supply.comingFrom}</div>
                               <div><span className="font-medium text-[#64748b]">Availability:</span> {supply.availability}</div>
                               <div><span className="font-medium text-[#64748b]">Assigned:</span> {assignedQty} of {remainingQty}</div>
                             </div>
-                            <form action={remapOrderLineProductAction} className="mt-4 grid gap-2 rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-3">
-                              <input type="hidden" name="orderId" value={orderRecord.id} />
-                              <input type="hidden" name="lineId" value={line.id} />
-                              <input type="hidden" name="mappedSku" value={item.sku ?? line.legacy_item_code ?? ""} />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Manual Product Mapping Override</label>
-                              <select name="productId" defaultValue={line.product_id ?? ""} className="input" required>
-                                <option value="" disabled>Select product</option>
-                                {assignableProducts.map((product) => (
-                                  <option key={product.id} value={product.id}>
-                                    {product.sku ?? "—"} · {product.canonical_name ?? "Unnamed product"}
-                                  </option>
-                                ))}
-                              </select>
-                              <button type="submit" className="btn-secondary">Save Product Mapping For This Order</button>
-                            </form>
                             {(line.inventory_allocations?.length ?? 0) === 0 && (supply.coverage?.warehouseQty ?? 0) > 0 ? (
                               <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
                                 <p><span className="font-semibold">Suggested:</span> Warehouse</p>

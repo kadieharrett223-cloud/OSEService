@@ -118,6 +118,18 @@ describe("orders visibility and activation", () => {
     expect(result.isVisibleOperationalOrder).toBe(true);
   });
 
+  it("classifies shipped QBO orders with remaining mapped review lines as Partially Shipped", () => {
+    const result = classifyOrder(order({
+      shipping_order_lines: [
+        line({ approved_qty: 0, ordered_qty: 1, fulfilled_qty: 1, approval_status: "PENDING_REVIEW", fulfillment_status: "FULFILLED" }),
+        line({ approved_qty: 0, ordered_qty: 1, fulfilled_qty: 0, approval_status: "PENDING_REVIEW", fulfillment_status: "PENDING" }),
+      ],
+    }));
+
+    expect(result.isPartiallyShippedOrder).toBe(true);
+    expect(result.isNewOrder).toBe(false);
+  });
+
   it("keeps a refreshed order in New only while remaining demand exists", () => {
     const withDemand = classifyOrder(order({ shipping_order_lines: [line({ approved_qty: 2, fulfilled_qty: 0 })] }));
     expect(withDemand.isNewOrder).toBe(true);

@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
-import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
+import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 
 async function loadTableColumnSet(
@@ -58,13 +58,6 @@ function getPositiveNumber(formData: FormData, key: string) {
   return raw;
 }
 
-function isNonInventoryQboLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
-  const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
-  const description = String(line.source_description ?? "").trim().toLowerCase();
-  return sku === "note" || sku.startsWith("note:")
-    || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
-}
-
 export async function completeServiceOnlyOrderAction(formData: FormData) {
   await requireUser();
   const orderId = getString(formData, "orderId");
@@ -76,7 +69,7 @@ export async function completeServiceOnlyOrderAction(formData: FormData) {
     adminClient.from("shipping_order_lines").select("id").eq("shipping_order_id", orderId),
     adminClient.from("qbo_invoice_lines").select("qbo_sku,source_description,ordered_qty").eq("qbo_invoice_id", order.source_invoice_id),
   ]);
-  if ((operationalLines ?? []).length > 0 || (invoiceLines ?? []).some((line) => Number(line.ordered_qty ?? 0) > 0 && !isNonInventoryQboLine(line))) {
+  if ((operationalLines ?? []).length > 0 || (invoiceLines ?? []).some((line) => Number(line.ordered_qty ?? 0) > 0 && !isNonInventoryQuickbooksLine(line))) {
     redirect(`/orders/${orderId}?error=Physical+items+must+be+mapped+and+fulfilled+through+the+normal+workflow`);
   }
   const { error } = await adminClient.from("shipping_orders").update({ review_status: "FULFILLED" } as never).eq("id", orderId);
@@ -457,7 +450,7 @@ async function activateExistingQuickbooksOrder(
 ) {
   const { data: invoiceLines } = await adminClient
     .from("qbo_invoice_lines")
-    .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku")
+    .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku, source_description")
     .eq("qbo_invoice_id", invoice.id);
 
   const { data: orderLines } = await adminClient

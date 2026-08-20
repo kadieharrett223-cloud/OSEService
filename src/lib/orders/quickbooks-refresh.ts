@@ -11,6 +11,7 @@ export type RefreshInvoiceLine = {
   product_id?: string | null;
   ordered_qty?: number | null;
   qbo_sku?: string | null;
+  source_description?: string | null;
 };
 
 export type RefreshOrderLine = {
@@ -60,6 +61,14 @@ export function qboSkuCandidates(value: string | null | undefined) {
   return candidates;
 }
 
+export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
+  const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
+  const description = String(line.source_description ?? "").trim().toLowerCase();
+  return sku === "note"
+    || sku.startsWith("note:")
+    || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
+}
+
 export function planQuickbooksOrderRefresh(
   invoiceLines: RefreshInvoiceLine[],
   orderLines: RefreshOrderLine[],
@@ -70,6 +79,7 @@ export function planQuickbooksOrderRefresh(
   const productIds = new Set<string>();
 
   for (const invoiceLine of invoiceLines) {
+    if (isNonInventoryQuickbooksLine(invoiceLine)) continue;
     const productId = invoiceLine.product_id
       ?? qboSkuCandidates(invoiceLine.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
       ?? null;

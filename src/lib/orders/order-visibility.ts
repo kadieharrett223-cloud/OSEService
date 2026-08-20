@@ -108,6 +108,7 @@ export function classifyOrder(
 
   const anyWarehouse = operationalLines.some((line) => WAREHOUSE_STATES.includes(upper(line.warehouse_status)));
   const anyShipped = allLines.some((line) => Number(line.fulfilled_qty ?? 0) > 0 || upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
+  const hasRemainingMappedLine = allLines.some((line) => Boolean(line.product_id) && remainingOf(line) > 0 && !isClosed(line));
   const hasArchivedLines = allLines.length > 0
     && allLines.some((line) => Boolean(line.product_id))
     && allLines.every((line) => upper(line.fulfillment_status) === "FULFILLED");
@@ -119,7 +120,7 @@ export function classifyOrder(
     isVisibleOperationalOrder,
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
-    isPartiallyShippedOrder: hasOperationalLines && anyShipped,
+    isPartiallyShippedOrder: isVisibleOperationalOrder && anyShipped && hasRemainingMappedLine,
     isArchivedOrder: (!isVisibleOperationalOrder && hasArchivedLines) || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };

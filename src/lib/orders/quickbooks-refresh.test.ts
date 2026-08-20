@@ -97,7 +97,19 @@ describe("re-entering a QuickBooks invoice", () => {
     const plan = planQuickbooksOrderRefresh([invoiceLine({ id: "inv-line-4", product_id: null, qbo_sku: "Install" })], [], aliases);
 
     expect(plan.inserts).toHaveLength(0);
-    expect(plan.skippedUnmapped).toEqual(["inv-line-4"]);
+    expect(plan.skippedUnmapped).toEqual([]);
+  });
+
+  it("always treats discount item-name lines as non-inventory", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "discount-line", product_id: null, qbo_sku: "Discount-1", source_description: "swap meet 10%" })],
+      [],
+      new Map([["DISCOUNT-1", "product-discount"]]),
+    );
+
+    expect(plan.inserts).toHaveLength(0);
+    expect(plan.updates).toHaveLength(0);
+    expect(plan.skippedUnmapped).toHaveLength(0);
   });
 
   it("reports every product whose queue needs renumbering", () => {

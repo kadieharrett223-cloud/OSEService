@@ -898,6 +898,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const orderId = getString(formData, "orderId");
   const lineId = getString(formData, "lineId");
   const source = (getString(formData, "assignment_source") ?? "UNASSIGNED").toUpperCase();
+  const containerId = getString(formData, "assignment_container_id");
   const supplier = getString(formData, "fulfillment_supplier")?.trim() || null;
   const reference = getString(formData, "fulfillment_reference")?.trim() || null;
   const tracking = getString(formData, "fulfillment_tracking")?.trim() || null;
@@ -910,9 +911,11 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   }
 
   const normalizedSource = normalizeFulfillmentSource(source);
-  if (!normalizedSource) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Dropship,+or+Other`);
+  const isContainerAssignment = source === "CONTAINER";
+  if (!normalizedSource && !isContainerAssignment) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Container,+Dropship,+or+Other`);
   if (normalizedSource === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
   if (normalizedSource === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
+  if (isContainerAssignment && !containerId) redirect(`/orders/${orderId}?error=Select+a+container+for+Container+assignment`);
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
@@ -936,11 +939,11 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     await recalculateProductQueues([lineRow.product_id]);
 
   const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
-  const assignedQty = shouldCreateWarehouseReservation(normalizedSource)
+  const assignedQty = (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource))
     ? Math.min(remainingQty, requestedQty > 0 ? requestedQty : remainingQty)
     : 0;
 
-  if (shouldCreateWarehouseReservation(normalizedSource) && assignedQty <= 0) {
+  if ((isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource)) && assignedQty <= 0) {
     redirect(`/orders/${orderId}?error=Assigned+quantity+must+be+greater+than+zero`);
   }
 
@@ -954,7 +957,8 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   }
 
   const { error: sourceError } = await adminClient.from("shipping_order_lines").update({
-    fulfillment_source: normalizedSource,
+    // Container allocation is still an internal physical pipeline source.
+    fulfillment_source: isContainerAssignment ? "WAREHOUSE" : normalizedSource,
     fulfillment_supplier: normalizedSource === "DROPSHIP" ? supplier : null,
     fulfillment_reference: normalizedSource === "DROPSHIP" ? reference : null,
     fulfillment_tracking: normalizedSource === "DROPSHIP" ? tracking : null,
@@ -962,14 +966,14 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   } as never).eq("id", lineRow.id);
   if (sourceError) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError.message)}`);
 
-  if (remainingQty > 0 && shouldCreateWarehouseReservation(normalizedSource)) {
+  if (remainingQty > 0 && (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource))) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
         shipping_order_line_id: lineRow.id,
         product_id: lineRow.product_id,
         quantity: assignedQty,
         allocation_status: "ALLOCATED",
-        source_type: "FLOOR",
-        container_id: null,
+        source_type: isContainerAssignment ? "CONTAINER" : "FLOOR",
+        container_id: isContainerAssignment ? containerId : null,
       });
 
       if (insertError) {
@@ -980,9 +984,11 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const { error: statusError } = await adminClient
     .from("shipping_order_lines")
     .update({
-      allocation_status: assignedQty > 0 && shouldCreateWarehouseReservation(normalizedSource) ? "ALLOCATED" : "UNALLOCATED",
+      allocation_status: assignedQty > 0 && (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource)) ? "ALLOCATED" : "UNALLOCATED",
       warehouse_status: assignedQty > 0 && shouldCreateWarehouseReservation(normalizedSource)
         ? "READY_TO_SHIP"
+        : assignedQty > 0 && isContainerAssignment
+          ? "APPROVED"
         : "ON_FLOOR",
     })
     .eq("id", lineRow.id);
@@ -993,8 +999,8 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
 
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_ASSIGNMENT_UPDATED", {
     line_id: lineId,
-    source: normalizedSource,
-    container_id: null,
+    source: isContainerAssignment ? "CONTAINER" : normalizedSource,
+    container_id: isContainerAssignment ? containerId : null,
     quantity: assignedQty,
   });
 

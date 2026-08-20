@@ -1468,8 +1468,8 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.7fr_0.9fr]">
-        <div className="flex flex-col space-y-6">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.9fr)]">
+        <div className="flex min-w-0 flex-col space-y-6">
           <ShipmentSelectionProvider>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1498,8 +1498,8 @@ export default async function OrderDetailPage({
             ) : null}
 
             <div className="mt-4 overflow-x-auto">
-              <div className="min-w-[900px]">
-                <div className="grid grid-cols-[minmax(220px,2fr)_75px_75px_90px_90px_180px_150px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+              <div className="min-w-full">
+                <div className="grid grid-cols-[minmax(200px,2fr)_70px_70px_90px_90px_minmax(120px,1fr)_120px_100px_100px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
                   <span>Ordered</span>
                   <span>Shipped</span>
@@ -1540,15 +1540,15 @@ export default async function OrderDetailPage({
                       : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
-                    const fulfillmentSource = String(line?.fulfillment_source ?? (line?.inventory_allocations?.[0]?.source_type === "FLOOR" ? "WAREHOUSE" : "WAREHOUSE")).toUpperCase();
-                    const assignmentSourceDefault = fulfillmentSource === "DROPSHIP" || fulfillmentSource === "OTHER" ? fulfillmentSource : "WAREHOUSE";
+                    const inferredSource = String(line?.fulfillment_source ?? (line?.inventory_allocations?.[0]?.source_type === "CONTAINER" ? "CONTAINER" : line?.inventory_allocations?.[0]?.source_type === "FLOOR" ? "WAREHOUSE" : "WAREHOUSE")).toUpperCase();
+                    const assignmentSourceDefault = inferredSource === "DROPSHIP" || inferredSource === "OTHER" || inferredSource === "CONTAINER" ? inferredSource : "WAREHOUSE";
                     const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
                     const descriptionSummary = truncateText(item.description, 84);
                     const isWarehouseFulfillment = assignmentSourceDefault === "WAREHOUSE";
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_75px_75px_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(200px,2fr)_70px_70px_90px_90px_minmax(120px,1fr)_120px_100px_100px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
@@ -1628,7 +1628,7 @@ export default async function OrderDetailPage({
                                 </form>
                               </div>
                             ) : null}
-                            <SourceAssignmentForm orderId={orderRecord.id} lineId={line.id} remainingQty={remainingQty} qtyAssignedDefault={qtyAssignedDefault} defaultSource={assignmentSourceDefault} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} />
+                            <SourceAssignmentForm orderId={orderRecord.id} lineId={line.id} remainingQty={remainingQty} qtyAssignedDefault={qtyAssignedDefault} defaultSource={assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER"} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} containers={containerOptions.filter((container) => ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"].includes(String(container.lifecycle_status ?? "").toUpperCase()))} />
                             {["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) && Number(line.fulfilled_qty ?? 0) <= 0 ? (
                               <form action={moveOrderLineBackToOrdersAction} className="mt-3">
                                 <input type="hidden" name="orderId" value={orderRecord.id} />

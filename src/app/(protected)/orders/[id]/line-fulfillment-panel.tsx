@@ -19,7 +19,7 @@ type FulfillmentEntry = {
   fulfillment_type?: "SHIPMENT" | "PICKUP" | null;
 };
 
-type FulfillmentSource = "WAREHOUSE" | "DROPSHIP" | "OTHER";
+type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
 
 function today() {
   return new Date().toISOString().slice(0, 10);

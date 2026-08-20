@@ -1784,6 +1784,14 @@ export default async function OrderDetailPage({
               <div className="flex items-center justify-between gap-3"><span>Unallocated</span><span className="font-semibold text-[#b91c1c]">{visibleUnallocatedCount}</span></div>
               <div className="border-t border-[#eef2f7] pt-2 flex items-center justify-between gap-3"><span>Total</span><span className="font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</span></div>
             </div>
+            <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="font-semibold text-[#475569]">Fulfillment</span>
+                <span className="font-bold text-[#111827]">
+                  {totalUnitsShipped}/{totalEligibleInventoryUnits} {totalEligibleInventoryUnits > 0 && totalUnitsShipped >= totalEligibleInventoryUnits ? "Complete" : "Fulfilled"}
+                </span>
+              </div>
+            </div>
           </section>
         </aside>
       </div>

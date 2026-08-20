@@ -30,6 +30,7 @@ export type ClassificationOrder = {
   review_status?: string | null;
   duplicate_of_order_id?: string | null;
   shipping_order_lines?: ClassificationLine[] | null;
+  qbo_invoices?: { private_note?: string | null } | null;
 };
 
 export type OrderClassification = {
@@ -58,9 +59,10 @@ export function classifyOrder(
   const manualMappingSkus = options.manualMappingSkus ?? new Set<string>();
   const allLines = order.shipping_order_lines ?? [];
   const isExcluded = EXCLUDED_ORDER_NUMBERS.includes(String(order.order_number ?? ""));
+  const isVoided = upper(order.qbo_invoices?.private_note) === "VOIDED";
   const isHistoricalDuplicate = Boolean(order.duplicate_of_order_id);
 
-  if (isHistoricalDuplicate) {
+  if (isHistoricalDuplicate || isVoided) {
     return {
       operationalLines: [],
       isActivated: false,
@@ -76,6 +78,7 @@ export function classifyOrder(
     const remaining = Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     return Boolean(line.product_id)
       && !isExcluded
+      && !isVoided
       && !manualMappingSkus.has(upper(line.products?.sku))
       && !manualMappingSkus.has(upper(line.legacy_item_code))
       && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))
@@ -85,7 +88,7 @@ export function classifyOrder(
 
   const hasUnresolvedLines = allLines.some((line) => !line.product_id && !isClosed(line))
     || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
-  const hasOpenLine = !isExcluded && allLines.some((line) => remainingOf(line) > 0 && !isClosed(line));
+  const hasOpenLine = !isExcluded && !isVoided && allLines.some((line) => remainingOf(line) > 0 && !isClosed(line));
   const isActivated = upper(order.review_status) !== "PENDING_REVIEW";
 
   const hasOperationalLines = operationalLines.length > 0;

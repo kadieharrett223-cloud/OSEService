@@ -72,6 +72,7 @@ type QueueLine = {
     fulfillment_method?: "SHIP" | "WILL_CALL" | null;
     qbo_invoices?: {
       invoice_number: string | null;
+      private_note?: string | null;
       customers?: {
         company_name: string | null;
         full_name: string | null;
@@ -288,6 +289,7 @@ export default async function InventoryPage({
           legacy_customer_name,
           qbo_invoices (
             invoice_number,
+            private_note,
             customers (company_name, full_name)
           )
         ),
@@ -331,7 +333,10 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
-  const activeQueueLineRows = queueLineRows.filter((line) => !line.shipping_orders?.duplicate_of_order_id);
+  const activeQueueLineRows = queueLineRows.filter((line) =>
+    !line.shipping_orders?.duplicate_of_order_id
+    && String(line.shipping_orders?.qbo_invoices?.private_note ?? "").trim().toUpperCase() !== "VOIDED",
+  );
   const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase

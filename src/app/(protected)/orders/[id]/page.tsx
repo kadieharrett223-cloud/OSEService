@@ -1468,7 +1468,7 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.9fr)]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2.2fr)_minmax(220px,0.72fr)]">
         <div className="flex min-w-0 flex-col space-y-6">
           <ShipmentSelectionProvider>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -1499,12 +1499,11 @@ export default async function OrderDetailPage({
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-full">
-                <div className="grid grid-cols-[minmax(200px,2fr)_70px_70px_90px_90px_minmax(120px,1fr)_120px_100px_100px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(200px,2.3fr)_70px_70px_90px_minmax(120px,1.2fr)_120px_100px_100px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
                   <span>Ordered</span>
                   <span>Shipped</span>
                   <span>Qty Needed</span>
-                  <span>Available</span>
                   <span>Coming From</span>
                   <span>ETA</span>
                   <span>Status</span>
@@ -1548,7 +1547,7 @@ export default async function OrderDetailPage({
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(200px,2fr)_70px_70px_90px_90px_minmax(120px,1fr)_120px_100px_100px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(200px,2.3fr)_70px_70px_90px_minmax(120px,1.2fr)_120px_100px_100px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
@@ -1557,7 +1556,6 @@ export default async function OrderDetailPage({
                           <span>{item.orderedQty}</span>
                           <span>{fulfilled}</span>
                           <span>{needed}</span>
-                          <span className="font-semibold text-[#16a34a]">{inStock}</span>
                           <span className="font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
                           <span className="text-xs text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
                           <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>

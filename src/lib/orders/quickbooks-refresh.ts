@@ -46,12 +46,16 @@ export function qboSkuCandidates(value: string | null | undefined) {
 
   const candidates = [raw.toUpperCase()];
   if (/\(deleted/i.test(raw)) {
-    const liveSku = raw
+    let liveSku = raw
       .replace(/\s*\(deleted[^)]*\)\s*$/i, "")
-      .replace(/[-\s]*\d+$/g, "")
       .trim()
       .toUpperCase();
     if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
+
+    while (/[-\s]1$/.test(liveSku)) {
+      liveSku = liveSku.replace(/[-\s]1$/, "").trim();
+      if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
+    }
   }
   return candidates;
 }

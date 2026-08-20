@@ -61,8 +61,24 @@ describe("re-entering a QuickBooks invoice", () => {
       new Map([["4PXL-10", "product-lift"]]),
     );
 
-    expect(qboSkuCandidates("4PXL-10-1 (deleted)")).toEqual(["4PXL-10-1 (DELETED)", "4PXL-10"]);
+    expect(qboSkuCandidates("4PXL-10-1 (deleted)")).toEqual(["4PXL-10-1 (DELETED)", "4PXL-10-1", "4PXL-10"]);
     expect(plan.inserts[0]?.productId).toBe("product-lift");
+  });
+
+  it("maps a deleted QBO SKU with multiple suffixes without stripping the base capacity", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-double-deleted", product_id: null, qbo_sku: "4PHDXL-12-1-1 (deleted)" })],
+      [],
+      new Map([["4PHDXL-12", "product-heavy-lift"]]),
+    );
+
+    expect(qboSkuCandidates("4PHDXL-12-1-1 (deleted)")).toEqual([
+      "4PHDXL-12-1-1 (DELETED)",
+      "4PHDXL-12-1-1",
+      "4PHDXL-12-1",
+      "4PHDXL-12",
+    ]);
+    expect(plan.inserts[0]?.productId).toBe("product-heavy-lift");
   });
 
   it("skips an invoice line that cannot be mapped rather than inventing a product", () => {

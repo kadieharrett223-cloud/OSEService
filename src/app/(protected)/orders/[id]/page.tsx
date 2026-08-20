@@ -530,7 +530,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
         || normalizedDescription.startsWith("--")
         || normalizedSku === "note"
         || normalizedSku.startsWith("note:")
-        || /discount|shipping|freight|sales tax|tax adjustment|^note$|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
+        || /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
 
       return {
         sku,
@@ -1179,11 +1179,11 @@ export default async function OrderDetailPage({
       key: `${skuKey ?? "line"}-${index}`,
       sku: item.sku,
       description: item.description,
-      orderedQty: item.isNonInventory && resolvedProduct && item.qty <= 0 ? 1 : item.qty,
+      orderedQty: item.qty,
       amount: item.amount,
       productId: shippingLine?.product_id ?? resolvedProduct?.id ?? null,
       shippingLine,
-      isNonInventory: item.isNonInventory && !resolvedProduct,
+      isNonInventory: item.isNonInventory,
     };
   });
 

@@ -1814,7 +1814,16 @@ export default async function OrderDetailPage({
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Customer Queue</h2>
             <div className="mt-3 space-y-3">
-              {visibleItems.filter((item) => !item.isNonInventory).map((item, index) => {
+              {visibleItems.filter((item) => {
+                const line = item.shippingLine;
+                const remaining = line
+                  ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0))
+                  : 0;
+                return !item.isNonInventory
+                  && Boolean(line)
+                  && remaining > 0
+                  && !["CANCELLED", "REMOVED", "DENIED", "FULFILLED"].includes(String(line?.fulfillment_status ?? "").toUpperCase());
+              }).map((item, index) => {
                 const queueLine = item.shippingLine;
                 const queueSku = item.sku ?? queueLine?.products?.sku ?? "Line item";
                 return (

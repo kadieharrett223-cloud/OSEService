@@ -571,7 +571,7 @@ async function loadTableColumnSet(
   return new Set(results.filter((result) => !result.error).map((result) => result.column));
 }
 
-function buildShippingOrderSelect(columnSet: Set<string>) {
+function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<string>) {
   const columns = [
     "id",
     "order_number",
@@ -588,33 +588,37 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
   if (columnSet.has("carrier")) columns.push("carrier");
   if (columnSet.has("fulfillment_method")) columns.push("fulfillment_method");
 
+  const lineColumns = [
+    "id",
+    "ordered_qty",
+    "approved_qty",
+    "fulfilled_qty",
+    "approval_status",
+    "warehouse_status",
+    "fulfillment_status",
+    "allocation_status",
+    "priority",
+    "queue_position_start",
+    "queue_position_count",
+    "queue_position_override",
+    "queue_position_override_reason",
+    "legacy_item_code",
+    "legacy_matched_item_code",
+    "legacy_container_assignment",
+    "suggested_assignment_source",
+    "suggested_container_id",
+    "fulfillment_source",
+    "fulfillment_supplier",
+    "fulfillment_reference",
+    "fulfillment_tracking",
+    "fulfillment_notes",
+  ].filter((column) => column === "id" || lineColumnSet.has(column));
+
   columns.push(
     "customers (company_name, full_name, email, phone)",
     "qbo_invoices (id, invoice_number, payment_status, invoice_date, total_amount, raw_payload)",
     `shipping_order_lines (
-      id,
-      ordered_qty,
-      approved_qty,
-      fulfilled_qty,
-      approval_status,
-      warehouse_status,
-      fulfillment_status,
-      allocation_status,
-      priority,
-      queue_position_start,
-      queue_position_count,
-      queue_position_override,
-      queue_position_override_reason,
-      legacy_item_code,
-      legacy_matched_item_code,
-      legacy_container_assignment,
-      suggested_assignment_source,
-      suggested_container_id,
-      fulfillment_source,
-      fulfillment_supplier,
-      fulfillment_reference,
-      fulfillment_tracking,
-      fulfillment_notes,
+      ${lineColumns.join(",\n      ")},
       products (sku, canonical_name),
       inventory_allocations (
         quantity,
@@ -706,12 +710,19 @@ export default async function OrderDetailPage({
   const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
     "fulfillment_method",
   ]);
+  const shippingOrderLineColumnSet = await loadTableColumnSet(supabase, "shipping_order_lines", [
+    "ordered_qty", "approved_qty", "fulfilled_qty", "approval_status", "warehouse_status", "fulfillment_status",
+    "allocation_status", "priority", "queue_position_start", "queue_position_count", "queue_position_override",
+    "queue_position_override_reason", "legacy_item_code", "legacy_matched_item_code", "legacy_container_assignment",
+    "suggested_assignment_source", "suggested_container_id", "fulfillment_source", "fulfillment_supplier",
+    "fulfillment_reference", "fulfillment_tracking", "fulfillment_notes",
+  ]);
   const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);
   const shipmentColumns = await loadTableColumnSet(supabase, "order_shipments", ["id", "created_by", "created_at"]);
   const hasOrderShipmentsTables = shipmentColumns.has("id");
   const fulfillmentColumns = await loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]);
   const hasOrderAttachmentsTable = attachmentColumns.has("id");
-  const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet);
+  const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet, shippingOrderLineColumnSet);
   const attachmentSelect = ["id", "file_name", "file_path", "file_size", "mime_type", "created_at", ...["document_type", "note", "is_restricted", "shipment_id"].filter((column) => attachmentColumns.has(column))].join(", ");
   const fulfillmentSelect = ["id", "shipping_order_line_id", "fulfilled_qty", "fulfilled_at", "shipment_number", "carrier", "tracking_number", "reason", ...(fulfillmentColumns.has("fulfillment_type") ? ["fulfillment_type"] : [])].join(", ");
 

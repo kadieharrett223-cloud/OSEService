@@ -20,6 +20,7 @@ type ReviewLine = {
     id: string;
     invoice_number: string | null;
     payment_status: string | null;
+    raw_payload?: { PrivateNote?: string | null } | null;
   } | null;
 };
 
@@ -53,7 +54,7 @@ export default async function ShippingReviewPage({ searchParams }: { searchParam
       fulfillment_status,
       qbo_invoice_id,
       products (canonical_name, sku),
-      qbo_invoices (id, invoice_number, payment_status)
+      qbo_invoices (id, invoice_number, payment_status, raw_payload)
     `)
     .order("created_at", { ascending: false });
 
@@ -63,7 +64,7 @@ export default async function ShippingReviewPage({ searchParams }: { searchParam
 
   const { data: reviewRows, error } = await query.limit(40);
 
-  const reviewLines = (reviewRows ?? []) as ReviewLine[];
+  const reviewLines = ((reviewRows ?? []) as ReviewLine[]).filter((line) => String(line.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED");
   const filteredProductName = reviewLines[0]?.products?.canonical_name ?? reviewLines[0]?.products?.sku ?? null;
 
   return (

@@ -35,6 +35,7 @@ type OrderRow = {
   qbo_invoices?: {
     payment_status: string | null;
     invoice_date: string | null;
+    raw_payload?: { PrivateNote?: string | null } | null;
   } | null;
   shipping_order_lines?: Array<{
     approval_status: string | null;
@@ -150,7 +151,7 @@ export default async function DashboardPage() {
       .select(`
         id,
         review_status,
-        qbo_invoices (payment_status, invoice_date),
+        qbo_invoices (payment_status, invoice_date, raw_payload),
         shipping_order_lines (approval_status, warehouse_status, fulfillment_status)
       `)
       .order("created_at", { ascending: false })
@@ -164,7 +165,7 @@ export default async function DashboardPage() {
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
   const containerRows = (containers ?? []) as ContainerRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
-  const orderRows = (orders ?? []) as OrderRow[];
+  const orderRows = ((orders ?? []) as unknown as OrderRow[]).filter((order) => String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED");
   const caseRows = (cases ?? []) as CaseRow[];
   const installationRows = (installations ?? []) as InstallationRow[];
   const auditRows = (audits ?? []) as AuditRow[];

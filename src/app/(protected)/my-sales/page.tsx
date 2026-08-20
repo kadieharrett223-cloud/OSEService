@@ -13,6 +13,7 @@ type SalesOrder = {
   qbo_invoices?: {
     invoice_number: string | null;
     payment_status: string | null;
+    raw_payload?: { PrivateNote?: string | null } | null;
     customers?: {
       full_name: string | null;
       company_name: string | null;
@@ -107,6 +108,7 @@ export default async function MySalesPage({ searchParams }: { searchParams: Prom
       qbo_invoices (
         invoice_number,
         payment_status,
+        raw_payload,
         customers (full_name, company_name)
       ),
       shipping_order_lines (
@@ -129,6 +131,7 @@ export default async function MySalesPage({ searchParams }: { searchParams: Prom
 
   const orders = ((rows ?? []) as SalesOrder[])
     .filter((order) => order.qbo_invoices?.payment_status === "Paid")
+    .filter((order) => String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED")
     .filter((order) => {
       const customer = `${order.qbo_invoices?.customers?.full_name ?? ""} ${order.qbo_invoices?.customers?.company_name ?? ""}`.toLowerCase();
       const invoice = `${order.qbo_invoices?.invoice_number ?? ""}`.toLowerCase();

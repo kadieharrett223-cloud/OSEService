@@ -24,6 +24,7 @@ type QueueEntry = {
     legacy_customer_name: string | null;
     qbo_invoices?: {
       invoice_number: string | null;
+      raw_payload?: { PrivateNote?: string | null } | null;
       customers?: {
         company_name: string | null;
         full_name: string | null;
@@ -85,6 +86,7 @@ export default async function OrderQueuePage() {
         legacy_customer_name,
         qbo_invoices (
           invoice_number,
+          raw_payload,
           customers (company_name, full_name)
         )
       )
@@ -93,7 +95,10 @@ export default async function OrderQueuePage() {
     .order("queue_position_start", { ascending: true, nullsFirst: false });
 
   const queueEntries = (queueRows ?? []) as QueueEntry[];
-  const activeQueueEntries = queueEntries.filter((line) => !line.shipping_orders?.duplicate_of_order_id);
+  const activeQueueEntries = queueEntries.filter((line) =>
+    !line.shipping_orders?.duplicate_of_order_id
+    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
+  );
   const openDemand = activeQueueEntries.reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
   const lineIds = activeQueueEntries.map((line) => line.id);
   const { data: allocationRows } = lineIds.length

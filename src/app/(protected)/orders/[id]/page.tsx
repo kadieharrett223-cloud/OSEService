@@ -1474,8 +1474,10 @@ export default async function OrderDetailPage({
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-[900px]">
-                <div className="grid grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(220px,2fr)_75px_75px_90px_90px_180px_150px_130px_110px] gap-3 border-b border-[#edf2f7] px-2 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
+                  <span>Ordered</span>
+                  <span>Shipped</span>
                   <span>Qty Needed</span>
                   <span>Available</span>
                   <span>Coming From</span>
@@ -1484,7 +1486,7 @@ export default async function OrderDetailPage({
                   <span>Action</span>
                 </div>
                 <div>
-                  {itemStockSummary.map(({ item, supply, needed, inStock, status }, rowIndex) => {
+                  {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }, rowIndex) => {
                     const line = item.shippingLine;
                     const fallbackShipmentLine = item.productId
                       ? orderLines.find((candidate) => {
@@ -1519,12 +1521,14 @@ export default async function OrderDetailPage({
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(220px,2fr)_75px_75px_90px_90px_180px_150px_130px_110px] items-start gap-3 px-2 py-4 text-sm text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
+                          <span>{item.orderedQty}</span>
+                          <span>{fulfilled}</span>
                           <span>{needed}</span>
                           <span className="font-semibold text-[#16a34a]">{inStock}</span>
                           <span className="font-medium text-[#111827]">{supply.comingFrom}</span>

@@ -1795,9 +1795,9 @@ export default async function OrderDetailPage({
               <div className="border-t border-[#eef2f7] pt-2 flex items-center justify-between gap-3"><span>Total</span><span className="font-semibold text-[#111827]">{formatCurrency(quickbooksSnapshot?.total_amount)}</span></div>
             </div>
           </section>
-          <section className="rounded-2xl border border-[#bbdec5] bg-[#f1fbf3] p-5 shadow-sm">
+          <section className="rounded-2xl border border-[#bbdec5] bg-[#f1fbf3] p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#356344]">Fulfillment</h2>
-            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{totalUnitsShipped}/{totalEligibleInventoryUnits}</div>
+            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{totalUnitsShipped}/{totalEligibleInventoryUnits} <span className="text-xl">Fulfilled</span></div>
             <p className="mt-1 text-sm font-semibold text-[#356344]">{fulfillmentProgressStatus}</p>
           </section>
         </aside>

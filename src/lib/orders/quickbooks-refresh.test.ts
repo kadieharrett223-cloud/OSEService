@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planQuickbooksOrderRefresh, resolveInvoiceOrder, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
+import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
 
@@ -52,6 +52,17 @@ describe("re-entering a QuickBooks invoice", () => {
   it("resolves an unmapped invoice line through product aliases", () => {
     const plan = planQuickbooksOrderRefresh([invoiceLine({ id: "inv-line-3", product_id: null, qbo_sku: "jvcj-6" })], [], aliases);
     expect(plan.inserts[0]?.productId).toBe("product-jack");
+  });
+
+  it("maps a deleted QBO SKU variant to its live alias", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-deleted", product_id: null, qbo_sku: "4PXL-10-1 (deleted)" })],
+      [],
+      new Map([["4PXL-10", "product-lift"]]),
+    );
+
+    expect(qboSkuCandidates("4PXL-10-1 (deleted)")).toEqual(["4PXL-10-1 (DELETED)", "4PXL-10"]);
+    expect(plan.inserts[0]?.productId).toBe("product-lift");
   });
 
   it("skips an invoice line that cannot be mapped rather than inventing a product", () => {

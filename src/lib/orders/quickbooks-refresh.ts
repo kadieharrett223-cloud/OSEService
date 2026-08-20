@@ -39,6 +39,23 @@ export function resolveInvoiceOrder(existingOrder: { id: string } | null | undef
   return existingOrder?.id ? { action: "refresh", orderId: existingOrder.id } : { action: "create" };
 }
 
+/** Match QBO's deleted-item variants to the corresponding live product alias. */
+export function qboSkuCandidates(value: string | null | undefined) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [] as string[];
+
+  const candidates = [raw.toUpperCase()];
+  if (/\(deleted/i.test(raw)) {
+    const liveSku = raw
+      .replace(/\s*\(deleted[^)]*\)\s*$/i, "")
+      .replace(/[-\s]*\d+$/g, "")
+      .trim()
+      .toUpperCase();
+    if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
+  }
+  return candidates;
+}
+
 export function planQuickbooksOrderRefresh(
   invoiceLines: RefreshInvoiceLine[],
   orderLines: RefreshOrderLine[],
@@ -49,8 +66,9 @@ export function planQuickbooksOrderRefresh(
   const productIds = new Set<string>();
 
   for (const invoiceLine of invoiceLines) {
-    const aliasKey = String(invoiceLine.qbo_sku ?? "").trim().toUpperCase();
-    const productId = invoiceLine.product_id ?? productIdByAlias.get(aliasKey) ?? null;
+    const productId = invoiceLine.product_id
+      ?? qboSkuCandidates(invoiceLine.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
+      ?? null;
     const orderedQty = Math.max(0, Number(invoiceLine.ordered_qty ?? 0));
     const existing = existingByInvoiceLine.get(invoiceLine.id);
 

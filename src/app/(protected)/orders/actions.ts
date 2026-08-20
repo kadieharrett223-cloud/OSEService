@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
-import { planQuickbooksOrderRefresh, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
+import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 
 async function loadTableColumnSet(
@@ -464,7 +464,7 @@ async function activateExistingQuickbooksOrder(
     .select("id, qbo_invoice_line_id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
     .eq("shipping_order_id", orderId);
 
-  const aliasSkus = (invoiceLines ?? []).map((line) => line.qbo_sku).filter((sku): sku is string => Boolean(sku));
+  const aliasSkus = (invoiceLines ?? []).flatMap((line) => qboSkuCandidates(line.qbo_sku));
   const { data: aliasRows } = aliasSkus.length
     ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
     : { data: [] };
@@ -545,7 +545,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (linesError) redirect(`/orders/new?error=${encodeURIComponent(linesError.message)}`);
   if (!invoiceLines?.length) redirect(`/orders/new?error=This+invoice+has+no+imported+QuickBooks+lines`);
 
-  const aliasSkus = invoiceLines.map((line) => line.qbo_sku).filter((sku): sku is string => Boolean(sku));
+  const aliasSkus = invoiceLines.flatMap((line) => qboSkuCandidates(line.qbo_sku));
   const { data: aliasRows } = aliasSkus.length
     ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
     : { data: [] };
@@ -567,7 +567,12 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (orderError || !order?.id) redirect(`/orders/new?error=${encodeURIComponent(orderError?.message ?? "Unable to create order")}`);
 
   const mappedInvoiceLines = invoiceLines
-    .map((line) => ({ ...line, product_id: line.product_id ?? productIdByAlias.get(String(line.qbo_sku ?? "").trim().toUpperCase()) ?? null }))
+    .map((line) => ({
+      ...line,
+      product_id: line.product_id
+        ?? qboSkuCandidates(line.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
+        ?? null,
+    }))
     .filter((line): line is typeof line & { product_id: string } => Boolean(line.product_id));
   const { error: lineError } = mappedInvoiceLines.length
     ? await adminClient.from("shipping_order_lines").insert(mappedInvoiceLines.map((line) => ({

@@ -1468,8 +1468,8 @@ export default async function OrderDetailPage({
         </div>
       </div>
 
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,2.8fr)_minmax(220px,0.68fr)]">
-        <div className="flex min-w-0 flex-col space-y-5">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3.2fr)_minmax(180px,0.58fr)]">
+        <div className="flex min-w-0 flex-col space-y-4">
           <ShipmentSelectionProvider>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1499,15 +1499,15 @@ export default async function OrderDetailPage({
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-full">
-                <div className="grid grid-cols-[minmax(180px,2.2fr)_62px_62px_72px_minmax(110px,1fr)_90px_80px_84px] gap-2 border-b border-[#edf2f7] px-2 py-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] gap-1.5 border-b border-[#edf2f7] px-2 py-2 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#64748b]">
                   <span>Item</span>
                   <span>Ord.</span>
-                  <span>Ship.</span>
+                  <span>Shp.</span>
                   <span>Need</span>
                   <span>Source</span>
                   <span>ETA</span>
                   <span>Status</span>
-                  <span>Action</span>
+                  <span>Act.</span>
                 </div>
                 <div>
                   {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }, rowIndex) => {
@@ -1547,18 +1547,18 @@ export default async function OrderDetailPage({
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(180px,2.2fr)_62px_62px_72px_minmax(110px,1fr)_90px_80px_84px] items-start gap-2 px-2 py-3 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-start gap-1.5 px-2 py-2.5 text-sm text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
-                            <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
+                            <span className="mt-1 block text-[11px] text-[#64748b]">{descriptionSummary}</span>
                           </span>
-                          <span>{item.orderedQty}</span>
-                          <span>{fulfilled}</span>
-                          <span>{needed}</span>
-                          <span className="font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
-                          <span className="text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
-                          <span><span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
+                          <span className="text-[12px]">{item.orderedQty}</span>
+                          <span className="text-[12px]">{fulfilled}</span>
+                          <span className="text-[12px]">{needed}</span>
+                          <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
+                          <span className="text-[10px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
+                          <span><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>

@@ -130,6 +130,60 @@ export async function createFocusedProductMappingAction(formData: FormData) {
     redirect(`/product-mappings?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to save aliases")}`);
   }
 
+  const orderMatch = returnTo.match(/^\/orders\/([0-9a-f-]+)/i);
+  if (orderMatch) {
+    const orderId = orderMatch[1];
+    const { data: order } = await supabase
+      .from("shipping_orders")
+      .select("source_invoice_id")
+      .eq("id", orderId)
+      .maybeSingle();
+    const sourceInvoiceId = order?.source_invoice_id ?? null;
+    const { data: invoiceLine } = sourceInvoiceId
+      ? await supabase
+        .from("qbo_invoice_lines")
+        .select("id, qbo_line_id, qbo_sku, ordered_qty, source_description")
+        .eq("qbo_invoice_id", sourceInvoiceId)
+        .eq("qbo_sku", sourceSku)
+        .maybeSingle()
+      : { data: null };
+
+    if (invoiceLine) {
+      await supabase
+        .from("qbo_invoice_lines")
+        .update({ product_id: productId })
+        .eq("id", invoiceLine.id);
+      const { data: existingLine } = await supabase
+        .from("shipping_order_lines")
+        .select("id")
+        .eq("shipping_order_id", orderId)
+        .eq("qbo_invoice_line_id", invoiceLine.id)
+        .maybeSingle();
+      if (!existingLine) {
+        const { error: insertError } = await supabase.from("shipping_order_lines").insert({
+          shipping_order_id: orderId,
+          qbo_invoice_line_id: invoiceLine.id,
+          product_id: productId,
+          ordered_qty: Number(invoiceLine.ordered_qty ?? 1) || 1,
+          approved_qty: Number(invoiceLine.ordered_qty ?? 1) || 1,
+          fulfilled_qty: 0,
+          cancelled_qty: 0,
+          approval_status: "APPROVED",
+          warehouse_status: "APPROVED",
+          allocation_status: "UNALLOCATED",
+          fulfillment_status: "PENDING",
+          priority: "NORMAL",
+          source_event_key: `QBO_INVOICE_LINE:${sourceInvoiceId}:${invoiceLine.qbo_line_id}`,
+          legacy_item_code: invoiceLine.qbo_sku,
+        });
+        if (insertError && insertError.code !== "23505") {
+          redirect(`/product-mappings?error=${encodeURIComponent(insertError.message)}`);
+        }
+      }
+      await recalculateProductQueues([productId]);
+    }
+  }
+
   revalidatePath("/product-mappings");
   revalidatePath("/orders");
   if (returnTo.startsWith("/orders/")) {

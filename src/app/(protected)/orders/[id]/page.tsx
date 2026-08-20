@@ -770,7 +770,7 @@ export default async function OrderDetailPage({
     return <div className="p-6">Order not found.</div>;
   }
 
-  if ((orderRecord.shipping_order_lines ?? []).length === 0) {
+  if ((orderRecord.shipping_order_lines ?? []).length === 0 && parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload).some((item) => !item.isNonInventory && item.qty > 0)) {
     const invoiceNumber = orderRecord.qbo_invoices?.invoice_number ?? orderRecord.order_number ?? "—";
     const customerName = orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending";
     const serviceItems = parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload);
@@ -828,6 +828,9 @@ export default async function OrderDetailPage({
   }
 
   const parsedInvoiceItems = parseQuickbooksInvoiceItems(quickbooksSnapshot?.raw_payload);
+  const isServiceOnlyOrder = (orderRecord.shipping_order_lines ?? []).length === 0
+    && parsedInvoiceItems.length > 0
+    && parsedInvoiceItems.every((item) => item.isNonInventory);
 
   const actorIds = Array.from(new Set(activities.map((activity) => activity.actor_id).filter(Boolean))) as string[];
   const { data: actorRows } = actorIds.length
@@ -1484,7 +1487,9 @@ export default async function OrderDetailPage({
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
-                {hasShippableLines ? (
+                {isServiceOnlyOrder ? (
+                  <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>
+                ) : hasShippableLines ? (
                   <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
                 ) : (
                   <span className="rounded-full bg-[#fff7e6] px-3 py-1.5 text-[#b45309]">Awaiting review</span>
@@ -1492,7 +1497,7 @@ export default async function OrderDetailPage({
               </div>
             </div>
 
-            {!hasShippableLines ? (
+            {!hasShippableLines && !isServiceOnlyOrder ? (
               <div className="mt-4 rounded-lg border border-[#f4d9a8] bg-[#fffaf0] p-3 text-sm text-[#8a5a00]">
                 There are no remaining physical inventory lines available for shipment selection.
                 Service lines and lines without a valid product mapping must be resolved before they can be shipped.

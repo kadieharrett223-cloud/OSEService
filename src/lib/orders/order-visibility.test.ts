@@ -130,6 +130,18 @@ describe("orders visibility and activation", () => {
     expect(result.isNewOrder).toBe(false);
   });
 
+  it("keeps shipped orders in Partially Shipped even when review status is still pending", () => {
+    const result = classifyOrder(order({
+      review_status: "PENDING_REVIEW",
+      shipping_order_lines: [
+        line({ approved_qty: 0, ordered_qty: 2, fulfilled_qty: 1, approval_status: "PENDING_REVIEW", fulfillment_status: "PARTIALLY_FULFILLED" }),
+      ],
+    }));
+
+    expect(result.isPartiallyShippedOrder).toBe(true);
+    expect(result.isVisibleOperationalOrder).toBe(false);
+  });
+
   it("keeps a refreshed order in New only while remaining demand exists", () => {
     const withDemand = classifyOrder(order({ shipping_order_lines: [line({ approved_qty: 2, fulfilled_qty: 0 })] }));
     expect(withDemand.isNewOrder).toBe(true);

@@ -120,7 +120,7 @@ export function classifyOrder(
     isVisibleOperationalOrder,
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
-    isPartiallyShippedOrder: isVisibleOperationalOrder && anyShipped && hasRemainingMappedLine,
+    isPartiallyShippedOrder: anyShipped && hasRemainingMappedLine,
     isArchivedOrder: (!isVisibleOperationalOrder && hasArchivedLines) || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };

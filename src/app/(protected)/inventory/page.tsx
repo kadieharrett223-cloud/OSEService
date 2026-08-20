@@ -72,7 +72,7 @@ type QueueLine = {
     fulfillment_method?: "SHIP" | "WILL_CALL" | null;
     qbo_invoices?: {
       invoice_number: string | null;
-      private_note?: string | null;
+      raw_payload?: { PrivateNote?: string | null } | null;
       customers?: {
         company_name: string | null;
         full_name: string | null;
@@ -289,7 +289,7 @@ export default async function InventoryPage({
           legacy_customer_name,
           qbo_invoices (
             invoice_number,
-            private_note,
+            raw_payload,
             customers (company_name, full_name)
           )
         ),
@@ -335,7 +335,7 @@ export default async function InventoryPage({
   const queueLineRows = (queueLines ?? []) as QueueLine[];
   const activeQueueLineRows = queueLineRows.filter((line) =>
     !line.shipping_orders?.duplicate_of_order_id
-    && String(line.shipping_orders?.qbo_invoices?.private_note ?? "").trim().toUpperCase() !== "VOIDED",
+    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
   const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
   const manualMappingSkus = new Set<string>();

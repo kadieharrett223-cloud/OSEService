@@ -30,7 +30,7 @@ export type ClassificationOrder = {
   review_status?: string | null;
   duplicate_of_order_id?: string | null;
   shipping_order_lines?: ClassificationLine[] | null;
-  qbo_invoices?: { private_note?: string | null } | null;
+  qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null } | null;
 };
 
 export type OrderClassification = {
@@ -59,7 +59,7 @@ export function classifyOrder(
   const manualMappingSkus = options.manualMappingSkus ?? new Set<string>();
   const allLines = order.shipping_order_lines ?? [];
   const isExcluded = EXCLUDED_ORDER_NUMBERS.includes(String(order.order_number ?? ""));
-  const isVoided = upper(order.qbo_invoices?.private_note) === "VOIDED";
+  const isVoided = upper(order.qbo_invoices?.raw_payload?.PrivateNote) === "VOIDED";
   const isHistoricalDuplicate = Boolean(order.duplicate_of_order_id);
 
   if (isHistoricalDuplicate || isVoided) {

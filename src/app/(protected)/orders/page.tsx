@@ -37,7 +37,7 @@ type OrderSummary = {
   qbo_invoices?: {
     invoice_number: string | null;
     payment_status: string | null;
-    private_note?: string | null;
+    raw_payload?: { PrivateNote?: string | null } | null;
     invoice_date: string | null;
   } | null;
   shipping_order_lines?: Array<{
@@ -83,7 +83,7 @@ function buildOrdersSelect(includeDuplicateField: boolean) {
   return `
     ${orderFields.join(",\n      ")},
     customers (company_name, full_name),
-    qbo_invoices (invoice_number, payment_status, invoice_date, private_note)
+    qbo_invoices (invoice_number, payment_status, invoice_date, raw_payload)
   `;
 }
 

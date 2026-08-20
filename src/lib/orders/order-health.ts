@@ -15,6 +15,7 @@ export type OrderHealthIssue = {
 export type HealthLine = {
   id: string;
   product_id?: string | null;
+  legacy_item_code?: string | null;
   ordered_qty?: number | null;
   approved_qty?: number | null;
   fulfilled_qty?: number | null;

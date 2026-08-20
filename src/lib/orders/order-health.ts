@@ -54,10 +54,6 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
   if (input.qboVoided && !input.cancelled) {
     issues.push({ severity: "ERROR", code: "VOIDED_ACTIVE", product: null, issue: "QuickBooks invoice is voided but the ERP order is not cancelled", expected: "Cancelled", actual: "Active", cause: "The invoice status changed after import." });
   }
-  if (input.cancelled && input.lines.some((line) => remaining(line) > 0)) {
-    issues.push({ severity: "WARNING", code: "CANCELLED_OPEN_DEMAND", product: null, issue: "Cancelled order still has remaining demand", expected: "0 remaining demand", actual: String(input.lines.reduce((sum, line) => sum + remaining(line), 0)), cause: "Cancellation has not removed the open obligation from the read model." });
-  }
-
   for (const line of input.lines) {
     const product = productLabel(line);
     const open = remaining(line);

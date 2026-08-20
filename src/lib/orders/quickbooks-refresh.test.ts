@@ -112,6 +112,18 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.skippedUnmapped).toHaveLength(0);
   });
 
+  it("allows mapped misc charge lines to refresh as physical demand", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "misc-line", qbo_sku: "Misc Charge", source_description: "4032-6 Three level lift", product_id: "product-lift" })],
+      [],
+      aliases,
+    );
+
+    expect(plan.inserts).toEqual([
+      { qboInvoiceLineId: "misc-line", productId: "product-lift", orderedQty: 2, qboSku: "Misc Charge", qboLineId: "1" },
+    ]);
+  });
+
   it("reports every product whose queue needs renumbering", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine(), invoiceLine({ id: "inv-line-2", product_id: "product-2" })],

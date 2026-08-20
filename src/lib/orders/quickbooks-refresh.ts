@@ -66,7 +66,7 @@ export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; so
   const description = String(line.source_description ?? "").trim().toLowerCase();
   return sku === "note"
     || sku.startsWith("note:")
-    || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
+    || /discount|shipping|freight|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
 }
 
 export function planQuickbooksOrderRefresh(

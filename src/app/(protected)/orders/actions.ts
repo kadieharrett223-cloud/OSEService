@@ -764,6 +764,10 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const lineId = getString(formData, "lineId");
   const source = (getString(formData, "assignment_source") ?? "UNASSIGNED").toUpperCase();
   const containerId = getString(formData, "container_id");
+  const supplier = getString(formData, "fulfillment_supplier")?.trim() || null;
+  const reference = getString(formData, "fulfillment_reference")?.trim() || null;
+  const tracking = getString(formData, "fulfillment_tracking")?.trim() || null;
+  const fulfillmentNotes = getString(formData, "fulfillment_notes")?.trim() || null;
   const requestedQty = getPositiveNumber(formData, "qty_assigned");
   const adminClient = getSupabaseAdmin();
 
@@ -771,9 +775,13 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     redirect(`/orders/${orderId ?? ""}`);
   }
 
+  if (source === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
+  if (source === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
+  if (source === "CONTAINER" && !containerId) redirect(`/orders/${orderId}?error=Container+selection+required`);
+
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty")
+    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
     .eq("id", lineId)
     .maybeSingle();
 
@@ -783,6 +791,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
+    fulfillment_source: string | null;
   } | null;
 
   if (lineError || !lineRow) {
@@ -809,12 +818,17 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
   }
 
+  const { error: sourceError } = await adminClient.from("shipping_order_lines").update({
+    fulfillment_source: source === "FLOOR" ? "WAREHOUSE" : source === "CONTAINER" ? "CONTAINER" : source === "DROPSHIP" ? "DROPSHIP" : source === "OTHER" ? "OTHER" : null,
+    fulfillment_supplier: supplier,
+    fulfillment_reference: reference,
+    fulfillment_tracking: tracking,
+    fulfillment_notes: fulfillmentNotes,
+  } as never).eq("id", lineRow.id);
+  if (sourceError) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError.message)}`);
+
   if (remainingQty > 0 && source !== "UNASSIGNED") {
     if (source === "CONTAINER") {
-      if (!containerId) {
-        redirect(`/orders/${orderId}?error=Container+selection+required`);
-      }
-
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
         shipping_order_line_id: lineRow.id,
         product_id: lineRow.product_id,
@@ -903,7 +917,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty")
+    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
     .eq("id", lineId)
     .maybeSingle();
 
@@ -912,6 +926,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
     product_id: string | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
+    fulfillment_source: string | null;
   } | null;
 
   if (lineError || !lineRow) {
@@ -965,7 +980,9 @@ export async function markOrderLineShippedAction(formData: FormData) {
   }
 
   try {
-    await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, shipQty, `SHIPMENT:${shipmentNumber}:${lineId}`);
+    if (String(lineRow.fulfillment_source ?? "WAREHOUSE").toUpperCase() === "WAREHOUSE") {
+      await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, shipQty, `SHIPMENT:${shipmentNumber}:${lineId}`);
+    }
   } catch (inventoryError) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(inventoryError instanceof Error ? inventoryError.message : "Unable to update inventory")}`);
   }

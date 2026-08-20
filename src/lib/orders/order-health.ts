@@ -26,6 +26,9 @@ export type HealthLine = {
   queue_position_count?: number | null;
   products?: { sku?: string | null; canonical_name?: string | null } | null;
   inventory_allocations?: Array<{ quantity?: number | null; source_type?: string | null }>;
+  fulfillment_source?: string | null;
+  fulfillment_supplier?: string | null;
+  fulfillment_notes?: string | null;
 };
 
 export type HealthShipment = {
@@ -60,6 +63,10 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     const shipped = shipmentQtyByLine.get(line.id) ?? 0;
     const status = upper(line.fulfillment_status);
     const context = { lineId: line.id, warehouseStatus: line.warehouse_status };
+    if (upper(line.fulfillment_source) === "CONTAINER" && !(line.inventory_allocations ?? []).some((allocation) => upper(allocation.source_type) === "CONTAINER")) issues.push({ ...context, severity: "ERROR", code: "CONTAINER_SOURCE_UNASSIGNED", product, issue: "Container fulfillment source has no container allocation", expected: "Assigned container", actual: "No container", cause: "Select a specific inbound container before saving this source." });
+    if (upper(line.fulfillment_source) === "DROPSHIP" && !line.fulfillment_supplier) issues.push({ ...context, severity: "WARNING", code: "DROPSHIP_SUPPLIER_MISSING", product, issue: "Dropship source has no supplier detail", expected: "Supplier/vendor", actual: "Missing", cause: "Add the supplier before relying on this fulfillment source." });
+    if (upper(line.fulfillment_source) === "OTHER" && !line.fulfillment_notes) issues.push({ ...context, severity: "WARNING", code: "OTHER_SOURCE_NOTE_MISSING", product, issue: "Other fulfillment source has no note", expected: "Source note", actual: "Missing", cause: "Explain how this line will be fulfilled." });
+    if (upper(line.fulfillment_source) === "WAREHOUSE" && !line.product_id) issues.push({ ...context, severity: "ERROR", code: "WAREHOUSE_SOURCE_UNMAPPED", product, issue: "Warehouse source has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Warehouse fulfillment cannot identify physical inventory." });
     if (!line.product_id && open > 0) issues.push({ ...context, severity: "ERROR", code: "UNMAPPED_PHYSICAL_LINE", product, issue: "Physical demand line has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Inventory and shipment actions cannot identify the product." });
     if (line.queue_position_count != null && Number(line.queue_position_count) !== open) issues.push({ ...context, severity: "WARNING", code: "QUEUE_COUNT_MISMATCH", product, issue: "Queue range count does not match remaining quantity", expected: String(open), actual: String(line.queue_position_count), cause: "Queue metadata is stale or represents a different logical line." });
     if (open > 0 && line.queue_position_start == null && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))) issues.push({ ...context, severity: "WARNING", code: "QUEUE_POSITION_MISSING", product, issue: "Open approved line has no queue position", expected: "Assigned queue position", actual: "Missing", cause: "The positions-only queue calculation has not assigned this line." });

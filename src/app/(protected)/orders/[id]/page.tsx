@@ -71,6 +71,11 @@ type OrderDetailRow = {
     legacy_container_assignment: string | null;
     suggested_assignment_source: string | null;
     suggested_container_id: string | null;
+    fulfillment_source?: string | null;
+    fulfillment_supplier?: string | null;
+    fulfillment_reference?: string | null;
+    fulfillment_tracking?: string | null;
+    fulfillment_notes?: string | null;
     products?: { sku: string | null; canonical_name: string | null } | null;
     inventory_allocations?: Array<{
       quantity: number | null;
@@ -605,6 +610,11 @@ function buildShippingOrderSelect(columnSet: Set<string>) {
       legacy_container_assignment,
       suggested_assignment_source,
       suggested_container_id,
+      fulfillment_source,
+      fulfillment_supplier,
+      fulfillment_reference,
+      fulfillment_tracking,
+      fulfillment_notes,
       products (sku, canonical_name),
       inventory_allocations (
         quantity,
@@ -1515,7 +1525,7 @@ export default async function OrderDetailPage({
                       : Math.max(0, item.orderedQty);
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
-                    const assignmentSourceDefault = line?.inventory_allocations?.[0]?.source_type ?? line?.suggested_assignment_source ?? "UNASSIGNED";
+                    const assignmentSourceDefault = line?.fulfillment_source === "WAREHOUSE" ? "FLOOR" : line?.fulfillment_source ?? line?.inventory_allocations?.[0]?.source_type ?? line?.suggested_assignment_source ?? "UNASSIGNED";
                     const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
                     const descriptionSummary = truncateText(item.description, 84);
 
@@ -1531,7 +1541,7 @@ export default async function OrderDetailPage({
                           <span>{fulfilled}</span>
                           <span>{needed}</span>
                           <span className="font-semibold text-[#16a34a]">{inStock}</span>
-                          <span className="font-medium text-[#111827]">{supply.comingFrom}</span>
+                          <span className="font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
                           <span className="text-xs text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
                           <span><span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
@@ -1591,11 +1601,13 @@ export default async function OrderDetailPage({
                             <form action={updateOrderLineAssignmentAction} className="mt-4 grid gap-2">
                               <input type="hidden" name="orderId" value={orderRecord.id} />
                               <input type="hidden" name="lineId" value={line.id} />
-                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Inventory source</label>
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Fulfillment Source</label>
                               <select name="assignment_source" className="select text-sm" defaultValue={assignmentSourceDefault}>
                                 <option value="UNASSIGNED">Unassigned</option>
                                 <option value="FLOOR">Warehouse</option>
                                 <option value="CONTAINER">Container</option>
+                                <option value="DROPSHIP">Dropshipping</option>
+                                <option value="OTHER">Other</option>
                               </select>
                               <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Container (when source is Container)</label>
                               <select name="container_id" className="select text-sm" defaultValue={line.inventory_allocations?.[0]?.container_id ?? line.suggested_container_id ?? ""}>
@@ -1606,6 +1618,14 @@ export default async function OrderDetailPage({
                                   </option>
                                 ))}
                               </select>
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Supplier (Dropshipping)</label>
+                              <input name="fulfillment_supplier" className="input" defaultValue={line.fulfillment_supplier ?? ""} placeholder="Supplier/vendor" />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">PO / Reference</label>
+                              <input name="fulfillment_reference" className="input" defaultValue={line.fulfillment_reference ?? ""} />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Tracking</label>
+                              <input name="fulfillment_tracking" className="input" defaultValue={line.fulfillment_tracking ?? ""} />
+                              <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Other / Source Notes</label>
+                              <textarea name="fulfillment_notes" className="textarea" defaultValue={line.fulfillment_notes ?? ""} placeholder="Required for Other" />
                               <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Qty assigned</label>
                               <input name="qty_assigned" type="number" min="1" max={Math.max(1, remainingQty || 1)} defaultValue={qtyAssignedDefault} className="input" />
                               <p className="text-xs text-[#64748b]">Container status and ETA are read automatically from Containers.</p>

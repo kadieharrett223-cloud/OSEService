@@ -174,6 +174,13 @@ function normalizeSkuKey(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeQboSkuKey(value: string | null | undefined) {
+  const rawValue = String(value ?? "").trim();
+  const hasDeletedMarker = /\(deleted/i.test(rawValue);
+  const raw = rawValue.replace(/\s*\(deleted[^)]*\)\s*$/i, "");
+  return normalizeSkuKey(hasDeletedMarker ? raw.replace(/[-\s]*\d+$/g, "") : raw);
+}
+
 const MANUFACTURER_PREFIX = /^(HL|HK|FB|YZ)-/i;
 
 /** Legacy data reuses AR-1 for two different ramps, so that code must not collapse. */
@@ -385,7 +392,7 @@ export default async function InventoryPage({
     const directCandidates = qboCandidatesByParentProduct.get(productKey) ?? [];
     const skuCandidates = allQboLineRows.filter((qboLine) => {
       const row = qboLine as { qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null };
-      return row.qbo_invoice_id === bridgeInvoiceId && normalizeSkuKey(row.qbo_sku) === normalizeSkuKey(line.legacy_item_code);
+      return row.qbo_invoice_id === bridgeInvoiceId && normalizeQboSkuKey(row.qbo_sku) === normalizeQboSkuKey(line.legacy_item_code);
     });
     const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
     return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };

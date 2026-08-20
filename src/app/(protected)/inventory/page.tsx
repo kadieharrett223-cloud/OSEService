@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -128,6 +128,7 @@ type InventoryViewRow = {
   customerQueue: Array<{
     position: string;
     lineId: string;
+    logicalDemandKey: string;
     openQty: number;
     warehouseQty: number;
     waitingQty: number;
@@ -510,6 +511,7 @@ export default async function InventoryPage({
         ? `${line.queue_position_start}${Number(line.queue_position_count ?? 0) > 1 ? `-${line.queue_position_start + Number(line.queue_position_count) - 1}` : ""}`
         : "—",
       lineId: line.id,
+      logicalDemandKey: demandLineIdentity(line),
       openQty,
       warehouseQty: warehouseDisplay.warehouseQty,
       waitingQty: warehouseDisplay.waitingQty,
@@ -618,13 +620,13 @@ export default async function InventoryPage({
 
   const displayRows = Array.from(canonicalGroups.values())
     .map((group) => {
-      // Separate lines on one invoice are separate obligations, so quantities are summed into a
-      // single customer row rather than collapsed to the largest line.
+      // Keep each logical product obligation distinct. An invoice can have multiple physical
+      // lines, and canonical display groups must never sum unrelated lines into one customer qty.
       const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
       for (const item of group.customerQueue) {
         const key = item.invoice && item.invoice !== "—"
-          ? `INVOICE:${item.invoice}`.toUpperCase()
-          : `ORDER:${item.orderId}`.toUpperCase();
+          ? `INVOICE:${item.invoice}|${item.logicalDemandKey}`.toUpperCase()
+          : `ORDER:${item.orderId}|${item.logicalDemandKey}`.toUpperCase();
         const existing = customerDemandByInvoice.get(key);
         if (!existing) {
           customerDemandByInvoice.set(key, { ...item });

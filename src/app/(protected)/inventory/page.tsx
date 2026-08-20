@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
+import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -176,10 +177,11 @@ function normalizeSkuKey(value: string | null | undefined) {
 }
 
 function normalizeQboSkuKey(value: string | null | undefined) {
-  const rawValue = String(value ?? "").trim();
-  const hasDeletedMarker = /\(deleted/i.test(rawValue);
-  const raw = rawValue.replace(/\s*\(deleted[^)]*\)\s*$/i, "");
-  return normalizeSkuKey(hasDeletedMarker ? raw.replace(/[-\s]*\d+$/g, "") : raw);
+  return normalizeQboSkuKeys(value).at(-1) ?? normalizeSkuKey(value);
+}
+
+function normalizeQboSkuKeys(value: string | null | undefined) {
+  return qboSkuCandidates(value).map(normalizeSkuKey).filter(Boolean) as string[];
 }
 
 const MANUFACTURER_PREFIX = /^(HL|HK|FB|YZ)-/i;
@@ -373,7 +375,7 @@ export default async function InventoryPage({
   const allQboLineRows = [...(qboLineRows ?? []), ...(extraQboLineRows.data ?? [])].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
   const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null }>) {
-    const qboProductId = qboLine.product_id ?? productIdByAliasKey.get(normalizeSkuKey(qboLine.qbo_sku)) ?? null;
+    const qboProductId = qboLine.product_id ?? normalizeQboSkuKeys(qboLine.qbo_sku).map((key) => productIdByAliasKey.get(key)).find(Boolean) ?? null;
     const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeSkuKey(qboLine.qbo_sku)}`;
     const candidates = qboCandidatesByParentProduct.get(key) ?? [];
     candidates.push(qboLine);
@@ -393,7 +395,9 @@ export default async function InventoryPage({
     const directCandidates = qboCandidatesByParentProduct.get(productKey) ?? [];
     const skuCandidates = allQboLineRows.filter((qboLine) => {
       const row = qboLine as { qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null };
-      return row.qbo_invoice_id === bridgeInvoiceId && normalizeQboSkuKey(row.qbo_sku) === normalizeQboSkuKey(line.legacy_item_code);
+      const qboKeys = normalizeQboSkuKeys(row.qbo_sku);
+      const lineKeys = normalizeQboSkuKeys(line.legacy_item_code);
+      return row.qbo_invoice_id === bridgeInvoiceId && qboKeys.some((key) => lineKeys.includes(key));
     });
     const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
     return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };
@@ -422,7 +426,7 @@ export default async function InventoryPage({
   const demandSkuCountsByProduct = new Map<string, Map<string, number>>();
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line) || !line.legacy_item_code) continue;
-    const candidate = line.legacy_item_code.trim().replace(/\s*\(deleted\)\s*$/i, "").toUpperCase();
+    const candidate = qboSkuCandidates(line.legacy_item_code).at(-1) ?? line.legacy_item_code.trim().toUpperCase();
     if (!candidate || /^\d+$/.test(candidate)) continue;
     const counts = demandSkuCountsByProduct.get(line.product_id) ?? new Map<string, number>();
     counts.set(candidate, (counts.get(candidate) ?? 0) + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)));

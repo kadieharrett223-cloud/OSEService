@@ -11,6 +11,7 @@ import {
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -1226,6 +1227,13 @@ export default async function OrderDetailPage({
     const line = item.shippingLine;
     const itemStatus = deriveItemStatus(item);
     const warehouseStatus = String(line?.warehouse_status ?? "").toUpperCase();
+    const assignedSupply = getAssignedSupplySnapshot(line);
+    if (assignedSupply) {
+      return {
+        ...assignedSupply,
+        coverage: line ? coverageByLineId.get(line.id) ?? null : null,
+      };
+    }
 
     if (line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(warehouseStatus) && (line.inventory_allocations?.length ?? 0) === 0) {
       return {

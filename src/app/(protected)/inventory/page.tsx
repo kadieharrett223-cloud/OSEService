@@ -149,6 +149,8 @@ type InventoryViewRow = {
     orderId: string;
     orderCreatedAt: string | null;
     firstPaymentAt: string | null;
+    sourceInvoiceId: string | null;
+    invoiceOrderedQty: number | null;
   }>;
 };
 
@@ -365,7 +367,7 @@ export default async function InventoryPage({
     if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
   }
   const { data: qboLineRows } = sourceInvoiceIds.length
-    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id").in("qbo_invoice_id", sourceInvoiceIds)
+    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", sourceInvoiceIds)
     : { data: [] };
   const { data: qboParentRows } = orderNumbers.length
     ? await supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,${duplicateParentField}${cancellationField}qbo_invoices(raw_payload)`).in("order_number", orderNumbers).eq("source_type", "QBO_INVOICE")
@@ -374,12 +376,18 @@ export default async function InventoryPage({
   const qboParentByOrderNumber = new Map(typedQboParentRows.filter((row) => !row.duplicate_of_order_id && String(row.cancellation_status ?? "").toUpperCase() !== "CANCELLED" && String(row.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() !== "VOIDED").map((row) => [String(row.order_number), row]));
   const qboParentInvoiceIds = [...new Set(typedQboParentRows.map((row) => row.source_invoice_id).filter(Boolean))] as string[];
   const extraQboLineRows = qboParentInvoiceIds.length
-    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id").in("qbo_invoice_id", qboParentInvoiceIds)
+    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", qboParentInvoiceIds)
     : { data: [] };
   const allQboLineRows = [...(qboLineRows ?? []), ...(extraQboLineRows.data ?? [])].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
+  const invoiceQtyByInvoiceProduct = new Map<string, number>();
   const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
-  for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null }>) {
+  for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty?: number | null }>) {
     const qboProductId = qboLine.product_id ?? normalizeQboSkuKeys(qboLine.qbo_sku).map((key) => productIdByAliasKey.get(key)).find(Boolean) ?? null;
+    const orderedQty = Math.max(0, Number(qboLine.ordered_qty ?? 0));
+    if (qboProductId && orderedQty > 0) {
+      const qtyKey = `${qboLine.qbo_invoice_id}|${qboProductId}`;
+      invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
+    }
     const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeSkuKey(qboLine.qbo_sku)}`;
     const candidates = qboCandidatesByParentProduct.get(key) ?? [];
     candidates.push(qboLine);
@@ -500,8 +508,16 @@ export default async function InventoryPage({
     if (!line.product_id || !isOpenQueueLine(line)) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
 
-    const openQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-    const qty = openQty;
+    const operationalOpenQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const sourceInvoiceId = line.shipping_orders?.source_invoice_id ?? null;
+    const invoiceOrderedQty = sourceInvoiceId && line.product_id
+      ? invoiceQtyByInvoiceProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? null
+      : null;
+    const shippedQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
+    const approvedQty = invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
+    const normalizedShippedQty = Math.min(approvedQty, shippedQty);
+    const openQty = Math.max(0, approvedQty - normalizedShippedQty);
+    const qty = approvedQty;
 
     const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
     const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name
@@ -509,7 +525,7 @@ export default async function InventoryPage({
       ?? line.shipping_orders?.legacy_customer_name
       ?? "Customer pending";
     const warehouseDisplay = getWarehouseDemandDisplay({
-      openQty,
+      openQty: operationalOpenQty,
       warehouseStatus: line.warehouse_status,
       willCall: line.shipping_orders?.fulfillment_method === "WILL_CALL",
     });
@@ -525,8 +541,8 @@ export default async function InventoryPage({
       waitingQty: warehouseDisplay.waitingQty,
       inWarehouse: warehouseDisplay.inWarehouse,
       willCall: warehouseDisplay.willCall,
-      approvedQty: Math.max(0, Number(line.approved_qty ?? 0)),
-      shippedQty: Math.max(0, Number(line.fulfilled_qty ?? 0)),
+      approvedQty,
+      shippedQty: normalizedShippedQty,
       invoice,
       customer,
       qty,
@@ -541,6 +557,8 @@ export default async function InventoryPage({
       orderId: line.shipping_orders?.id ?? "",
       orderCreatedAt: line.shipping_orders?.created_at ?? null,
       firstPaymentAt: line.shipping_orders?.first_payment_at ?? null,
+      sourceInvoiceId,
+      invoiceOrderedQty,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];
@@ -680,13 +698,13 @@ export default async function InventoryPage({
 
   const displayRows = Array.from(canonicalGroups.values())
     .map((group) => {
-      // Keep each logical product obligation distinct. An invoice can have multiple physical
-      // lines, and canonical display groups must never sum unrelated lines into one customer qty.
+      // Customer list displays one row per invoice/order for a product, and quantity is
+      // authoritative to invoice line quantities when available.
       const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
       for (const item of group.customerQueue) {
         const key = item.invoice && item.invoice !== "—"
-          ? `INVOICE:${item.invoice}|${item.logicalDemandKey}`.toUpperCase()
-          : `ORDER:${item.orderId}|${item.logicalDemandKey}`.toUpperCase();
+          ? `INVOICE:${item.invoice}`.toUpperCase()
+          : `ORDER:${item.orderId}`.toUpperCase();
         const existing = customerDemandByInvoice.get(key);
         if (!existing) {
           customerDemandByInvoice.set(key, { ...item });
@@ -697,9 +715,19 @@ export default async function InventoryPage({
         existing.waitingQty += item.waitingQty;
         existing.inWarehouse = existing.inWarehouse || item.inWarehouse;
         existing.willCall = existing.willCall || item.willCall;
-        existing.qty += item.qty;
-        existing.approvedQty += item.approvedQty;
+        existing.qty = Math.max(existing.qty, item.qty);
+        existing.approvedQty = Math.max(existing.approvedQty, item.approvedQty);
         existing.shippedQty += item.shippedQty;
+        existing.invoiceOrderedQty = existing.invoiceOrderedQty ?? item.invoiceOrderedQty;
+      }
+      for (const item of customerDemandByInvoice.values()) {
+        if (item.invoiceOrderedQty == null) continue;
+        const orderedQty = Math.max(0, Number(item.invoiceOrderedQty));
+        const shippedQty = Math.min(orderedQty, Math.max(0, item.shippedQty));
+        item.qty = orderedQty;
+        item.approvedQty = orderedQty;
+        item.shippedQty = shippedQty;
+        item.openQty = Math.max(0, orderedQty - shippedQty);
       }
       group.customerQueue = Array.from(customerDemandByInvoice.values());
       group.openDemand = group.customerQueue.reduce((sum, item) => sum + item.openQty, 0);

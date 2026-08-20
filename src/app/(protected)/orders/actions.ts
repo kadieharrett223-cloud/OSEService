@@ -73,8 +73,10 @@ export async function cancelVoidedOrderAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
   if (!orderId || confirmation !== "CONFIRM_CANCEL_VOIDED") redirect(`/exceptions?error=Cancellation+confirmation+required`);
   if (!(await isVoidedQuickBooksOrder(adminClient, orderId))) redirect(`/exceptions?error=Only+voided+QuickBooks+orders+can+be+cancelled+from+ERP+Health`);
+  const { data: affectedLines } = await adminClient.from("shipping_order_lines").select("product_id").eq("shipping_order_id", orderId).not("product_id", "is", null);
   const { error } = await adminClient.rpc("cancel_voided_order", { p_order_id: orderId, p_reason: "Voided in QuickBooks" } as never);
   if (error) redirect(`/exceptions?error=${encodeURIComponent(error.message)}`);
+  await recalculateProductQueues((affectedLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
   revalidatePath("/exceptions");
   revalidatePath("/orders");
   revalidatePath("/inventory");

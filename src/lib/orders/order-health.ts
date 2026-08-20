@@ -3,6 +3,8 @@ export type HealthSeverity = "INFO" | "WARNING" | "ERROR";
 export type OrderHealthIssue = {
   severity: HealthSeverity;
   code: string;
+  lineId?: string;
+  warehouseStatus?: string | null;
   product: string | null;
   issue: string;
   expected: string;
@@ -60,15 +62,16 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     const open = remaining(line);
     const shipped = shipmentQtyByLine.get(line.id) ?? 0;
     const status = upper(line.fulfillment_status);
-    if (!line.product_id && open > 0) issues.push({ severity: "ERROR", code: "UNMAPPED_PHYSICAL_LINE", product, issue: "Physical demand line has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Inventory and shipment actions cannot identify the product." });
-    if (line.queue_position_count != null && Number(line.queue_position_count) !== open) issues.push({ severity: "WARNING", code: "QUEUE_COUNT_MISMATCH", product, issue: "Queue range count does not match remaining quantity", expected: String(open), actual: String(line.queue_position_count), cause: "Queue metadata is stale or represents a different logical line." });
-    if (open > 0 && line.queue_position_start == null && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))) issues.push({ severity: "WARNING", code: "QUEUE_POSITION_MISSING", product, issue: "Open approved line has no queue position", expected: "Assigned queue position", actual: "Missing", cause: "The positions-only queue calculation has not assigned this line." });
+    const context = { lineId: line.id, warehouseStatus: line.warehouse_status };
+    if (!line.product_id && open > 0) issues.push({ ...context, severity: "ERROR", code: "UNMAPPED_PHYSICAL_LINE", product, issue: "Physical demand line has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Inventory and shipment actions cannot identify the product." });
+    if (line.queue_position_count != null && Number(line.queue_position_count) !== open) issues.push({ ...context, severity: "WARNING", code: "QUEUE_COUNT_MISMATCH", product, issue: "Queue range count does not match remaining quantity", expected: String(open), actual: String(line.queue_position_count), cause: "Queue metadata is stale or represents a different logical line." });
+    if (open > 0 && line.queue_position_start == null && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))) issues.push({ ...context, severity: "WARNING", code: "QUEUE_POSITION_MISSING", product, issue: "Open approved line has no queue position", expected: "Assigned queue position", actual: "Missing", cause: "The positions-only queue calculation has not assigned this line." });
     const reserved = (line.inventory_allocations ?? []).reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
-    if (reserved > open && open > 0) issues.push({ severity: "ERROR", code: "RESERVATION_EXCEEDS_DEMAND", product, issue: "Reservation exceeds remaining demand", expected: `<= ${open}`, actual: String(reserved), cause: "Allocation state is ahead of customer-line state." });
-    if (reserved > 0 && open <= 0) issues.push({ severity: "ERROR", code: "FULFILLED_RESERVATION", product, issue: "Fulfilled line still has an active reservation", expected: "0 reserved", actual: String(reserved), cause: "Reservation was not released after fulfillment." });
-    if (shipped > Number(line.approved_qty ?? line.ordered_qty ?? 0)) issues.push({ severity: "ERROR", code: "SHIPMENT_EXCEEDS_DEMAND", product, issue: "Shipment quantity exceeds ordered demand", expected: `<= ${line.approved_qty ?? line.ordered_qty ?? 0}`, actual: String(shipped), cause: "Shipment history and order-line demand disagree." });
-    if (Math.abs(shipped - Number(line.fulfilled_qty ?? 0)) > 0.001) issues.push({ severity: "ERROR", code: "FULFILLMENT_TOTAL_MISMATCH", product, issue: "Fulfilled quantity does not equal shipment history", expected: String(line.fulfilled_qty ?? 0), actual: String(shipped), cause: "A shipment or fulfillment record is missing or duplicated." });
-    if (status === "FULFILLED" && open > 0) issues.push({ severity: "ERROR", code: "FULFILLED_WITH_OPEN_DEMAND", product, issue: "Line is marked fulfilled but still has remaining demand", expected: "0 remaining", actual: String(open), cause: "Fulfillment status and quantities disagree." });
+    if (reserved > open && open > 0) issues.push({ ...context, severity: "ERROR", code: "RESERVATION_EXCEEDS_DEMAND", product, issue: "Reservation exceeds remaining demand", expected: `<= ${open}`, actual: String(reserved), cause: "Allocation state is ahead of customer-line state." });
+    if (reserved > 0 && open <= 0) issues.push({ ...context, severity: "ERROR", code: "FULFILLED_RESERVATION", product, issue: "Fulfilled line still has an active reservation", expected: "0 reserved", actual: String(reserved), cause: "Reservation was not released after fulfillment." });
+    if (shipped > Number(line.approved_qty ?? line.ordered_qty ?? 0)) issues.push({ ...context, severity: "ERROR", code: "SHIPMENT_EXCEEDS_DEMAND", product, issue: "Shipment quantity exceeds ordered demand", expected: `<= ${line.approved_qty ?? line.ordered_qty ?? 0}`, actual: String(shipped), cause: "Shipment history and order-line demand disagree." });
+    if (Math.abs(shipped - Number(line.fulfilled_qty ?? 0)) > 0.001) issues.push({ ...context, severity: "ERROR", code: "FULFILLMENT_TOTAL_MISMATCH", product, issue: "Fulfilled quantity does not equal shipment history", expected: String(line.fulfilled_qty ?? 0), actual: String(shipped), cause: "A shipment or fulfillment record is missing or duplicated." });
+    if (status === "FULFILLED" && open > 0) issues.push({ ...context, severity: "ERROR", code: "FULFILLED_WITH_OPEN_DEMAND", product, issue: "Line is marked fulfilled but still has remaining demand", expected: "0 remaining", actual: String(open), cause: "Fulfillment status and quantities disagree." });
   }
 
   return issues;

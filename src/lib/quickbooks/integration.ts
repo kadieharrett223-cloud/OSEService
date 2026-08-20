@@ -16,6 +16,7 @@ type ConnectionRow = {
   last_sync_at: string | null;
   last_sync_status: string | null;
   last_sync_error: string | null;
+  invoice_sync_cursor_at: string | null;
   updated_at: string;
 };
 
@@ -391,14 +392,25 @@ export async function disconnectQuickbooksConnection() {
 
 async function loadConnectionForSync() {
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("quickbooks_connections")
-    .select("id, realm_id, environment, status, encrypted_access_token, encrypted_refresh_token, access_token_expires_at")
+    .select("id, realm_id, environment, status, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, invoice_sync_cursor_at")
     .eq("status", "connected")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
+  if (error && error.code === "42703") {
+    const fallback = await supabase
+      .from("quickbooks_connections")
+      .select("id, realm_id, environment, status, encrypted_access_token, encrypted_refresh_token, access_token_expires_at")
+      .eq("status", "connected")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    data = (fallback.data ? { ...fallback.data, invoice_sync_cursor_at: null } : null) as unknown as typeof data;
+    error = fallback.error;
+  }
   if (error) {
     throw new Error(error.message);
   }
@@ -407,7 +419,7 @@ async function loadConnectionForSync() {
     throw new Error("QuickBooks is not connected yet.");
   }
 
-  return data as Pick<ConnectionRow, "id" | "realm_id" | "environment" | "status" | "encrypted_access_token" | "encrypted_refresh_token" | "access_token_expires_at">;
+  return data as unknown as Pick<ConnectionRow, "id" | "realm_id" | "environment" | "status" | "encrypted_access_token" | "encrypted_refresh_token" | "access_token_expires_at" | "invoice_sync_cursor_at">;
 }
 
 async function persistRefreshedTokens(connectionId: string, tokenPayload: TokenResponse) {
@@ -462,10 +474,12 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   const pageSize = 200;
   const maxPages = 50;
   const invoices: Array<Record<string, unknown>> = [];
+  const cursor = connection.invoice_sync_cursor_at;
 
   for (let page = 0; page < maxPages; page += 1) {
     const startPosition = page * pageSize + 1;
-    const qboQuery = `select * from Invoice startposition ${startPosition} maxresults ${pageSize}`;
+    const cursorFilter = cursor ? ` where Metadata.LastUpdatedTime > '${cursor}'` : "";
+    const qboQuery = `select * from Invoice${cursorFilter} order by Metadata.LastUpdatedTime startposition ${startPosition} maxresults ${pageSize}`;
 
     const payload = await fetchQuickbooksQuery({
       apiBase,
@@ -865,14 +879,16 @@ export async function syncQuickbooksInvoices() {
     const result = await syncQuickbooksSnapshots(connection, accessToken);
     const paymentResult = await syncQuickbooksFirstPaymentDates(connection, accessToken);
 
-    const { error } = await supabase
-      .from("quickbooks_connections")
-      .update({
+    const syncCursorAt = new Date().toISOString();
+      const { error } = await supabase
+        .from("quickbooks_connections")
+        .update({
         last_sync_at: new Date().toISOString(),
+        invoice_sync_cursor_at: syncCursorAt,
         last_sync_status: "success",
         last_sync_error: null,
-      })
-      .eq("id", connection.id);
+        } as never)
+        .eq("id", connection.id);
 
     if (error) {
       throw new Error(error.message);

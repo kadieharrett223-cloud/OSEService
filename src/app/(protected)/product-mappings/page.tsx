@@ -85,8 +85,8 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
       {params.error ? <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">{params.error}</div> : null}
       {queueError || productsError ? <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">Manual mapping queue is unavailable until its migration is applied.</div> : null}
 
-      <div className="overflow-x-auto rounded-2xl border border-[#e5e7eb] bg-white shadow-sm">
-        <table className="w-full min-w-[1100px] text-left text-sm">
+      <div className="rounded-2xl border border-[#e5e7eb] bg-white shadow-sm">
+        <table className="w-full table-fixed text-left text-sm">
           <thead className="bg-[#f8fafc]">
             <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
               <th className="px-4 py-3">Source SKU</th>
@@ -102,16 +102,17 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
             {mappingGroups.map((entry) => (
               <tr key={entry.id} className="border-b border-[#f1f5f9] align-top last:border-0">
                 <td className="px-4 py-4 font-semibold text-[#111827]">{entry.source_sku}</td>
-                <td className="max-w-[320px] px-4 py-4 text-[#475569]">{entry.source_description ?? "—"}</td>
+                <td className="px-4 py-4 text-[#475569] break-words">{entry.source_description ?? "—"}</td>
                 <td className="px-4 py-4 text-[#475569]">{entry.customer_name ?? "—"}<div className="text-xs">Invoice {entry.invoice_number ?? "—"}</div></td>
                 <td className="px-4 py-4 font-semibold">{entry.quantity}</td>
                 <td className="px-4 py-4 text-xs text-[#64748b]">{entry.current_product_id ?? "Unmapped / ambiguous"}</td>
                 <td className="px-4 py-4">
                   <form id={`mapping-${entry.id}`} action={resolveProductMappingForSkuAction} className="space-y-2">
                     <input type="hidden" name="sourceSku" value={entry.source_sku} />
+                    <input type="hidden" name="sourceDescription" value={entry.source_description ?? ""} />
                     {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
                     <ProductPicker products={products ?? []} />
-                    <input name="resolutionNote" placeholder="Reason / evidence (optional)" className="input min-w-[280px]" />
+                    <input name="resolutionNote" placeholder="Reason / evidence (optional)" className="input w-full" />
                   </form>
                 </td>
                 <td className="px-4 py-4"><button form={`mapping-${entry.id}`} type="submit" className="btn-primary">Save</button></td>
@@ -128,6 +129,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
           <p className="mt-1 text-sm text-[#5a5a5a]">{focusedSourceSku}{focusedDescription ? ` — ${focusedDescription}` : ""}</p>
           <form action={createFocusedProductMappingAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
             <input type="hidden" name="sourceSku" value={focusedSourceSku} />
+            <input type="hidden" name="sourceDescription" value={focusedDescription} />
             {params.order_id ? <input type="hidden" name="returnTo" value={`/orders/${params.order_id}`} /> : null}
             <label className="text-xs font-semibold text-[#64748b]">Select the matching inventory item<ProductPicker products={products ?? []} /></label>
             <button type="submit" className="btn-primary">Save Mapping</button>

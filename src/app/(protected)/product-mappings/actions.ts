@@ -18,6 +18,39 @@ function value(formData: FormData, key: string) {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+function aliasCandidates(sourceSku: string, sourceDescription: string) {
+  const candidates = new Set<string>();
+  const sku = sourceSku.trim().toUpperCase();
+  if (sku) candidates.add(sku);
+
+  const description = sourceDescription.trim().toUpperCase();
+  const skuLikeMatches = description.match(/\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b/g) ?? [];
+  for (const match of skuLikeMatches) {
+    if (match.length >= 3) candidates.add(match);
+  }
+
+  return [...candidates];
+}
+
+async function upsertManualAliases(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  productId: string,
+  aliases: string[],
+  sourceRef: string,
+) {
+  if (!aliases.length) return;
+
+  const payload = aliases.map((alias) => ({
+    product_id: productId,
+    alias,
+    source_type: "manual",
+    source_ref: sourceRef,
+  }));
+
+  const { error } = await supabase.from("product_aliases").upsert(payload, { onConflict: "product_id,alias,source_type" });
+  if (error) throw error;
+}
+
 export async function resolveManualProductMappingAction(formData: FormData) {
   await requireUser();
   const queueId = value(formData, "queueId");
@@ -78,6 +111,7 @@ export async function createFocusedProductMappingAction(formData: FormData) {
   await requireUser();
 
   const sourceSku = value(formData, "sourceSku");
+  const sourceDescription = value(formData, "sourceDescription");
   const productId = value(formData, "productId");
   const returnTo = value(formData, "returnTo");
   if (!sourceSku || !productId) {
@@ -85,15 +119,15 @@ export async function createFocusedProductMappingAction(formData: FormData) {
   }
 
   const supabase = getSupabaseAdmin();
-  const { error } = await supabase.from("product_aliases").upsert({
-    product_id: productId,
-    alias: sourceSku,
-    source_type: "manual",
-    source_ref: returnTo || `FOCUSED:${sourceSku}`,
-  }, { onConflict: "product_id,alias,source_type" });
-
-  if (error) {
-    redirect(`/product-mappings?error=${encodeURIComponent(error.message)}`);
+  try {
+    await upsertManualAliases(
+      supabase,
+      productId,
+      aliasCandidates(sourceSku, sourceDescription),
+      returnTo || `FOCUSED:${sourceSku}`,
+    );
+  } catch (error) {
+    redirect(`/product-mappings?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to save aliases")}`);
   }
 
   revalidatePath("/product-mappings");
@@ -108,6 +142,7 @@ export async function createFocusedProductMappingAction(formData: FormData) {
 export async function resolveProductMappingForSkuAction(formData: FormData) {
   await requireUser();
   const sourceSku = value(formData, "sourceSku");
+  const sourceDescription = value(formData, "sourceDescription");
   const productId = value(formData, "productId");
   const note = value(formData, "resolutionNote");
   const supabase = getSupabaseAdmin();
@@ -116,13 +151,16 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
     redirect("/product-mappings?error=Select+a+canonical+product");
   }
 
-  const { error: aliasError } = await supabase.from("product_aliases").upsert({
-    product_id: productId,
-    alias: sourceSku,
-    source_type: "manual",
-    source_ref: `SKU:${sourceSku}`,
-  }, { onConflict: "product_id,alias,source_type" });
-  if (aliasError) redirect(`/product-mappings?error=${encodeURIComponent(aliasError.message)}`);
+  try {
+    await upsertManualAliases(
+      supabase,
+      productId,
+      aliasCandidates(sourceSku, sourceDescription),
+      `SKU:${sourceSku}`,
+    );
+  } catch (error) {
+    redirect(`/product-mappings?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to save aliases")}`);
+  }
 
   const queueTable = supabase.from("manual_product_mapping_queue") as any;
   const { error: queueError } = await queueTable

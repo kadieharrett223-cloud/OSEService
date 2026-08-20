@@ -1417,6 +1417,7 @@ export default async function OrderDetailPage({
         <div className="rounded-lg border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</div>
       ) : null}
 
+      <ShipmentSelectionProvider>
       <div className="rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <div className="min-w-0 flex-1">
@@ -1437,6 +1438,9 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
+            {!isServiceOnlyOrder ? (
+              <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
+            ) : null}
             {shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
@@ -1470,7 +1474,6 @@ export default async function OrderDetailPage({
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3.2fr)_minmax(180px,0.58fr)]">
         <div className="flex min-w-0 flex-col space-y-4">
-          <ShipmentSelectionProvider>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -1482,10 +1485,8 @@ export default async function OrderDetailPage({
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
                 {isServiceOnlyOrder ? (
                   <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>
-                ) : hasShippableLines ? (
-                  <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
                 ) : (
-                  <span className="rounded-full bg-[#fff7e6] px-3 py-1.5 text-[#b45309]">Awaiting review</span>
+                  <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
                 )}
               </div>
             </div>
@@ -1499,7 +1500,7 @@ export default async function OrderDetailPage({
 
             <div className="mt-4 overflow-x-auto">
               <div className="min-w-full">
-                <div className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] gap-1.5 border-b border-[#edf2f7] px-2 py-2 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-[#64748b]">
+                <div className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] gap-1.5 border-b border-[#edf2f7] px-2 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-[#64748b]">
                   <span>Item</span>
                   <span>Ord.</span>
                   <span>Shp.</span>
@@ -1542,23 +1543,23 @@ export default async function OrderDetailPage({
                     const inferredSource = String(line?.fulfillment_source ?? (line?.inventory_allocations?.[0]?.source_type === "CONTAINER" ? "CONTAINER" : line?.inventory_allocations?.[0]?.source_type === "FLOOR" ? "WAREHOUSE" : "WAREHOUSE")).toUpperCase();
                     const assignmentSourceDefault = inferredSource === "DROPSHIP" || inferredSource === "OTHER" || inferredSource === "CONTAINER" ? inferredSource : "WAREHOUSE";
                     const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
-                    const descriptionSummary = truncateText(item.description, 84);
+                    const descriptionSummary = truncateText(item.description, 30);
                     const isWarehouseFulfillment = assignmentSourceDefault === "WAREHOUSE";
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-start gap-1.5 px-2 py-2.5 text-sm text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-start gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
-                            <span className="mt-1 block text-[11px] text-[#64748b]">{descriptionSummary}</span>
+                            <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
                           <span className="text-[12px]">{item.orderedQty}</span>
                           <span className="text-[12px]">{fulfilled}</span>
                           <span className="text-[12px]">{needed}</span>
                           <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
-                          <span className="text-[10px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
-                          <span><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
+                          <span className="text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
+                          <span><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
@@ -1671,7 +1672,6 @@ export default async function OrderDetailPage({
             </div>
             <ShipmentSelectionComposer orderId={orderRecord.id} pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
           </section>
-          </ShipmentSelectionProvider>
 
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="shipments">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1790,6 +1790,7 @@ export default async function OrderDetailPage({
           </section>
         </aside>
       </div>
+      </ShipmentSelectionProvider>
     </div>
   );
 }

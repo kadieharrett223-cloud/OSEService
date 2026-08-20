@@ -46,6 +46,8 @@ function isUuid(value: string) {
 type AuditDetails = Record<string, string | number | boolean | null>;
 
 const ALLOWED_ATTACHMENT_EXTENSIONS = new Set(["jpg", "jpeg", "png", "heic", "pdf", "mp4"]);
+const NO_SHIPPABLE_LINES_ERROR = "No remaining physical inventory lines available for shipment selection";
+const CLOSED_FULFILLMENT_STATES = new Set(["FULFILLED", "CANCELLED", "REMOVED", "DENIED"]);
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -56,6 +58,42 @@ function getPositiveNumber(formData: FormData, key: string) {
   const raw = Number(getString(formData, key) ?? "0");
   if (!Number.isFinite(raw) || raw <= 0) return 0;
   return raw;
+}
+
+async function hasRemainingShippableLinesForOrder(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+) {
+  const lineColumnSet = await loadTableColumnSet(supabase, "shipping_order_lines", ["fulfillment_source"]);
+  const selectFields = lineColumnSet.has("fulfillment_source")
+    ? "id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source"
+    : "id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status";
+  const { data, error } = await supabase
+    .from("shipping_order_lines")
+    .select(selectFields)
+    .eq("shipping_order_id", orderId);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const rows = (data ?? []) as unknown as Array<{
+    product_id: string | null;
+    ordered_qty: number | null;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+    fulfillment_status: string | null;
+    fulfillment_source?: string | null;
+  }>;
+
+  return rows.some((line) => {
+    if (!line.product_id) return false;
+    if (!shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE")) return false;
+    const basis = Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0));
+    const remaining = Math.max(0, basis - Number(line.fulfilled_qty ?? 0));
+    if (remaining <= 0) return false;
+    return !CLOSED_FULFILLMENT_STATES.has(String(line.fulfillment_status ?? "").trim().toUpperCase());
+  });
 }
 
 export async function completeServiceOnlyOrderAction(formData: FormData) {
@@ -1182,7 +1220,12 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   const selectedIds = formData.getAll("line_id").map((value) => String(value).trim()).filter(Boolean);
   const adminClient = getSupabaseAdmin();
 
-  if (!orderId || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
+  if (!orderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
+  if (selectedIds.length === 0) {
+    const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
+    if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
+    redirect(`/orders/${orderId}?error=Select+at+least+one+mapped+item+to+ship`);
+  }
   if (!trackingNumber) redirect(`/orders/${orderId}?error=Tracking+number+is+required`);
   if (!shipmentDate) redirect(`/orders/${orderId}?error=Shipment+date+is+required`);
 
@@ -1270,7 +1313,12 @@ export async function completeOrderShipmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes");
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
-  if (!orderId || !shipmentDate || !idempotencyKey || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
+  if (!orderId || !shipmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
+  if (selectedIds.length === 0) {
+    const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
+    if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
+    redirect(`/orders/${orderId}?error=Select+shipment+items+and+a+ship+date`);
+  }
 
   const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);

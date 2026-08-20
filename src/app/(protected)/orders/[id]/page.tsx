@@ -717,6 +717,7 @@ export default async function OrderDetailPage({
   const supabase = getSupabaseAdmin();
   const { id } = await params;
   const { error, message } = await searchParams;
+  const normalizedError = String(error ?? "").replace(/\+/g, " ").toLowerCase();
 
   const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
     "fulfillment_method",
@@ -1363,6 +1364,9 @@ export default async function OrderDetailPage({
   const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
+  const showNoShippableLinesNotice = !hasShippableLines
+    && !isServiceOnlyOrder
+    && normalizedError.includes("no remaining physical inventory lines available for shipment selection");
   const overallStatus = totalUnitsNeeded === 0 && totalEligibleInventoryUnits > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
@@ -1482,7 +1486,7 @@ export default async function OrderDetailPage({
               </div>
             </div>
 
-            {!hasShippableLines && !isServiceOnlyOrder ? (
+            {showNoShippableLinesNotice ? (
               <div className="mt-4 rounded-lg border border-[#f4d9a8] bg-[#fffaf0] p-3 text-sm text-[#8a5a00]">
                 There are no remaining physical inventory lines available for shipment selection.
                 Service lines and lines without a valid product mapping must be resolved before they can be shipped.

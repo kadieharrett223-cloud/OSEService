@@ -26,6 +26,8 @@ import { AutoSubmitSelect } from "./auto-submit-select";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
 import { ShipmentHistoryCard } from "./shipment-history-card";
 import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionComposer, ShipmentSelectionProvider } from "./shipment-selection";
+import { OrderHealthPanel } from "./order-health-panel";
+import { evaluateOrderHealth } from "@/lib/orders/order-health";
 
 type OrderDetailRow = {
   id: string;
@@ -853,6 +855,11 @@ export default async function OrderDetailPage({
     }
   }
   const shipmentLog = [...shipments, ...historicalShipments.values()];
+  const orderHealthIssues = evaluateOrderHealth({
+    lines: orderLines,
+    shipments: shipmentLog.map((shipment) => ({ lines: (shipment.lines ?? []).map((line) => ({ shipping_order_line_id: line.shipping_order_line_id, quantity: line.quantity })) })),
+    qboVoided: String(quickbooksSnapshot?.raw_payload && typeof quickbooksSnapshot.raw_payload === "object" ? (quickbooksSnapshot.raw_payload as { PrivateNote?: unknown }).PrivateNote : "").trim().toUpperCase() === "VOIDED",
+  });
   const editableShipmentLinesByShipment = new Map<string, Array<{ id: string; sku: string; productName: string | null; currentQty: number; maxQty: number }>>();
   for (const shipment of shipments) {
     const editableLines = buildShipmentEditLineState(
@@ -1402,6 +1409,7 @@ export default async function OrderDetailPage({
               <span className="font-normal text-[#64748b]">· {formatDate(orderRecord.created_at)} · {orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</span>
             </div>
             <p className="mt-1 truncate text-xs text-[#64748b]">{contactAddress}</p>
+            <div className="mt-3"><OrderHealthPanel issues={orderHealthIssues} /></div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>

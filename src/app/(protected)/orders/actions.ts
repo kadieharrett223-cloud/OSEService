@@ -823,6 +823,75 @@ export async function addOrderNoteAction(formData: FormData) {
   redirect(`/orders/${orderId}`);
 }
 
+export async function remapOrderLineProductAction(formData: FormData) {
+  await requireUser();
+
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  const productId = getString(formData, "productId");
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !lineId || !productId) {
+    redirect(`/orders/${orderId ?? ""}?error=Select+a+product+to+map`);
+  }
+
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, shipping_order_id, product_id")
+    .eq("id", lineId)
+    .maybeSingle();
+
+  const lineRow = line as { id: string; shipping_order_id: string; product_id: string | null } | null;
+  if (lineError || !lineRow || lineRow.shipping_order_id !== orderId) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+  }
+
+  const { data: product, error: productError } = await adminClient
+    .from("products")
+    .select("id")
+    .eq("id", productId)
+    .maybeSingle();
+  if (productError || !product) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(productError?.message ?? "Selected product was not found")}`);
+  }
+
+  if (lineRow.product_id === productId) {
+    redirect(`/orders/${orderId}?message=Line+already+mapped+to+selected+product`);
+  }
+
+  const lineColumnSet = await loadTableColumnSet(adminClient, "shipping_order_lines", ["legacy_matched_item_code"]);
+  const mappedSku = getString(formData, "mappedSku")?.trim() || null;
+  const payload = lineColumnSet.has("legacy_matched_item_code")
+    ? { product_id: productId, legacy_matched_item_code: mappedSku }
+    : { product_id: productId };
+
+  const { error: updateError } = await adminClient
+    .from("shipping_order_lines")
+    .update(payload as never)
+    .eq("id", lineId);
+  if (updateError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  if (lineRow.product_id) {
+    await recalculateProductQueues([lineRow.product_id]);
+  }
+  await recalculateProductQueues([productId]);
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_LINE_PRODUCT_REASSIGNED", {
+    line_id: lineId,
+    previous_product_id: lineRow.product_id,
+    next_product_id: productId,
+    mapped_sku: mappedSku,
+  });
+
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath("/product-mappings");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Product+mapping+updated+for+this+order+line`);
+}
+
 export async function updateOrderLineAssignmentAction(formData: FormData) {
   await requireUser();
 

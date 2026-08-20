@@ -1190,7 +1190,6 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
-  if (await isVoidedQuickBooksOrder(adminClient, orderId)) redirect(`/orders/${orderId}?error=This+QuickBooks+invoice+is+voided+and+cannot+be+fulfilled`);
   if (!trackingNumber) redirect(`/orders/${orderId}?error=Tracking+number+is+required`);
   if (!shipmentDate) redirect(`/orders/${orderId}?error=Shipment+date+is+required`);
 
@@ -1279,7 +1278,6 @@ export async function completeOrderShipmentAction(formData: FormData) {
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
   if (!orderId || !shipmentDate || !idempotencyKey || selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
-  if (await isVoidedQuickBooksOrder(adminClient, orderId)) redirect(`/orders/${orderId}?error=This+QuickBooks+invoice+is+voided+and+cannot+be+fulfilled`);
 
   const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);

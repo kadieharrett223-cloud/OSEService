@@ -49,6 +49,18 @@ describe("re-entering a QuickBooks invoice", () => {
     ]);
   });
 
+  it("creates one operational unit for mapped physical QBO lines that import with zero quantity", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-zero", qbo_line_id: "9", product_id: null, ordered_qty: 0, qbo_sku: "2PCFHD-12 (deleted-1)" })],
+      [],
+      new Map([["2PCFHD-12", "product-lift"]]),
+    );
+
+    expect(plan.inserts).toEqual([
+      { qboInvoiceLineId: "inv-line-zero", productId: "product-lift", orderedQty: 1, qboSku: "2PCFHD-12 (deleted-1)", qboLineId: "9" },
+    ]);
+  });
+
   it("resolves an unmapped invoice line through product aliases", () => {
     const plan = planQuickbooksOrderRefresh([invoiceLine({ id: "inv-line-3", product_id: null, qbo_sku: "jvcj-6" })], [], aliases);
     expect(plan.inserts[0]?.productId).toBe("product-jack");

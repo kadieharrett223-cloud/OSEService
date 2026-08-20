@@ -73,7 +73,8 @@ export function planQuickbooksOrderRefresh(
     const productId = invoiceLine.product_id
       ?? qboSkuCandidates(invoiceLine.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
       ?? null;
-    const orderedQty = Math.max(0, Number(invoiceLine.ordered_qty ?? 0));
+    const rawOrderedQty = Number(invoiceLine.ordered_qty ?? 0);
+    const orderedQty = rawOrderedQty > 0 ? rawOrderedQty : 1;
     const existing = existingByInvoiceLine.get(invoiceLine.id);
 
     if (existing) {

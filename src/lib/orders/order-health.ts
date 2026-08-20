@@ -35,9 +35,16 @@ export type HealthShipment = {
   lines?: Array<{ shipping_order_line_id: string; quantity: number | null }>;
 };
 
+export type HealthFulfillmentEvidence = {
+  shipping_order_line_id: string;
+  fulfilled_qty: number | null;
+  fulfillment_type?: string | null;
+};
+
 export type OrderHealthInput = {
   lines: HealthLine[];
   shipments?: HealthShipment[];
+  fulfillments?: HealthFulfillmentEvidence[];
   qboLines?: Array<{ qbo_sku?: string | null; ordered_qty?: number | null; product_id?: string | null }>;
   qboVoided?: boolean;
   cancelled?: boolean;
@@ -53,6 +60,12 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
   for (const shipment of input.shipments ?? []) {
     for (const line of shipment.lines ?? []) shipmentQtyByLine.set(line.shipping_order_line_id, (shipmentQtyByLine.get(line.shipping_order_line_id) ?? 0) + Number(line.quantity ?? 0));
   }
+  const fulfillmentEvidenceQtyByLine = new Map(shipmentQtyByLine);
+  for (const fulfillment of input.fulfillments ?? []) {
+    const type = upper(fulfillment.fulfillment_type);
+    if (!["PICKUP", "DROPSHIP", "OTHER"].includes(type)) continue;
+    fulfillmentEvidenceQtyByLine.set(fulfillment.shipping_order_line_id, (fulfillmentEvidenceQtyByLine.get(fulfillment.shipping_order_line_id) ?? 0) + Number(fulfillment.fulfilled_qty ?? 0));
+  }
 
   if (input.qboVoided && !input.cancelled) {
     issues.push({ severity: "ERROR", code: "VOIDED_ACTIVE", product: null, issue: "QuickBooks invoice is voided but the ERP order is not cancelled", expected: "Cancelled", actual: "Active", cause: "The invoice status changed after import." });
@@ -61,9 +74,9 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     const product = productLabel(line);
     const open = remaining(line);
     const shipped = shipmentQtyByLine.get(line.id) ?? 0;
+    const fulfilledEvidence = fulfillmentEvidenceQtyByLine.get(line.id) ?? 0;
     const status = upper(line.fulfillment_status);
     const context = { lineId: line.id, warehouseStatus: line.warehouse_status };
-    if (upper(line.fulfillment_source) === "CONTAINER" && !(line.inventory_allocations ?? []).some((allocation) => upper(allocation.source_type) === "CONTAINER")) issues.push({ ...context, severity: "ERROR", code: "CONTAINER_SOURCE_UNASSIGNED", product, issue: "Container fulfillment source has no container allocation", expected: "Assigned container", actual: "No container", cause: "Select a specific inbound container before saving this source." });
     if (upper(line.fulfillment_source) === "DROPSHIP" && !line.fulfillment_supplier) issues.push({ ...context, severity: "WARNING", code: "DROPSHIP_SUPPLIER_MISSING", product, issue: "Dropship source has no supplier detail", expected: "Supplier/vendor", actual: "Missing", cause: "Add the supplier before relying on this fulfillment source." });
     if (upper(line.fulfillment_source) === "OTHER" && !line.fulfillment_notes) issues.push({ ...context, severity: "WARNING", code: "OTHER_SOURCE_NOTE_MISSING", product, issue: "Other fulfillment source has no note", expected: "Source note", actual: "Missing", cause: "Explain how this line will be fulfilled." });
     if (upper(line.fulfillment_source) === "WAREHOUSE" && !line.product_id) issues.push({ ...context, severity: "ERROR", code: "WAREHOUSE_SOURCE_UNMAPPED", product, issue: "Warehouse source has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Warehouse fulfillment cannot identify physical inventory." });
@@ -74,7 +87,7 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     if (reserved > open && open > 0) issues.push({ ...context, severity: "ERROR", code: "RESERVATION_EXCEEDS_DEMAND", product, issue: "Reservation exceeds remaining demand", expected: `<= ${open}`, actual: String(reserved), cause: "Allocation state is ahead of customer-line state." });
     if (reserved > 0 && open <= 0) issues.push({ ...context, severity: "ERROR", code: "FULFILLED_RESERVATION", product, issue: "Fulfilled line still has an active reservation", expected: "0 reserved", actual: String(reserved), cause: "Reservation was not released after fulfillment." });
     if (shipped > Number(line.approved_qty ?? line.ordered_qty ?? 0)) issues.push({ ...context, severity: "ERROR", code: "SHIPMENT_EXCEEDS_DEMAND", product, issue: "Shipment quantity exceeds ordered demand", expected: `<= ${line.approved_qty ?? line.ordered_qty ?? 0}`, actual: String(shipped), cause: "Shipment history and order-line demand disagree." });
-    if (Math.abs(shipped - Number(line.fulfilled_qty ?? 0)) > 0.001) issues.push({ ...context, severity: "ERROR", code: "FULFILLMENT_TOTAL_MISMATCH", product, issue: "Fulfilled quantity does not equal shipment history", expected: String(line.fulfilled_qty ?? 0), actual: String(shipped), cause: "A shipment or fulfillment record is missing or duplicated." });
+    if (Math.abs(fulfilledEvidence - Number(line.fulfilled_qty ?? 0)) > 0.001) issues.push({ ...context, severity: "ERROR", code: "FULFILLMENT_TOTAL_MISMATCH", product, issue: "Fulfilled quantity does not equal fulfillment evidence", expected: String(line.fulfilled_qty ?? 0), actual: String(fulfilledEvidence), cause: "A shipment, pickup, dropship, or manual fulfillment record is missing or duplicated." });
     if (status === "FULFILLED" && open > 0) issues.push({ ...context, severity: "ERROR", code: "FULFILLED_WITH_OPEN_DEMAND", product, issue: "Line is marked fulfilled but still has remaining demand", expected: "0 remaining", actual: String(open), cause: "Fulfillment status and quantities disagree." });
   }
 

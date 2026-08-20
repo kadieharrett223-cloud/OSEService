@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
+import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
 import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 
@@ -797,7 +798,6 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const orderId = getString(formData, "orderId");
   const lineId = getString(formData, "lineId");
   const source = (getString(formData, "assignment_source") ?? "UNASSIGNED").toUpperCase();
-  const containerId = getString(formData, "container_id");
   const supplier = getString(formData, "fulfillment_supplier")?.trim() || null;
   const reference = getString(formData, "fulfillment_reference")?.trim() || null;
   const tracking = getString(formData, "fulfillment_tracking")?.trim() || null;
@@ -809,9 +809,10 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     redirect(`/orders/${orderId ?? ""}`);
   }
 
-  if (source === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
-  if (source === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
-  if (source === "CONTAINER" && !containerId) redirect(`/orders/${orderId}?error=Container+selection+required`);
+  const normalizedSource = normalizeFulfillmentSource(source);
+  if (!normalizedSource) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Dropship,+or+Other`);
+  if (normalizedSource === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
+  if (normalizedSource === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
@@ -835,11 +836,11 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     await recalculateProductQueues([lineRow.product_id]);
 
   const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
-  const assignedQty = source === "UNASSIGNED"
-    ? 0
-    : Math.min(remainingQty, requestedQty > 0 ? requestedQty : remainingQty);
+  const assignedQty = shouldCreateWarehouseReservation(normalizedSource)
+    ? Math.min(remainingQty, requestedQty > 0 ? requestedQty : remainingQty)
+    : 0;
 
-  if (source !== "UNASSIGNED" && assignedQty <= 0) {
+  if (shouldCreateWarehouseReservation(normalizedSource) && assignedQty <= 0) {
     redirect(`/orders/${orderId}?error=Assigned+quantity+must+be+greater+than+zero`);
   }
 
@@ -853,31 +854,15 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   }
 
   const { error: sourceError } = await adminClient.from("shipping_order_lines").update({
-    fulfillment_source: source === "FLOOR" ? "WAREHOUSE" : source === "CONTAINER" ? "CONTAINER" : source === "DROPSHIP" ? "DROPSHIP" : source === "OTHER" ? "OTHER" : null,
-    fulfillment_supplier: supplier,
-    fulfillment_reference: reference,
-    fulfillment_tracking: tracking,
+    fulfillment_source: normalizedSource,
+    fulfillment_supplier: normalizedSource === "DROPSHIP" ? supplier : null,
+    fulfillment_reference: normalizedSource === "DROPSHIP" ? reference : null,
+    fulfillment_tracking: normalizedSource === "DROPSHIP" ? tracking : null,
     fulfillment_notes: fulfillmentNotes,
   } as never).eq("id", lineRow.id);
   if (sourceError) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError.message)}`);
 
-  if (remainingQty > 0 && source !== "UNASSIGNED") {
-    if (source === "CONTAINER") {
-      const { error: insertError } = await adminClient.from("inventory_allocations").insert({
-        shipping_order_line_id: lineRow.id,
-        product_id: lineRow.product_id,
-        quantity: assignedQty,
-        allocation_status: "ALLOCATED",
-        source_type: "CONTAINER",
-        container_id: containerId,
-      });
-
-      if (insertError) {
-        redirect(`/orders/${orderId}?error=${encodeURIComponent(insertError.message)}`);
-      }
-    }
-
-    if (source === "FLOOR") {
+  if (remainingQty > 0 && shouldCreateWarehouseReservation(normalizedSource)) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
         shipping_order_line_id: lineRow.id,
         product_id: lineRow.product_id,
@@ -890,18 +875,15 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
       if (insertError) {
         redirect(`/orders/${orderId}?error=${encodeURIComponent(insertError.message)}`);
       }
-    }
   }
 
   const { error: statusError } = await adminClient
     .from("shipping_order_lines")
     .update({
-      allocation_status: assignedQty > 0 && source !== "UNASSIGNED" ? "ALLOCATED" : "UNALLOCATED",
-      warehouse_status: assignedQty > 0 && source === "FLOOR"
+      allocation_status: assignedQty > 0 && shouldCreateWarehouseReservation(normalizedSource) ? "ALLOCATED" : "UNALLOCATED",
+      warehouse_status: assignedQty > 0 && shouldCreateWarehouseReservation(normalizedSource)
         ? "READY_TO_SHIP"
-        : assignedQty > 0 && source === "CONTAINER"
-          ? "ASSIGNED_TO_INBOUND"
-          : "ON_FLOOR",
+        : "ON_FLOOR",
     })
     .eq("id", lineRow.id);
 
@@ -911,8 +893,8 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
 
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_ASSIGNMENT_UPDATED", {
     line_id: lineId,
-    source,
-    container_id: source === "CONTAINER" ? (containerId ?? null) : null,
+    source: normalizedSource,
+    container_id: null,
     quantity: assignedQty,
   });
 
@@ -920,6 +902,111 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Assignment+updated`);
+}
+
+export async function completeNonWarehouseFulfillmentAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  const fulfilledDate = getString(formData, "fulfilled_date")?.trim();
+  const quantity = getPositiveNumber(formData, "fulfill_qty");
+  const supplier = getString(formData, "fulfillment_supplier")?.trim() || null;
+  const reference = getString(formData, "fulfillment_reference")?.trim() || null;
+  const tracking = getString(formData, "fulfillment_tracking")?.trim() || null;
+  const notes = getString(formData, "fulfillment_notes")?.trim() || null;
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
+  if (!fulfilledDate) redirect(`/orders/${orderId}?error=Completion+date+is+required`);
+  if (quantity <= 0) redirect(`/orders/${orderId}?error=Fulfillment+quantity+must+be+greater+than+zero`);
+
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
+    .eq("id", lineId)
+    .eq("shipping_order_id", orderId)
+    .maybeSingle();
+
+  const lineRow = line as {
+    id: string;
+    product_id: string | null;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+    fulfillment_source: string | null;
+    fulfillment_supplier?: string | null;
+    fulfillment_reference?: string | null;
+    fulfillment_tracking?: string | null;
+    fulfillment_notes?: string | null;
+  } | null;
+
+  if (lineError || !lineRow) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+  const source = String(lineRow.fulfillment_source ?? "").toUpperCase();
+  if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Select+Dropship+or+Other+before+using+this+completion`);
+
+  const finalSupplier = supplier ?? lineRow.fulfillment_supplier ?? null;
+  const finalReference = reference ?? lineRow.fulfillment_reference ?? null;
+  const finalTracking = tracking ?? lineRow.fulfillment_tracking ?? null;
+  const finalNotes = notes ?? lineRow.fulfillment_notes ?? null;
+  if (source === "DROPSHIP" && !finalSupplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropship+completion`);
+  if (source === "OTHER" && !finalNotes) redirect(`/orders/${orderId}?error=Explanation+is+required+for+Other+completion`);
+
+  const approvedQty = Number(lineRow.approved_qty ?? 0);
+  const fulfilledQty = Number(lineRow.fulfilled_qty ?? 0);
+  const remainingQty = Math.max(0, approvedQty - fulfilledQty);
+  if (quantity > remainingQty) redirect(`/orders/${orderId}?error=Fulfillment+quantity+cannot+exceed+remaining+quantity`);
+
+  const nextFulfilledQty = fulfilledQty + quantity;
+  const isComplete = nextFulfilledQty >= approvedQty && approvedQty > 0;
+  const fulfilledAtIso = `${fulfilledDate}T12:00:00.000Z`;
+  const eventKey = `${source}:${Date.now()}:${lineId}`;
+
+  const { error: clearError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", lineId);
+  if (clearError) redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
+
+  const { error: updateError } = await adminClient.from("shipping_order_lines").update({
+    fulfilled_qty: nextFulfilledQty,
+    fulfillment_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+    warehouse_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+    allocation_status: "UNALLOCATED",
+    fulfillment_supplier: source === "DROPSHIP" ? finalSupplier : null,
+    fulfillment_reference: source === "DROPSHIP" ? finalReference : null,
+    fulfillment_tracking: source === "DROPSHIP" ? finalTracking : null,
+    fulfillment_notes: finalNotes,
+  } as never).eq("id", lineId);
+  if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+
+  const fulfillmentColumns = await loadTableColumnSet(adminClient, "fulfillments", ["fulfillment_type"]);
+  const { error: fulfillmentError } = await adminClient.from("fulfillments").insert({
+    shipping_order_line_id: lineId,
+    fulfilled_qty: quantity,
+    fulfilled_at: fulfilledAtIso,
+    shipment_number: source === "DROPSHIP" ? finalReference : null,
+    carrier: source === "DROPSHIP" ? finalSupplier : null,
+    tracking_number: source === "DROPSHIP" ? finalTracking : null,
+    reason: source === "DROPSHIP" ? "Dropship fulfillment completed" : `Other fulfillment completed: ${finalNotes}`,
+    source_event_key: eventKey,
+    actor_id: user.id,
+    ...(fulfillmentColumns.has("fulfillment_type") ? { fulfillment_type: source } : {}),
+  } as never);
+  if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
+
+  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
+  await writeOrderActivity(adminClient, orderId, source === "DROPSHIP" ? "ORDER_LINE_DROPSHIP_COMPLETED" : "ORDER_LINE_OTHER_FULFILLMENT_COMPLETED", {
+    line_id: lineId,
+    fulfillment_source: source,
+    quantity,
+    supplier: finalSupplier,
+    reference: finalReference,
+    tracking_number: finalTracking,
+    note: finalNotes,
+    fulfilled_at: fulfilledAtIso,
+  });
+
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=${source === "DROPSHIP" ? "Dropship" : "Other+fulfillment"}+completed`);
 }
 
 export async function markOrderLineShippedAction(formData: FormData) {
@@ -1014,7 +1101,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
   }
 
   try {
-    if (String(lineRow.fulfillment_source ?? "WAREHOUSE").toUpperCase() === "WAREHOUSE") {
+    if (shouldMoveWarehouseInventory(lineRow.fulfillment_source ?? "WAREHOUSE")) {
       await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, shipQty, `SHIPMENT:${shipmentNumber}:${lineId}`);
     }
   } catch (inventoryError) {
@@ -1061,12 +1148,14 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const documents = rawDocuments as unknown as Array<{ id: string; document_type?: string | null; is_restricted?: boolean | null }> | null;
   if (documentError || documents?.length !== 2 || !documents.some((doc) => doc.id === acknowledgmentDocumentId && doc.document_type === "PICKUP_RECEIPT") || !documents.some((doc) => doc.id === driversLicenseDocumentId && doc.document_type === "DRIVERS_LICENSE" && doc.is_restricted)) redirect(`/orders/${orderId}?error=Required+pickup+documents+are+missing+or+not+restricted`);
 
-  const { data: lines, error: lineError } = await adminClient.from("shipping_order_lines").select("id,product_id,approved_qty,fulfilled_qty,fulfillment_status").eq("shipping_order_id", orderId).in("id", selectedIds);
+  const { data: lines, error: lineError } = await adminClient.from("shipping_order_lines").select("id,product_id,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source").eq("shipping_order_id", orderId).in("id", selectedIds);
   if (lineError || lines?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Pickup+line+selection+is+invalid`);
+  const pickupLines = (lines ?? []) as unknown as Array<{ id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_source?: string | null }>;
   const pickedAt = pickupDate ? `${pickupDate}T12:00:00.000Z` : new Date().toISOString();
   const pickupId = crypto.randomUUID();
-  for (const line of lines ?? []) {
+  for (const line of pickupLines) {
     const pickupQty = getPositiveNumber(formData, `pickup_qty_${line.id}`);
+    if (!shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE")) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
     const remaining = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     if (pickupQty <= 0 || pickupQty > remaining) redirect(`/orders/${orderId}?error=Pickup+quantity+is+invalid`);
     const nextQty = Number(line.fulfilled_qty ?? 0) + pickupQty;
@@ -1107,13 +1196,13 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const { data: lines, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, fulfillment_source")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
 
   if (lineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError.message)}`);
 
-  const selectedLines = (lines ?? []) as Array<{
+  const selectedLines = (lines ?? []) as unknown as Array<{
     id: string;
     product_id: string | null;
     ordered_qty: number | null;
@@ -1121,10 +1210,12 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
     fulfilled_qty: number | null;
     approval_status: string | null;
     fulfillment_status: string | null;
+    fulfillment_source: string | null;
   }>;
 
   if (selectedLines.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Selected+line+does+not+belong+to+this+order`);
   if (selectedLines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+ship+an+unmapped+product+line`);
+  if (selectedLines.some((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"))) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
 
   const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;
@@ -1192,6 +1283,15 @@ export async function completeOrderShipmentAction(formData: FormData) {
 
   const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
+  const { data: sourceRows, error: sourceError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, fulfillment_source")
+    .eq("shipping_order_id", orderId)
+    .in("id", selectedIds);
+  if (sourceError || sourceRows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
+  const shipmentSourceRows = (sourceRows ?? []) as unknown as Array<{ id: string; fulfillment_source?: string | null }>;
+  if (shipmentSourceRows.some((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"))) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
+
   const { data: shipmentId, error } = await adminClient.rpc("complete_order_shipment", {
     p_order_id: orderId,
     p_shipped_at: `${shipmentDate}T12:00:00.000Z`,
@@ -1321,14 +1421,16 @@ export async function addOrderShipmentLineAction(formData: FormData) {
 
   const { data: line } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty")
+    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
     .eq("id", lineId)
     .eq("shipping_order_id", orderId)
     .maybeSingle();
-  if (!line) redirect(`/orders/${orderId}?error=That+item+does+not+belong+to+this+order`);
+  const lineRow = line as unknown as { id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_source?: string | null } | null;
+  if (!lineRow) redirect(`/orders/${orderId}?error=That+item+does+not+belong+to+this+order`);
+  if (!shouldMoveWarehouseInventory(lineRow.fulfillment_source ?? "WAREHOUSE")) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
 
-  const alreadyFulfilled = Number(line.fulfilled_qty ?? 0);
-  const approved = Number(line.approved_qty ?? 0);
+  const alreadyFulfilled = Number(lineRow.fulfilled_qty ?? 0);
+  const approved = Number(lineRow.approved_qty ?? 0);
   const nextFulfilled = alreadyFulfilled + quantity;
   if (nextFulfilled > approved) redirect(`/orders/${orderId}?error=Quantity+exceeds+the+remaining+amount`);
 
@@ -1360,8 +1462,8 @@ export async function addOrderShipmentLineAction(formData: FormData) {
     fulfillment_type: "SHIPMENT",
   } as never);
 
-  await recordFulfillmentInventory(adminClient, lineId, line.product_id, quantity, sourceEventKey, user.id);
-  if (line.product_id) await recalculateProductQueues([line.product_id]);
+  await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, quantity, sourceEventKey, user.id);
+  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
 
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_LINE_ADDED", {
     shipment_id: shipmentId,

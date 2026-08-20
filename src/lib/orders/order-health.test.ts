@@ -17,4 +17,22 @@ describe("order health diagnostics", () => {
     const issues = evaluateOrderHealth({ lines: [line()], qboVoided: true, cancelled: false });
     expect(issues.some((issue) => issue.code === "VOIDED_ACTIVE" && issue.severity === "ERROR")).toBe(true);
   });
+
+  it("accepts dropship fulfillment evidence without shipment history", () => {
+    const issues = evaluateOrderHealth({
+      lines: [line({ fulfilled_qty: 1, fulfillment_status: "FULFILLED", fulfillment_source: "DROPSHIP", fulfillment_supplier: "Vendor" })],
+      fulfillments: [{ shipping_order_line_id: "line-1", fulfilled_qty: 1, fulfillment_type: "DROPSHIP" }],
+    });
+
+    expect(issues.some((issue) => issue.code === "FULFILLMENT_TOTAL_MISMATCH")).toBe(false);
+  });
+
+  it("accepts other fulfillment evidence without shipment history", () => {
+    const issues = evaluateOrderHealth({
+      lines: [line({ fulfilled_qty: 1, fulfillment_status: "FULFILLED", fulfillment_source: "OTHER", fulfillment_notes: "Legacy shipment verified" })],
+      fulfillments: [{ shipping_order_line_id: "line-1", fulfilled_qty: 1, fulfillment_type: "OTHER" }],
+    });
+
+    expect(issues.some((issue) => issue.code === "FULFILLMENT_TOTAL_MISMATCH")).toBe(false);
+  });
 });

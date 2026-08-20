@@ -1438,9 +1438,6 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
-            {!isServiceOnlyOrder ? (
-              <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
-            ) : null}
             {shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />

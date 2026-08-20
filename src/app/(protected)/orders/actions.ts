@@ -66,6 +66,23 @@ async function isVoidedQuickBooksOrder(supabase: ReturnType<typeof getSupabaseAd
   return String((data as { qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null } | null } | null)?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED";
 }
 
+export async function cancelVoidedOrderAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const confirmation = getString(formData, "confirmation");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || confirmation !== "CONFIRM_CANCEL_VOIDED") redirect(`/exceptions?error=Cancellation+confirmation+required`);
+  if (!(await isVoidedQuickBooksOrder(adminClient, orderId))) redirect(`/exceptions?error=Only+voided+QuickBooks+orders+can+be+cancelled+from+ERP+Health`);
+  const { error } = await adminClient.rpc("cancel_voided_order", { p_order_id: orderId, p_reason: "Voided in QuickBooks" } as never);
+  if (error) redirect(`/exceptions?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/exceptions");
+  revalidatePath("/orders");
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/exceptions?message=Order+cancelled+in+ERP`);
+}
+
 function getFileExtension(fileName: string) {
   if (!fileName.includes(".")) return "";
   return fileName.split(".").pop()?.toLowerCase() ?? "";

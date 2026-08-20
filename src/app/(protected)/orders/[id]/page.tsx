@@ -1800,6 +1800,25 @@ export default async function OrderDetailPage({
             <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{totalUnitsShipped}/{totalEligibleInventoryUnits} <span className="text-xl">Fulfilled</span></div>
             <p className="mt-1 text-sm font-semibold text-[#356344]">{fulfillmentProgressStatus}</p>
           </section>
+          <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Customer Queue</h2>
+            <div className="mt-3 space-y-3">
+              {visibleItems.map((item, index) => {
+                const queueLine = item.shippingLine;
+                const queueSku = item.sku ?? queueLine?.products?.sku ?? "Line item";
+                return (
+                  <div key={`${item.key}-queue`} className="border-b border-[#eef2f7] pb-3 last:border-0 last:pb-0">
+                    <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
+                    <p className="mt-1 text-xs text-[#64748b]">{truncateText(item.description, 30)}</p>
+                    <p className="mt-1 text-sm font-semibold text-[#356344]">
+                      Customer list position: {queueLine?.queue_position_start ? `#${queueLine.queue_position_start}` : "Pending assignment"}
+                    </p>
+                  </div>
+                );
+              })}
+              {visibleItems.length === 0 ? <p className="text-sm text-[#64748b]">No line items.</p> : null}
+            </div>
+          </section>
         </aside>
       </div>
       </ShipmentSelectionProvider>

@@ -365,6 +365,7 @@ export default async function OrdersPage({
                   && (orderedQty > 0 || fulfilledQty > 0);
               });
               const totalQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? line.ordered_qty ?? 0), 0);
+              const hasPhysicalLines = lines.length > 0;
               const inStockQty = lines
                 .filter((line) => ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
                 .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
@@ -394,15 +395,15 @@ export default async function OrdersPage({
                     <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{invoiceNumber}</Link>
                     <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
                   </td>
-                  <td className="px-3 py-3 font-semibold">{lines.length} items · {totalQty} units</td>
-                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{shippedQty} of {totalQty}</td>
-                  <td className="px-3 py-3 font-semibold text-[#b45309]">{remainingQty}</td>
-                  <td className="px-3 py-3 font-semibold text-[#334155]">{remainingStatus}</td>
+                  <td className="px-3 py-3 font-semibold">{hasPhysicalLines ? `${lines.length} items · ${totalQty} units` : "Service / no inventory"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{hasPhysicalLines ? `${shippedQty} of ${totalQty}` : "—"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#b45309]">{hasPhysicalLines ? remainingQty : "—"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#334155]">{hasPhysicalLines ? remainingStatus : "No physical fulfillment"}</td>
                   <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {activeTab === "new" ? (
+                    {activeTab === "new" && hasPhysicalLines ? (
                       <form action={moveOrderToWarehouseAction}>
                         <input type="hidden" name="orderId" value={order.id} />
                         <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>

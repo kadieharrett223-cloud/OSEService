@@ -518,7 +518,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
         || normalizedDescription.startsWith("--")
         || normalizedSku === "note"
         || normalizedSku.startsWith("note:")
-        || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|^note$|\bservice\b/.test(normalizedDescription);
+        || /discount|shipping|freight|misc(?:ellaneous)?\s+(?:charge|service)|sales tax|tax adjustment|^note$|\bservice\b|\binstall(?:ation)?\b/.test(normalizedDescription);
 
       return {
         sku,
@@ -772,16 +772,19 @@ export default async function OrderDetailPage({
   if ((orderRecord.shipping_order_lines ?? []).length === 0) {
     const invoiceNumber = orderRecord.qbo_invoices?.invoice_number ?? orderRecord.order_number ?? "—";
     const customerName = orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending";
+    const hasPhysicalInvoiceLine = parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload).some((item) => !item.isNonInventory && item.qty > 0);
     return (
       <div className="space-y-6">
         <div className="rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
-          This order has no mapped operational lines yet. Map the QuickBooks products before assigning inventory, moving items to Warehouse, or creating a shipment.
+          {hasPhysicalInvoiceLine
+            ? "This order has no mapped operational lines yet. Map the QuickBooks products before assigning inventory, moving items to Warehouse, or creating a shipment."
+            : "This invoice contains service or informational lines only. No inventory mapping, warehouse assignment, or shipment is required."}
         </div>
         <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d50917]">Working Order</p>
           <h1 className="mt-1 text-2xl font-semibold text-[#111827]">{customerName} <span className="font-normal text-[#64748b]">— Invoice #{invoiceNumber}</span></h1>
-          <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. Product mapping is required before warehouse fulfillment can begin.</p>
-          <div className="mt-4 flex flex-wrap gap-2"><Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link><Link href="/orders" className="btn-secondary">Back to orders</Link></div>
+          <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. {hasPhysicalInvoiceLine ? "Product mapping is required before warehouse fulfillment can begin." : "It remains available as invoice history without entering physical fulfillment workflows."}</p>
+          <div className="mt-4 flex flex-wrap gap-2">{hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : null}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
         </section>
       </div>
     );

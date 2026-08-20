@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
+import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -57,6 +58,7 @@ type QueueLine = {
   fulfillment_status: string | null;
   priority: string | null;
   warehouse_status: string | null;
+  fulfillment_source?: string | null;
   queue_position_start: number | null;
   queue_position_count: number | null;
   source_system?: string | null;
@@ -288,6 +290,8 @@ export default async function InventoryPage({
         approved_qty,
         fulfilled_qty,
         approval_status,
+        fulfillment_status,
+        fulfillment_source,
         priority,
         warehouse_status,
         queue_position_start,
@@ -350,7 +354,7 @@ export default async function InventoryPage({
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
-  const queueLineRows = (queueLines ?? []) as QueueLine[];
+  const queueLineRows = (queueLines ?? []) as unknown as QueueLine[];
   const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
   const orderNumbers = [...new Set(queueLineRows.map((line) => line.shipping_orders?.order_number).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();
@@ -555,6 +559,53 @@ export default async function InventoryPage({
     });
   }
 
+  const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();
+  for (const line of dedupedQueueLineRows) {
+    if (!line.product_id || !isOpenQueueLine(line)) continue;
+    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
+    const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const rows = coverageQueueByProduct.get(line.product_id) ?? [];
+    rows.push({
+      id: line.id,
+      product_id: line.product_id,
+      remaining_qty: remainingQty,
+      priority: line.priority,
+      queue_position_start: line.queue_position_start,
+      approved_at: null,
+      created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
+      has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
+      fulfillment_source: line.fulfillment_source,
+    });
+    coverageQueueByProduct.set(line.product_id, rows);
+  }
+
+  const coverageContainerSupplyByProduct = new Map<string, ProductContainerSupply[]>();
+  for (const line of containerLineRows) {
+    if (!line.product_id || !line.container_id || !isActiveIncomingContainer(line.containers?.lifecycle_status)) continue;
+    const qty = Math.max(0, Number(line.on_order_qty ?? 0) - Number(line.received_qty ?? 0));
+    if (qty <= 0) continue;
+    const rows = coverageContainerSupplyByProduct.get(line.product_id) ?? [];
+    rows.push({
+      container_id: line.container_id,
+      container_number: line.containers?.container_number ?? null,
+      available_qty: qty,
+      eta_confirmed_date: line.containers?.eta_confirmed_date ?? null,
+      eta_estimated_date: line.containers?.eta_estimated_date ?? line.containers?.port_date ?? null,
+      entered_date: null,
+    });
+    coverageContainerSupplyByProduct.set(line.product_id, rows);
+  }
+
+  const coverageByLineId = new Map<string, LineCoverage>();
+  for (const productId of new Set([...coverageQueueByProduct.keys(), ...coverageContainerSupplyByProduct.keys()])) {
+    const coverage = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, Math.max(0, onFloorByProduct.get(productId) ?? 0)]]),
+      queueLinesByProduct: coverageQueueByProduct,
+      containerSupplyByProduct: coverageContainerSupplyByProduct,
+    });
+    for (const [lineId, lineCoverage] of coverage.lines) coverageByLineId.set(lineId, lineCoverage);
+  }
+
   const canonicalGroups = new Map<string, InventoryViewRow>();
   for (const product of productRows) {
     const displaySku = operationalSkuByProduct.get(product.id) ?? product.sku ?? "—";
@@ -671,44 +722,19 @@ export default async function InventoryPage({
         })
         .map((item) => item);
 
-      // Migrated lines carry no allocation rows, so cover the queue from real stock in order.
-      let floorLeft = Math.max(0, group.onFloor - group.floorCommitted);
-      const containerPool = incomingContainers.map((container) => ({
-        containerNumber: container.containerNumber,
-        eta: container.eta,
-        left: container.available,
-      }));
-
       const coveredQueue = customerQueue.map((item) => {
-        if (item.assignedTo !== "Unassigned" || item.openQty <= 0) return item;
-
-        let outstanding = item.openQty;
-        const fromFloor = Math.min(outstanding, floorLeft);
-        floorLeft -= fromFloor;
-        outstanding -= fromFloor;
-
-        if (outstanding <= 0) return { ...item, expectedAvailability: "Available now · on floor" };
-
-        let lastContainer: (typeof containerPool)[number] | null = null;
-        for (const container of containerPool) {
-          if (container.left <= 0) continue;
-          const taken = Math.min(outstanding, container.left);
-          container.left -= taken;
-          outstanding -= taken;
-          lastContainer = container;
-          if (outstanding <= 0) break;
-        }
-
-        if (outstanding <= 0 && lastContainer) {
-          const prefix = fromFloor > 0 ? `${fromFloor} on floor · rest ` : "";
-          return { ...item, expectedAvailability: `${prefix}Container ${lastContainer.containerNumber} · ETA ${lastContainer.eta}` };
-        }
-
-        if (fromFloor > 0 || lastContainer) {
-          return { ...item, expectedAvailability: `${item.openQty - outstanding} of ${item.openQty} covered · ${outstanding} waiting` };
-        }
-
-        return { ...item, expectedAvailability: "Waiting for inventory" };
+        const coverage = coverageByLineId.get(item.lineId);
+        if (!coverage || item.openQty <= 0) return { ...item, expectedAvailability: "Waiting for inventory" };
+        const parts = coverage.allocations.map((allocation) => {
+          if (allocation.sourceType === "WAREHOUSE") return `${allocation.quantity} Warehouse · Available now`;
+          if (allocation.sourceType === "CONTAINER") return `${allocation.quantity} ${allocation.sourceLabel} · ETA ${allocation.etaDate ? formatShortDate(allocation.etaDate) : "Pending"}`;
+          return `${allocation.quantity} Unassigned`;
+        });
+        const status = coverage.unassignedQty > 0
+          ? coverage.coveredQty > 0 ? "Partially covered" : "Waiting for inventory"
+          : coverage.incomingQty > 0 ? "Incoming" : "Available now";
+        const completeEta = coverage.completeEtaDate ? ` · Complete ETA ${formatShortDate(coverage.completeEtaDate)}` : "";
+        return { ...item, expectedAvailability: `${parts.join(" + ")}${completeEta}`, status };
       });
 
       return {

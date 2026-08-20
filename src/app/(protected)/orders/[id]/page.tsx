@@ -2,7 +2,9 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { isOpenDemandLine } from "@/lib/demand/product-demand";
 import {
-  getSuggestedAllocation,
+  resolveProductCoverage,
+  validateProductCoverage,
+  type LineCoverage,
   type OpenQueueLine,
   type ProductContainerSupply,
 } from "@/lib/fulfillment/suggested-allocation";
@@ -172,7 +174,7 @@ type ItemSupplySnapshot = {
   availability: string;
   fulfillment: string;
   action: string;
-  suggestion: ReturnType<typeof getSuggestedAllocation> | null;
+  coverage: LineCoverage | null;
 };
 
 type QuickbooksInvoiceSnapshot = {
@@ -238,6 +240,7 @@ type OpenQueueLineLookupRow = {
   product_id: string | null;
   approved_qty: number | null;
   fulfilled_qty: number | null;
+  fulfillment_source?: string | null;
   priority: string | null;
   queue_position_start: number | null;
   approved_at: string | null;
@@ -888,7 +891,7 @@ export default async function OrderDetailPage({
     }
   }
   const shipmentLog = [...shipments, ...historicalShipments.values()];
-  const orderHealthIssues = evaluateOrderHealth({
+  let orderHealthIssues = evaluateOrderHealth({
     lines: orderLines,
     shipments: shipmentLog.map((shipment) => ({ lines: (shipment.lines ?? []).map((line) => ({ shipping_order_line_id: line.shipping_order_line_id, quantity: line.quantity })) })),
     fulfillments: fulfillments.map((fulfillment) => ({ shipping_order_line_id: fulfillment.shipping_order_line_id, fulfilled_qty: fulfillment.fulfilled_qty, fulfillment_type: fulfillment.fulfillment_type })),
@@ -968,7 +971,7 @@ export default async function OrderDetailPage({
           .in("product_id", resolvedProductIds),
         supabase
           .from("shipping_order_lines")
-          .select("id, product_id, approved_qty, fulfilled_qty, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
+          .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
           .in("product_id", resolvedProductIds)
           .eq("approval_status", "APPROVED")
           .neq("fulfillment_status", "FULFILLED"),
@@ -998,9 +1001,7 @@ export default async function OrderDetailPage({
   }
 
   const floorAvailableByProduct = new Map<string, number>();
-  for (const [productId, floorTotal] of onFloorAvailableByProduct.entries()) {
-    floorAvailableByProduct.set(productId, Math.max(0, floorTotal - (floorCommittedByProduct.get(productId) ?? 0)));
-  }
+  for (const [productId, floorTotal] of onFloorAvailableByProduct.entries()) floorAvailableByProduct.set(productId, Math.max(0, floorTotal));
 
   const activeContainerStatus = new Set(["ORDERED", "PRODUCTION", "INBOUND"]);
   const containerSupplyByProduct = new Map<string, ProductContainerSupply[]>();
@@ -1033,7 +1034,7 @@ export default async function OrderDetailPage({
 
   for (const [key, supply] of containerSupplyByProductContainer.entries()) {
     const [productId] = key.split(":");
-    const availableQty = Math.max(0, supply.available_qty - (containerCommittedByKey.get(key) ?? 0));
+    const availableQty = Math.max(0, supply.available_qty);
     if (availableQty <= 0) continue;
     const existingRows = containerSupplyByProduct.get(productId) ?? [];
     existingRows.push({
@@ -1045,7 +1046,7 @@ export default async function OrderDetailPage({
 
   const queueLinesByProduct = new Map<string, OpenQueueLine[]>();
   const queueLineById = new Map<string, OpenQueueLine>();
-  for (const row of (openQueueRows ?? []) as OpenQueueLineLookupRow[]) {
+  for (const row of (openQueueRows ?? []) as unknown as OpenQueueLineLookupRow[]) {
     if (!row.product_id) continue;
     const remainingQty = Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0));
     if (remainingQty <= 0) continue;
@@ -1055,6 +1056,7 @@ export default async function OrderDetailPage({
       id: row.id,
       product_id: row.product_id,
       remaining_qty: remainingQty,
+        fulfillment_source: row.fulfillment_source,
       priority: row.priority,
       queue_position_start: row.queue_position_start,
       approved_at: row.approved_at,
@@ -1067,6 +1069,29 @@ export default async function OrderDetailPage({
     queueLinesByProduct.set(row.product_id, lines);
     queueLineById.set(queueLine.id, queueLine);
   }
+
+  const coverageByProduct = new Map<string, ReturnType<typeof resolveProductCoverage>>();
+  for (const productId of resolvedProductIds) {
+    coverageByProduct.set(productId, resolveProductCoverage(productId, {
+      floorAvailableByProduct,
+      queueLinesByProduct,
+      containerSupplyByProduct,
+    }));
+  }
+  const coverageByLineId = new Map<string, LineCoverage>();
+  for (const coverage of coverageByProduct.values()) {
+    for (const [lineId, lineCoverage] of coverage.lines) coverageByLineId.set(lineId, lineCoverage);
+  }
+  const coverageHealthIssues = Array.from(coverageByProduct.values()).flatMap((coverage) => validateProductCoverage(coverage).map((issue) => ({
+    severity: issue.severity,
+    code: issue.code,
+    product: issue.productId,
+    issue: issue.message,
+    expected: String(issue.expected),
+    actual: String(issue.actual),
+    cause: "Shared supply/demand coverage resolver found a contradiction.",
+  })));
+  orderHealthIssues = [...orderHealthIssues, ...coverageHealthIssues];
 
   const shippingLineBySkuKey = new Map<string, NonNullable<OrderDetailRow["shipping_order_lines"]>[number]>();
   for (const line of orderLines) {
@@ -1185,7 +1210,7 @@ export default async function OrderDetailPage({
         availability: "No inventory required",
         fulfillment: "N/A",
         action: "N/A",
-        suggestion: null,
+        coverage: null,
       };
     }
 
@@ -1199,69 +1224,7 @@ export default async function OrderDetailPage({
         availability: "Reserved for this order",
         fulfillment: "Preparing",
         action: "Manage",
-        suggestion: null,
-      };
-    }
-
-    if (line && (line.inventory_allocations?.length ?? 0) > 0) {
-      const allocations = line.inventory_allocations ?? [];
-      const distinctSources = new Set(allocations.map((allocation) => allocation.source_type ?? "UNASSIGNED"));
-
-      if (allocations.length > 1 || distinctSources.size > 1) {
-        const parts = allocations.map((allocation) => {
-          const qty = Number(allocation.quantity ?? 0);
-          if (allocation.source_type === "FLOOR") {
-            return `Warehouse ${qty}`;
-          }
-          if (allocation.source_type === "CONTAINER") {
-            const containerName = allocation.containers?.container_number ?? "Container";
-            const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
-            return `${containerName} ${qty} (ETA ${eta})`;
-          }
-          return `Unassigned ${qty}`;
-        });
-
-        return {
-          comingFrom: "Split",
-          availability: parts.join(" + "),
-          fulfillment: itemStatus,
-          action: "Manage",
-          suggestion: null,
-        };
-      }
-
-      const allocation = allocations[0];
-      if (allocation?.source_type === "FLOOR") {
-        const floorAvailable = item.productId
-          ? Math.max(0, (onFloorAvailableByProduct.get(item.productId) ?? 0) - (floorCommittedByProduct.get(item.productId) ?? 0))
-          : 0;
-        return {
-          comingFrom: "Warehouse",
-          availability: floorAvailable > 0 ? `${floorAvailable} available now` : `${Number(allocation.quantity ?? 0)} assigned`,
-          fulfillment: itemStatus,
-          action: "Manage",
-          suggestion: null,
-        };
-      }
-
-      if (allocation?.source_type === "CONTAINER") {
-        const containerName = allocation.containers?.container_number ?? "Container";
-        const eta = formatDate(allocation.containers?.eta_confirmed_date ?? allocation.containers?.eta_estimated_date);
-        return {
-          comingFrom: containerName,
-          availability: `ETA ${eta}`,
-          fulfillment: itemStatus,
-          action: "Manage",
-          suggestion: null,
-        };
-      }
-
-      return {
-        comingFrom: "Unassigned",
-        availability: "No source selected",
-        fulfillment: itemStatus,
-        action: "Manage",
-        suggestion: null,
+        coverage: line ? coverageByLineId.get(line.id) ?? null : null,
       };
     }
 
@@ -1272,7 +1235,7 @@ export default async function OrderDetailPage({
         availability: "—",
         fulfillment: "Waiting",
         action: "Map SKU",
-        suggestion: null,
+        coverage: null,
       };
     }
 
@@ -1286,45 +1249,44 @@ export default async function OrderDetailPage({
         availability: "No source available",
         fulfillment: "Waiting",
         action: "Map SKU",
-        suggestion: null,
+        coverage: null,
       };
     }
 
-    const queueLine = queueLineById.get(line.id) ?? {
-      id: line.id,
-      product_id: productId,
-      remaining_qty: remainingQty,
-      priority: line.priority,
-      queue_position_start: line.queue_position_start,
-      approved_at: null,
-      created_at: orderRecord?.created_at ?? new Date().toISOString(),
-      has_live_allocation: false,
-    };
+    const coverage = coverageByLineId.get(line.id) ?? null;
+    if (coverage) {
+      const parts = coverage.allocations.map((allocation) => {
+        if (allocation.sourceType === "WAREHOUSE") return `${allocation.quantity} Warehouse · Available now`;
+        if (allocation.sourceType === "CONTAINER") return `${allocation.quantity} ${allocation.sourceLabel} · ETA ${allocation.etaDate ? formatDate(allocation.etaDate) : "Pending"}`;
+        return `${allocation.quantity} Unassigned`;
+      });
+      if (coverage.warehouseQty >= remainingQty) {
+        return {
+          comingFrom: "Warehouse",
+          availability: line.inventory_allocations?.some((allocation) => allocation.source_type === "FLOOR") ? "Reserved for this order" : "Available now",
+          fulfillment: "Ready",
+          action: "Manage",
+          coverage,
+        };
+      }
+      if (coverage.unassignedQty <= 0) {
+        const incoming = coverage.allocations.filter((allocation) => allocation.sourceType === "CONTAINER");
+        const singleIncoming = incoming.length === 1 && coverage.warehouseQty <= 0 ? incoming[0] : null;
+        return {
+          comingFrom: singleIncoming ? singleIncoming.sourceLabel : "Split",
+          availability: `${parts.join(" + ")}${coverage.completeEtaDate ? ` · Complete ETA ${formatDate(coverage.completeEtaDate)}` : ""}`,
+          fulfillment: coverage.incomingQty > 0 ? "Incoming" : "Ready",
+          action: "Manage",
+          coverage,
+        };
+      }
 
-    const suggested = getSuggestedAllocation(queueLine, {
-      floorAvailableByProduct,
-      queueLinesByProduct,
-      containerSupplyByProduct,
-    });
-
-    if (suggested.source_type === "WAREHOUSE") {
-      const availableNow = floorAvailableByProduct.get(productId) ?? 0;
       return {
-        comingFrom: "Warehouse",
-        availability: `${Math.max(0, availableNow)} available now`,
-        fulfillment: "Ready",
+        comingFrom: coverage.coveredQty > 0 ? "Partial" : "Unassigned",
+        availability: coverage.coveredQty > 0 ? `${parts.join(" + ")} · ${coverage.unassignedQty} waiting` : "No source available",
+        fulfillment: coverage.coveredQty > 0 ? "Partial" : "Waiting",
         action: "Manage",
-        suggestion: suggested,
-      };
-    }
-
-    if (suggested.source_type === "CONTAINER") {
-      return {
-        comingFrom: suggested.container_number ?? "Container",
-        availability: suggested.eta_date ? `ETA ${formatDate(suggested.eta_date)}` : "ETA pending",
-        fulfillment: "Waiting",
-        action: "Manage",
-        suggestion: suggested,
+        coverage,
       };
     }
 
@@ -1333,7 +1295,7 @@ export default async function OrderDetailPage({
       availability: "No source available",
       fulfillment: "Waiting",
       action: line ? "Manage" : "Map SKU",
-      suggestion: suggested,
+      coverage: null,
     };
   }
 
@@ -1359,7 +1321,7 @@ export default async function OrderDetailPage({
           ? "Preparing"
         : inStock >= needed
         ? "Ready"
-        : supply.suggestion?.source_type === "CONTAINER"
+        : supply.coverage?.incomingQty
           ? "Incoming"
           : inStock > 0
             ? "Partial"
@@ -1373,7 +1335,7 @@ export default async function OrderDetailPage({
   const visibleUnallocatedCount = itemStockSummary.reduce((sum, row) => {
     if (row.item.isNonInventory || row.needed <= 0 || row.inStock > 0) return sum;
     if ((row.item.shippingLine?.inventory_allocations?.length ?? 0) > 0) return sum;
-    if (row.supply.suggestion?.source_type === "CONTAINER") return sum;
+    if ((row.supply.coverage?.incomingQty ?? 0) > 0) return sum;
     return sum + row.needed;
   }, 0);
 
@@ -1607,20 +1569,20 @@ export default async function OrderDetailPage({
                             <div className="mt-3 space-y-2 text-sm text-[#374151]">
                               <div><span className="font-medium text-[#64748b]">Item:</span> {item.sku ?? "—"} · {item.description}</div>
                               <div><span className="font-medium text-[#64748b]">Currently assigned:</span> {line.inventory_allocations?.[0]?.source_type === "CONTAINER" ? containerNumberById.get(line.inventory_allocations[0].container_id ?? "") ?? "Container" : line.inventory_allocations?.[0]?.source_type === "FLOOR" ? "Warehouse / Floor" : "Not assigned"}</div>
-                              <div><span className="font-medium text-[#64748b]">Suggested source:</span> {supply.suggestion?.container_number ?? (supply.suggestion?.source_type === "WAREHOUSE" ? "Warehouse / Floor" : "None")}</div>
+                              <div><span className="font-medium text-[#64748b]">Derived coverage:</span> {supply.comingFrom}</div>
                               <div><span className="font-medium text-[#64748b]">Availability:</span> {supply.availability}</div>
                               <div><span className="font-medium text-[#64748b]">Assigned:</span> {assignedQty} of {remainingQty}</div>
                             </div>
-                            {(line.inventory_allocations?.length ?? 0) === 0 && supply.suggestion?.source_type === "WAREHOUSE" ? (
+                            {(line.inventory_allocations?.length ?? 0) === 0 && (supply.coverage?.warehouseQty ?? 0) > 0 ? (
                               <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
                                 <p><span className="font-semibold">Suggested:</span> Warehouse</p>
-                                <p className="mt-1"><span className="font-semibold">Estimated ETA:</span> {supply.suggestion.eta_type === "AVAILABLE_NOW" ? "Available now" : supply.suggestion.eta_date ? formatDate(supply.suggestion.eta_date) : "Pending"}</p>
-                                <p className="mt-1 text-xs text-[#64748b]">{supply.suggestion.reason}</p>
+                                <p className="mt-1"><span className="font-semibold">Estimated ETA:</span> Available now</p>
+                                <p className="mt-1 text-xs text-[#64748b]">Warehouse coverage is derived from current stock and queue position.</p>
                                 <form action={updateOrderLineAssignmentAction} className="mt-2">
                                   <input type="hidden" name="orderId" value={orderRecord.id} />
                                   <input type="hidden" name="lineId" value={line.id} />
                                   <input type="hidden" name="assignment_source" value="WAREHOUSE" />
-                                  <input type="hidden" name="qty_assigned" value={String(Math.max(1, Math.min(remainingQty || 1, supply.suggestion.suggested_qty || 1)))} />
+                                  <input type="hidden" name="qty_assigned" value={String(Math.max(1, Math.min(remainingQty || 1, supply.coverage?.warehouseQty || 1)))} />
                                   <button className="btn-secondary" type="submit" disabled={remainingQty <= 0}>
                                     Assign to warehouse
                                   </button>

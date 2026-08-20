@@ -20,6 +20,7 @@ export type OpenQueueLine = {
   approved_at: string | null;
   created_at: string;
   has_live_allocation: boolean;
+  fulfillment_source?: string | null;
 };
 
 export type ProductContainerSupply = {
@@ -35,6 +36,51 @@ export type SuggestedAllocationContext = {
   floorAvailableByProduct: Map<string, number>;
   queueLinesByProduct: Map<string, OpenQueueLine[]>;
   containerSupplyByProduct: Map<string, ProductContainerSupply[]>;
+};
+
+export type CoverageSourceType = "WAREHOUSE" | "CONTAINER" | "UNASSIGNED";
+
+export type CoverageAllocation = {
+  orderLineId: string;
+  productId: string;
+  quantity: number;
+  queueStart: number | null;
+  queueEnd: number | null;
+  sourceType: CoverageSourceType;
+  sourceId: string | null;
+  sourceLabel: string;
+  etaDate: string | null;
+  etaType: SuggestedEtaType;
+};
+
+export type LineCoverage = {
+  line: OpenQueueLine;
+  allocations: CoverageAllocation[];
+  coveredQty: number;
+  warehouseQty: number;
+  incomingQty: number;
+  unassignedQty: number;
+  completeEtaDate: string | null;
+  completeEtaType: SuggestedEtaType;
+};
+
+export type ProductCoverageResolution = {
+  productId: string;
+  demand: OpenQueueLine[];
+  currentSupply: number;
+  incomingSupply: ProductContainerSupply[];
+  allocations: CoverageAllocation[];
+  lines: Map<string, LineCoverage>;
+};
+
+export type CoverageDiagnostic = {
+  code: "WAREHOUSE_COVERAGE_EXCEEDS_ON_FLOOR" | "CONTAINER_COVERAGE_EXCEEDS_SUPPLY" | "NON_INVENTORY_SOURCE_CONSUMED_SUPPLY";
+  severity: "WARNING" | "ERROR";
+  productId: string;
+  sourceId: string | null;
+  expected: number;
+  actual: number;
+  message: string;
 };
 
 const ACTIVE_PRIORITY_RANK: Record<string, number> = {
@@ -111,6 +157,141 @@ function sortContainersByEta(containers: ProductContainerSupply[]) {
     if (leftTime !== rightTime) return leftTime - rightTime;
     return (left.container_number ?? "").localeCompare(right.container_number ?? "");
   });
+}
+
+function isInventoryDemand(line: OpenQueueLine) {
+  const source = String(line.fulfillment_source ?? "WAREHOUSE").trim().toUpperCase();
+  return source !== "DROPSHIP" && source !== "OTHER";
+}
+
+function queueRange(line: OpenQueueLine, offset: number, quantity: number) {
+  if (line.queue_position_start == null) return { queueStart: null, queueEnd: null };
+  const start = line.queue_position_start + offset;
+  return { queueStart: start, queueEnd: start + quantity - 1 };
+}
+
+function laterEta(left: { etaDate: string | null; etaType: SuggestedEtaType }, right: { etaDate: string | null; etaType: SuggestedEtaType }) {
+  if (!left.etaDate) return right;
+  if (!right.etaDate) return left;
+  return new Date(right.etaDate).getTime() > new Date(left.etaDate).getTime() ? right : left;
+}
+
+export function resolveProductCoverage(productId: string, context: SuggestedAllocationContext): ProductCoverageResolution {
+  const demand = sortQueueLines((context.queueLinesByProduct.get(productId) ?? [])
+    .filter((line) => line.product_id === productId && line.remaining_qty > 0 && isInventoryDemand(line)));
+  const currentSupply = Math.max(0, context.floorAvailableByProduct.get(productId) ?? 0);
+  const incomingSupply = sortContainersByEta(context.containerSupplyByProduct.get(productId) ?? [])
+    .map((container) => ({ ...container, available_qty: Math.max(0, container.available_qty) }));
+  const supply = [
+    { sourceType: "WAREHOUSE" as const, sourceId: null, sourceLabel: "Warehouse", qty: currentSupply, etaDate: null, etaType: "AVAILABLE_NOW" as const },
+    ...incomingSupply.map((container) => {
+      const eta = getContainerEta(container);
+      return { sourceType: "CONTAINER" as const, sourceId: container.container_id, sourceLabel: container.container_number ?? "Container", qty: container.available_qty, etaDate: eta.etaDate, etaType: eta.etaType };
+    }),
+  ];
+  let supplyIndex = 0;
+  const allocations: CoverageAllocation[] = [];
+  const lines = new Map<string, LineCoverage>();
+
+  for (const line of demand) {
+    let remaining = Math.max(0, line.remaining_qty);
+    let offset = 0;
+    const lineAllocations: CoverageAllocation[] = [];
+
+    while (remaining > 0) {
+      while (supplyIndex < supply.length && supply[supplyIndex].qty <= 0) supplyIndex += 1;
+      const current = supply[supplyIndex];
+      const take = current ? Math.min(remaining, current.qty) : remaining;
+      const range = queueRange(line, offset, take);
+      const allocation: CoverageAllocation = {
+        orderLineId: line.id,
+        productId,
+        quantity: take,
+        queueStart: range.queueStart,
+        queueEnd: range.queueEnd,
+        sourceType: current?.sourceType ?? "UNASSIGNED",
+        sourceId: current?.sourceId ?? null,
+        sourceLabel: current?.sourceLabel ?? "Unassigned",
+        etaDate: current?.etaDate ?? null,
+        etaType: current?.etaType ?? "NONE",
+      };
+      allocations.push(allocation);
+      lineAllocations.push(allocation);
+      if (current) current.qty -= take;
+      remaining -= take;
+      offset += take;
+    }
+
+    const completeEta = lineAllocations.reduce<{ etaDate: string | null; etaType: SuggestedEtaType }>((latest, allocation) => laterEta(latest, { etaDate: allocation.etaDate, etaType: allocation.etaType }), { etaDate: null, etaType: "NONE" });
+    const warehouseQty = lineAllocations.filter((allocation) => allocation.sourceType === "WAREHOUSE").reduce((sum, allocation) => sum + allocation.quantity, 0);
+    const incomingQty = lineAllocations.filter((allocation) => allocation.sourceType === "CONTAINER").reduce((sum, allocation) => sum + allocation.quantity, 0);
+    const unassignedQty = lineAllocations.filter((allocation) => allocation.sourceType === "UNASSIGNED").reduce((sum, allocation) => sum + allocation.quantity, 0);
+    lines.set(line.id, {
+      line,
+      allocations: lineAllocations,
+      coveredQty: warehouseQty + incomingQty,
+      warehouseQty,
+      incomingQty,
+      unassignedQty,
+      completeEtaDate: completeEta.etaDate,
+      completeEtaType: completeEta.etaType,
+    });
+  }
+
+  return { productId, demand, currentSupply, incomingSupply, allocations, lines };
+}
+
+export function validateProductCoverage(resolution: ProductCoverageResolution, allDemand: OpenQueueLine[] = resolution.demand): CoverageDiagnostic[] {
+  const diagnostics: CoverageDiagnostic[] = [];
+  const warehouseCovered = resolution.allocations
+    .filter((allocation) => allocation.sourceType === "WAREHOUSE")
+    .reduce((sum, allocation) => sum + allocation.quantity, 0);
+  if (warehouseCovered > resolution.currentSupply) {
+    diagnostics.push({
+      code: "WAREHOUSE_COVERAGE_EXCEEDS_ON_FLOOR",
+      severity: "ERROR",
+      productId: resolution.productId,
+      sourceId: null,
+      expected: resolution.currentSupply,
+      actual: warehouseCovered,
+      message: "Warehouse coverage exceeds ON_FLOOR supply.",
+    });
+  }
+
+  for (const container of resolution.incomingSupply) {
+    const covered = resolution.allocations
+      .filter((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === container.container_id)
+      .reduce((sum, allocation) => sum + allocation.quantity, 0);
+    if (covered > Math.max(0, container.available_qty)) {
+      diagnostics.push({
+        code: "CONTAINER_COVERAGE_EXCEEDS_SUPPLY",
+        severity: "ERROR",
+        productId: resolution.productId,
+        sourceId: container.container_id,
+        expected: Math.max(0, container.available_qty),
+        actual: covered,
+        message: "Incoming container coverage exceeds its SKU quantity.",
+      });
+    }
+  }
+
+  const consumedLineIds = new Set(resolution.allocations.filter((allocation) => allocation.sourceType !== "UNASSIGNED").map((allocation) => allocation.orderLineId));
+  for (const line of allDemand) {
+    if (!consumedLineIds.has(line.id)) continue;
+    if (!isInventoryDemand(line)) {
+      diagnostics.push({
+        code: "NON_INVENTORY_SOURCE_CONSUMED_SUPPLY",
+        severity: "ERROR",
+        productId: resolution.productId,
+        sourceId: null,
+        expected: 0,
+        actual: Math.max(0, line.remaining_qty),
+        message: "Dropship/Other demand consumed warehouse or incoming coverage.",
+      });
+    }
+  }
+
+  return diagnostics;
 }
 
 export function getSuggestedAllocation(orderLine: OpenQueueLine, context: SuggestedAllocationContext): SuggestedAllocationResult {

@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
+import { OrdersTabLinks } from "./orders-tab-links";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -298,20 +299,7 @@ export default async function OrdersPage({
           <button type="submit" className="btn-secondary">Filter</button>
           <Link href={`/orders?tab=${activeTab}`} className="btn-ghost">Clear</Link>
         </form>
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((tab) => {
-            const isActive = tab.id === activeTab;
-            return (
-              <Link
-                key={tab.id}
-                href={searchText ? `/orders?tab=${tab.id}&q=${encodeURIComponent(searchText)}` : `/orders?tab=${tab.id}`}
-                className={`rounded-full px-3 py-2 text-sm font-semibold ${isActive ? "bg-[#111827] text-white" : "bg-[#f3f4f6] text-[#374151]"}`}
-              >
-                {tab.label} ({tabCounts[tab.id as keyof typeof tabCounts] ?? 0})
-              </Link>
-            );
-          })}
-        </div>
+        <OrdersTabLinks tabs={tabs.map((tab) => ({ ...tab, count: tabCounts[tab.id as keyof typeof tabCounts] ?? 0 }))} activeTab={activeTab} searchText={searchText} />
       </div>
 
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

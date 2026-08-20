@@ -66,11 +66,12 @@ type QueueLine = {
   shipping_orders?: {
     id: string;
     source_invoice_id?: string | null;
+    source_type?: string | null;
+    order_number?: string | null;
     duplicate_of_order_id?: string | null;
     cancellation_status?: string | null;
     created_at?: string | null;
     first_payment_at?: string | null;
-    order_number?: string | null;
     legacy_customer_name: string | null;
     fulfillment_method?: "SHIP" | "WILL_CALL" | null;
     qbo_invoices?: {
@@ -248,6 +249,9 @@ export default async function InventoryPage({
   const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
   const duplicateParentColumnAvailable = !duplicateParentColumnError;
   const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
+  const { error: cancellationColumnError } = await supabase.from("shipping_orders").select("cancellation_status").limit(1);
+  const cancellationColumnAvailable = !cancellationColumnError;
+  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
 
   const [
     productsResult,
@@ -338,6 +342,7 @@ export default async function InventoryPage({
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const queueLineRows = (queueLines ?? []) as QueueLine[];
   const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
+  const orderNumbers = [...new Set(queueLineRows.map((line) => line.shipping_orders?.order_number).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();
   for (const product of productRows) {
     if (product.sku) productIdByAliasKey.set(normalizeSkuKey(product.sku), product.id);
@@ -348,8 +353,18 @@ export default async function InventoryPage({
   const { data: qboLineRows } = sourceInvoiceIds.length
     ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id").in("qbo_invoice_id", sourceInvoiceIds)
     : { data: [] };
+  const { data: qboParentRows } = orderNumbers.length
+    ? await supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,${duplicateParentField}${cancellationField}qbo_invoices(raw_payload)`).in("order_number", orderNumbers).eq("source_type", "QBO_INVOICE")
+    : { data: [] };
+  const typedQboParentRows = (qboParentRows ?? []) as unknown as Array<{ id: string; order_number: string | null; source_invoice_id: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null } | null }>;
+  const qboParentByOrderNumber = new Map(typedQboParentRows.filter((row) => !row.duplicate_of_order_id && String(row.cancellation_status ?? "").toUpperCase() !== "CANCELLED" && String(row.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() !== "VOIDED").map((row) => [String(row.order_number), row]));
+  const qboParentInvoiceIds = [...new Set(typedQboParentRows.map((row) => row.source_invoice_id).filter(Boolean))] as string[];
+  const extraQboLineRows = qboParentInvoiceIds.length
+    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id").in("qbo_invoice_id", qboParentInvoiceIds)
+    : { data: [] };
+  const allQboLineRows = [...(qboLineRows ?? []), ...(extraQboLineRows.data ?? [])].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
   const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
-  for (const qboLine of (qboLineRows ?? []) as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null }>) {
+  for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null }>) {
     const qboProductId = qboLine.product_id ?? productIdByAliasKey.get(normalizeSkuKey(qboLine.qbo_sku)) ?? null;
     const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeSkuKey(qboLine.qbo_sku)}`;
     const candidates = qboCandidatesByParentProduct.get(key) ?? [];
@@ -362,12 +377,15 @@ export default async function InventoryPage({
       parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
       parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
     };
-    if (line.qbo_invoice_line_id || !line.shipping_orders?.source_invoice_id || !line.product_id) return { ...line, ...parentFields };
-    const productKey = `${line.shipping_orders.source_invoice_id}|${line.product_id}`;
+    if (line.qbo_invoice_line_id || !line.product_id) return { ...line, ...parentFields };
+    const qboParent = qboParentByOrderNumber.get(String(line.shipping_orders?.order_number ?? ""));
+    const bridgeInvoiceId = qboParent?.source_invoice_id ?? line.shipping_orders?.source_invoice_id;
+    if (!bridgeInvoiceId) return { ...line, ...parentFields };
+    const productKey = `${bridgeInvoiceId}|${line.product_id}`;
     const directCandidates = qboCandidatesByParentProduct.get(productKey) ?? [];
-    const skuCandidates = (qboLineRows ?? []).filter((qboLine) => {
+    const skuCandidates = allQboLineRows.filter((qboLine) => {
       const row = qboLine as { qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null };
-      return row.qbo_invoice_id === line.shipping_orders?.source_invoice_id && normalizeSkuKey(row.qbo_sku) === normalizeSkuKey(line.legacy_item_code);
+      return row.qbo_invoice_id === bridgeInvoiceId && normalizeSkuKey(row.qbo_sku) === normalizeSkuKey(line.legacy_item_code);
     });
     const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
     return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };

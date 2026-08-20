@@ -21,6 +21,7 @@ export type OpenQueueLine = {
   created_at: string;
   has_live_allocation: boolean;
   fulfillment_source?: string | null;
+  warehouse_reserved_qty?: number | null;
 };
 
 export type ProductContainerSupply = {
@@ -170,6 +171,17 @@ function queueRange(line: OpenQueueLine, offset: number, quantity: number) {
   return { queueStart: start, queueEnd: start + quantity - 1 };
 }
 
+function addAllocation(
+  allocations: CoverageAllocation[],
+  lineAllocationsById: Map<string, CoverageAllocation[]>,
+  allocation: CoverageAllocation,
+) {
+  allocations.push(allocation);
+  const rows = lineAllocationsById.get(allocation.orderLineId) ?? [];
+  rows.push(allocation);
+  lineAllocationsById.set(allocation.orderLineId, rows);
+}
+
 function laterEta(left: { etaDate: string | null; etaType: SuggestedEtaType }, right: { etaDate: string | null; etaType: SuggestedEtaType }) {
   if (!left.etaDate) return right;
   if (!right.etaDate) return left;
@@ -182,8 +194,16 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
   const currentSupply = Math.max(0, context.floorAvailableByProduct.get(productId) ?? 0);
   const incomingSupply = sortContainersByEta(context.containerSupplyByProduct.get(productId) ?? [])
     .map((container) => ({ ...container, available_qty: Math.max(0, container.available_qty) }));
+  const pinnedWarehouseByLine = new Map<string, number>();
+  let pinnedWarehouseQty = 0;
+  for (const line of demand) {
+    const pinned = Math.min(Math.max(0, line.remaining_qty), Math.max(0, Number(line.warehouse_reserved_qty ?? 0)));
+    if (pinned <= 0) continue;
+    pinnedWarehouseByLine.set(line.id, pinned);
+    pinnedWarehouseQty += pinned;
+  }
   const supply = [
-    { sourceType: "WAREHOUSE" as const, sourceId: null, sourceLabel: "Warehouse", qty: currentSupply, etaDate: null, etaType: "AVAILABLE_NOW" as const },
+    { sourceType: "WAREHOUSE" as const, sourceId: null, sourceLabel: "Warehouse", qty: Math.max(0, currentSupply - pinnedWarehouseQty), etaDate: null, etaType: "AVAILABLE_NOW" as const },
     ...incomingSupply.map((container) => {
       const eta = getContainerEta(container);
       return { sourceType: "CONTAINER" as const, sourceId: container.container_id, sourceLabel: container.container_number ?? "Container", qty: container.available_qty, etaDate: eta.etaDate, etaType: eta.etaType };
@@ -191,19 +211,38 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
   ];
   let supplyIndex = 0;
   const allocations: CoverageAllocation[] = [];
+  const lineAllocationsById = new Map<string, CoverageAllocation[]>();
   const lines = new Map<string, LineCoverage>();
 
   for (const line of demand) {
-    let remaining = Math.max(0, line.remaining_qty);
-    let offset = 0;
-    const lineAllocations: CoverageAllocation[] = [];
+    const pinned = pinnedWarehouseByLine.get(line.id) ?? 0;
+    if (pinned <= 0) continue;
+    const range = queueRange(line, 0, pinned);
+    addAllocation(allocations, lineAllocationsById, {
+      orderLineId: line.id,
+      productId,
+      quantity: pinned,
+      queueStart: range.queueStart,
+      queueEnd: range.queueEnd,
+      sourceType: "WAREHOUSE",
+      sourceId: null,
+      sourceLabel: "Warehouse",
+      etaDate: null,
+      etaType: "AVAILABLE_NOW",
+    });
+  }
+
+  for (const line of demand) {
+    const pinned = pinnedWarehouseByLine.get(line.id) ?? 0;
+    let remaining = Math.max(0, line.remaining_qty - pinned);
+    let offset = pinned;
 
     while (remaining > 0) {
       while (supplyIndex < supply.length && supply[supplyIndex].qty <= 0) supplyIndex += 1;
       const current = supply[supplyIndex];
       const take = current ? Math.min(remaining, current.qty) : remaining;
       const range = queueRange(line, offset, take);
-      const allocation: CoverageAllocation = {
+      addAllocation(allocations, lineAllocationsById, {
         orderLineId: line.id,
         productId,
         quantity: take,
@@ -214,13 +253,13 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
         sourceLabel: current?.sourceLabel ?? "Unassigned",
         etaDate: current?.etaDate ?? null,
         etaType: current?.etaType ?? "NONE",
-      };
-      allocations.push(allocation);
-      lineAllocations.push(allocation);
+      });
       if (current) current.qty -= take;
       remaining -= take;
       offset += take;
     }
+
+    const lineAllocations = lineAllocationsById.get(line.id) ?? [];
 
     const completeEta = lineAllocations.reduce<{ etaDate: string | null; etaType: SuggestedEtaType }>((latest, allocation) => laterEta(latest, { etaDate: allocation.etaDate, etaType: allocation.etaType }), { etaDate: null, etaType: "NONE" });
     const warehouseQty = lineAllocations.filter((allocation) => allocation.sourceType === "WAREHOUSE").reduce((sum, allocation) => sum + allocation.quantity, 0);

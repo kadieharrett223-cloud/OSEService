@@ -241,6 +241,7 @@ type OpenQueueLineLookupRow = {
   approved_qty: number | null;
   fulfilled_qty: number | null;
   fulfillment_source?: string | null;
+  warehouse_status?: string | null;
   priority: string | null;
   queue_position_start: number | null;
   approved_at: string | null;
@@ -248,6 +249,8 @@ type OpenQueueLineLookupRow = {
   inventory_allocations?: Array<{
     id: string;
     allocation_status: string | null;
+    quantity?: number | null;
+    source_type?: string | null;
   }>;
 };
 
@@ -971,7 +974,7 @@ export default async function OrderDetailPage({
           .in("product_id", resolvedProductIds),
         supabase
           .from("shipping_order_lines")
-          .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status)")
+          .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, warehouse_status, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status, quantity, source_type)")
           .in("product_id", resolvedProductIds)
           .eq("approval_status", "APPROVED")
           .neq("fulfillment_status", "FULFILLED"),
@@ -1052,11 +1055,16 @@ export default async function OrderDetailPage({
     if (remainingQty <= 0) continue;
 
     const hasLiveAllocation = (row.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED");
+    const floorReservedQty = (row.inventory_allocations ?? [])
+      .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && String(allocation.source_type ?? "").toUpperCase() === "FLOOR")
+      .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
+    const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(row.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
     const queueLine: OpenQueueLine = {
       id: row.id,
       product_id: row.product_id,
       remaining_qty: remainingQty,
         fulfillment_source: row.fulfillment_source,
+      warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
       priority: row.priority,
       queue_position_start: row.queue_position_start,
       approved_at: row.approved_at,

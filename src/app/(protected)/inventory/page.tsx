@@ -564,6 +564,10 @@ export default async function InventoryPage({
     if (!line.product_id || !isOpenQueueLine(line)) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
     const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const floorReservedQty = (line.inventory_allocations ?? [])
+      .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")
+      .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
+    const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
     const rows = coverageQueueByProduct.get(line.product_id) ?? [];
     rows.push({
       id: line.id,
@@ -575,6 +579,7 @@ export default async function InventoryPage({
       created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
       fulfillment_source: line.fulfillment_source,
+      warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
     });
     coverageQueueByProduct.set(line.product_id, rows);
   }

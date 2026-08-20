@@ -69,6 +69,23 @@ describe("shared product coverage resolver", () => {
     ]);
   });
 
+  it("pins explicit warehouse reservations while consuming ON_FLOOR only once", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 2]]),
+      queueLinesByProduct: new Map([[productId, [
+        line("A", 1, 1),
+        line("B", 1, 2),
+        line("ReservedLater", 1, 99, { warehouse_reserved_qty: 1 }),
+      ]]]),
+      containerSupplyByProduct: new Map([[productId, [container("c1", "Container 1", 5, "2026-08-25")]]]),
+    });
+
+    expect(result.lines.get("ReservedLater")?.warehouseQty).toBe(1);
+    expect(result.lines.get("A")?.warehouseQty).toBe(1);
+    expect(result.lines.get("B")?.incomingQty).toBe(1);
+    expect(result.allocations.filter((allocation) => allocation.sourceType === "WAREHOUSE").reduce((sum, allocation) => sum + allocation.quantity, 0)).toBe(2);
+  });
+
   it("moves incoming coverage to warehouse after container receipt increases ON_FLOOR", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 4]]),

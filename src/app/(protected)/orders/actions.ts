@@ -1478,62 +1478,6 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const warehouseLines = lines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
   const nonWarehouseLines = lines.filter((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
   const fulfilledAtIso = `${fulfillmentDate}T12:00:00.000Z`;
-  let shipmentId: string | null = null;
-
-  if (warehouseLines.length > 0) {
-    const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
-      p_order_id: orderId,
-      p_shipped_at: fulfilledAtIso,
-      p_carrier: carrier || null,
-      p_tracking_number: trackingNumber || null,
-      p_notes: notes,
-      p_idempotency_key: `${idempotencyKey}:WAREHOUSE`,
-      p_lines: warehouseLines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
-    } as never);
-    if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
-    if (!createdShipmentId) redirect(`/orders/${orderId}?error=Unable+to+create+shipment+record`);
-    shipmentId = createdShipmentId as string;
-    const { error: shipmentNoteError } = await adminClient
-      .from("order_shipments")
-      .update({ notes } as never)
-      .eq("id", shipmentId)
-      .eq("shipping_order_id", orderId);
-    if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
-  }
-
-  if (nonWarehouseLines.length > 0) {
-    if (!shipmentId) {
-      const shipmentNumber = `SHIP-${Date.now()}`;
-      const { data: createdShipmentData, error: shipmentError } = await adminClient
-        .from("order_shipments")
-        .insert({
-          shipping_order_id: orderId,
-          shipment_number: shipmentNumber,
-          shipped_at: fulfilledAtIso,
-          carrier: carrier || null,
-          tracking_number: trackingNumber || null,
-          notes: notes || null,
-          idempotency_key: `${idempotencyKey}:EXTERNAL`,
-        } as never)
-        .select("id")
-        .single();
-      const createdShipment = createdShipmentData as { id: string } | null;
-      if (shipmentError || !createdShipment?.id) {
-        redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentError?.message ?? "Unable to create shipment record")}`);
-      }
-      shipmentId = createdShipment.id;
-    }
-
-    const shipmentLineRows = nonWarehouseLines.map((line) => ({
-      shipment_id: shipmentId,
-      shipping_order_line_id: line.id,
-      quantity: selectedQuantities.get(line.id) ?? 0,
-    }));
-    const { error: shipmentLineError } = await adminClient.from("order_shipment_lines").insert(shipmentLineRows as never);
-    if (shipmentLineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentLineError.message)}`);
-  }
-
-  const fulfillmentColumns = await loadTableColumnSet(adminClient, "fulfillments", ["fulfillment_type"]);
   for (const line of nonWarehouseLines) {
     const source = String(line.fulfillment_source ?? "").toUpperCase();
     if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Dropship+and+Other+must+be+assigned+before+non-warehouse+completion`);
@@ -1548,35 +1492,33 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     if (source === "OTHER" && !finalNotes) redirect(`/orders/${orderId}?error=Explanation+is+required+for+Other+completion`);
     if (source === "DROPSHIP" && !line.fulfillment_supplier && !carrier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropship+completion`);
 
-    const { error: clearError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", line.id);
-    if (clearError) redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
-
     const { error: updateError } = await adminClient.from("shipping_order_lines").update({
-      fulfilled_qty: nextFulfilled,
-      fulfillment_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
-      warehouse_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
-      allocation_status: "UNALLOCATED",
       fulfillment_supplier: source === "DROPSHIP" ? (line.fulfillment_supplier || carrier || null) : null,
       fulfillment_reference: source === "DROPSHIP" ? (line.fulfillment_reference || reference || null) : null,
       fulfillment_tracking: source === "DROPSHIP" ? (line.fulfillment_tracking || trackingNumber || null) : null,
       fulfillment_notes: finalNotes,
     } as never).eq("id", line.id);
     if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
-
-    const { error: fulfillmentError } = await adminClient.from("fulfillments").insert({
-      shipping_order_line_id: line.id,
-      fulfilled_qty: quantity,
-      fulfilled_at: fulfilledAtIso,
-      shipment_number: source === "DROPSHIP" ? (line.fulfillment_reference || reference || null) : null,
-      carrier: source === "DROPSHIP" ? (line.fulfillment_supplier || carrier || null) : null,
-      tracking_number: source === "DROPSHIP" ? (line.fulfillment_tracking || trackingNumber || null) : null,
-      reason: source === "DROPSHIP" ? "Dropship fulfillment completed" : `Other fulfillment completed: ${finalNotes}`,
-      source_event_key: `${source}:${idempotencyKey}:${line.id}`,
-      actor_id: actorId,
-      ...(fulfillmentColumns.has("fulfillment_type") ? { fulfillment_type: source } : {}),
-    } as never);
-    if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
   }
+
+  const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
+    p_order_id: orderId,
+    p_shipped_at: fulfilledAtIso,
+    p_carrier: carrier || null,
+    p_tracking_number: trackingNumber || null,
+    p_notes: notes,
+    p_idempotency_key: `${idempotencyKey}:FULFILLMENT`,
+    p_lines: lines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
+  } as never);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  if (!createdShipmentId) redirect(`/orders/${orderId}?error=Unable+to+create+shipment+record`);
+  const shipmentId = createdShipmentId as string;
+  const { error: shipmentNoteError } = await adminClient
+    .from("order_shipments")
+    .update({ notes } as never)
+    .eq("id", shipmentId)
+    .eq("shipping_order_id", orderId);
+  if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
 
   await writeOrderActivity(adminClient, orderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: selectedIds.join(","), warehouse_count: warehouseLines.length, non_warehouse_count: nonWarehouseLines.length, fulfilled_at: fulfilledAtIso });
   revalidateOrdersList();

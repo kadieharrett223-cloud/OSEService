@@ -66,6 +66,15 @@ function getPositiveNumber(formData: FormData, key: string) {
   return raw;
 }
 
+async function safeAccessUserId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string | null | undefined,
+) {
+  if (!userId || !isUuid(userId)) return null;
+  const { data } = await supabase.from("access_users").select("id").eq("id", userId).maybeSingle();
+  return data?.id ?? null;
+}
+
 async function hasRemainingShippableLinesForOrder(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   orderId: string,
@@ -1026,6 +1035,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   const tracking = getString(formData, "fulfillment_tracking")?.trim() || null;
   const notes = getString(formData, "fulfillment_notes")?.trim() || null;
   const adminClient = getSupabaseAdmin();
+  const actorId = await safeAccessUserId(adminClient, user.id);
 
   if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
   if (!fulfilledDate) redirect(`/orders/${orderId}?error=Completion+date+is+required`);
@@ -1096,7 +1106,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
     tracking_number: source === "DROPSHIP" ? finalTracking : null,
     reason: source === "DROPSHIP" ? "Dropship fulfillment completed" : `Other fulfillment completed: ${finalNotes}`,
     source_event_key: eventKey,
-    actor_id: user.id,
+    actor_id: actorId,
     ...(fulfillmentColumns.has("fulfillment_type") ? { fulfillment_type: source } : {}),
   } as never);
   if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
@@ -1251,6 +1261,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const pickupDate = getString(formData, "pickup_date")?.trim();
   const notes = getString(formData, "pickup_notes")?.trim() || null;
   const adminClient = getSupabaseAdmin();
+  const actorId = await safeAccessUserId(adminClient, user.id);
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
 
   const documentColumns = await loadTableColumnSet(adminClient, "order_attachments", ["document_type", "is_restricted"]);
@@ -1273,7 +1284,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
     const complete = nextQty >= Number(line.approved_qty ?? 0);
     const update = await adminClient.from("shipping_order_lines").update({ fulfilled_qty: nextQty, fulfillment_status: complete ? "FULFILLED" : "PARTIALLY_FULFILLED", warehouse_status: complete ? "FULFILLED" : "PARTIALLY_FULFILLED" }).eq("id", line.id);
     if (update.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(update.error.message)}`);
-    const event = await adminClient.from("fulfillments").insert({ shipping_order_line_id: line.id, fulfilled_qty: pickupQty, fulfilled_at: pickedAt, reason: "Order line picked up", source_event_key: `PICKUP:${pickupId}:${line.id}`, fulfillment_type: "PICKUP", actor_id: user.id } as never);
+    const event = await adminClient.from("fulfillments").insert({ shipping_order_line_id: line.id, fulfilled_qty: pickupQty, fulfilled_at: pickedAt, reason: "Order line picked up", source_event_key: `PICKUP:${pickupId}:${line.id}`, fulfillment_type: "PICKUP", actor_id: actorId } as never);
     if (event.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(event.error.message)}`);
     try {
       await recordFulfillmentInventory(adminClient, line.id, line.product_id, pickupQty, `PICKUP:${pickupId}:${line.id}`, user.id);
@@ -1446,6 +1457,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes")?.trim() || null;
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
+  const actorId = await safeAccessUserId(adminClient, user.id);
 
   if (!orderId || !fulfillmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+fulfillment+items+and+a+date`);
   if (selectedIds.length === 0) redirect(`/orders/${orderId}?error=Select+at+least+one+remaining+line`);
@@ -1525,7 +1537,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
       tracking_number: source === "DROPSHIP" ? (line.fulfillment_tracking || trackingNumber || null) : null,
       reason: source === "DROPSHIP" ? "Dropship fulfillment completed" : `Other fulfillment completed: ${finalNotes}`,
       source_event_key: `${source}:${idempotencyKey}:${line.id}`,
-      actor_id: user.id,
+      actor_id: actorId,
       ...(fulfillmentColumns.has("fulfillment_type") ? { fulfillment_type: source } : {}),
     } as never);
     if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);

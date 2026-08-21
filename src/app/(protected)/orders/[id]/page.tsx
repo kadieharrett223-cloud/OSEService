@@ -602,6 +602,7 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
 
   const lineColumns = [
     "id",
+    "product_id",
     "ordered_qty",
     "approved_qty",
     "fulfilled_qty",

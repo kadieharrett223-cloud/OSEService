@@ -1478,9 +1478,10 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const warehouseLines = lines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
   const nonWarehouseLines = lines.filter((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
   const fulfilledAtIso = `${fulfillmentDate}T12:00:00.000Z`;
+  let shipmentId: string | null = null;
 
   if (warehouseLines.length > 0) {
-    const { data: shipmentId, error } = await adminClient.rpc("complete_order_shipment", {
+    const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
       p_order_id: orderId,
       p_shipped_at: fulfilledAtIso,
       p_carrier: carrier || null,
@@ -1490,12 +1491,44 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
       p_lines: warehouseLines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
     } as never);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+    shipmentId = createdShipmentId as string | null;
     const { error: shipmentNoteError } = await adminClient
       .from("order_shipments")
       .update({ notes } as never)
       .eq("id", shipmentId)
       .eq("shipping_order_id", orderId);
     if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
+  }
+
+  if (nonWarehouseLines.length > 0) {
+    if (!shipmentId) {
+      const shipmentNumber = `SHIP-${Date.now()}`;
+      const { data: createdShipment, error: shipmentError } = await adminClient
+        .from("order_shipments")
+        .insert({
+          shipping_order_id: orderId,
+          shipment_number: shipmentNumber,
+          shipped_at: fulfilledAtIso,
+          carrier: carrier || null,
+          tracking_number: trackingNumber || null,
+          notes: notes || null,
+          idempotency_key: `${idempotencyKey}:EXTERNAL`,
+        } as never)
+        .select("id")
+        .single();
+      if (shipmentError || !createdShipment?.id) {
+        redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentError?.message ?? "Unable to create shipment record")}`);
+      }
+      shipmentId = createdShipment.id;
+    }
+
+    const shipmentLineRows = nonWarehouseLines.map((line) => ({
+      shipment_id: shipmentId,
+      shipping_order_line_id: line.id,
+      quantity: selectedQuantities.get(line.id) ?? 0,
+    }));
+    const { error: shipmentLineError } = await adminClient.from("order_shipment_lines").insert(shipmentLineRows as never);
+    if (shipmentLineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentLineError.message)}`);
   }
 
   const fulfillmentColumns = await loadTableColumnSet(adminClient, "fulfillments", ["fulfillment_type"]);

@@ -144,6 +144,26 @@ function lineMatchesInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string
   return invoiceKeys.some((invoiceKey) => lineKeys.some((lineKey) => lineKey === invoiceKey || lineKey.includes(invoiceKey) || invoiceKey.includes(lineKey)));
 }
 
+function prioritizeMatchingLine(left: PhysicalFulfillmentLine, right: PhysicalFulfillmentLine) {
+  const leftCompleted = upper(left.fulfillment_status) === "FULFILLED" ? 1 : 0;
+  const rightCompleted = upper(right.fulfillment_status) === "FULFILLED" ? 1 : 0;
+  if (leftCompleted !== rightCompleted) return leftCompleted > rightCompleted ? -1 : 1;
+
+  const leftFulfilled = Math.max(0, Number(left.fulfilled_qty ?? 0));
+  const rightFulfilled = Math.max(0, Number(right.fulfilled_qty ?? 0));
+  if (leftFulfilled !== rightFulfilled) return leftFulfilled > rightFulfilled ? -1 : 1;
+
+  const leftMapped = Boolean(left.product_id) ? 1 : 0;
+  const rightMapped = Boolean(right.product_id) ? 1 : 0;
+  if (leftMapped !== rightMapped) return leftMapped > rightMapped ? -1 : 1;
+
+  const leftApproved = Math.max(0, Number(left.approved_qty ?? 0));
+  const rightApproved = Math.max(0, Number(right.approved_qty ?? 0));
+  if (leftApproved !== rightApproved) return leftApproved > rightApproved ? -1 : 1;
+
+  return (left.id ?? "").localeCompare(right.id ?? "") < 0 ? -1 : 1;
+}
+
 export function getCanonicalPhysicalOrderSummary({
   rawPayload,
   lines,
@@ -178,11 +198,14 @@ export function getCanonicalPhysicalOrderSummary({
 
   const usedLineIds = new Set<string>();
   const items = invoiceItems.map((item) => {
-    const line = sourceLines.find((candidate) => {
-      if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
-      if (candidate.id && usedLineIds.has(candidate.id)) return false;
-      return lineMatchesInvoiceSku(candidate, item.sku);
-    }) ?? null;
+    const matches = sourceLines
+      .filter((candidate) => {
+        if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
+        if (candidate.id && usedLineIds.has(candidate.id)) return false;
+        return lineMatchesInvoiceSku(candidate, item.sku);
+      })
+      .sort((left, right) => prioritizeMatchingLine(left, right));
+    const line = matches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));
     return {

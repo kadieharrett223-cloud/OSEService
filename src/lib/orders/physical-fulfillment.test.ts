@@ -117,6 +117,20 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("prefers the fulfilled mapped duplicate over a stale unmapped duplicate with the same legacy SKU", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PTA-6", 1]]),
+      lines: [
+        line({ id: "stale-4pta", legacy_item_code: "4PTA-6", product_id: "old-product", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING" }),
+        line({ id: "mapped-4pta", legacy_item_code: "4PTA-6", product_id: "new-product", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(summary.items[0].line?.product_id).toBe("new-product");
+    expectInvariant(summary);
+  });
+
   it("keeps same-number 11982 customer obligations separate for John Sweeney and Bryant Bray", () => {
     const john = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["Misc Charge", 1], ["Note", 1], ["Discount-1", 1]], { descriptions: { "Misc Charge": "4032-6 Three level lift", Note: "220 volt motor", "Discount-1": "-- Discount" } }),

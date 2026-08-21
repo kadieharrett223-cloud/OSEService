@@ -26,7 +26,7 @@ export function SourceAssignmentForm({
   reference: string;
   tracking: string;
   notes: string;
-  containers: Array<{ id: string; container_number: string | null; lifecycle_status: string | null; eta_confirmed_date: string | null; eta_estimated_date: string | null }>;
+  containers: Array<{ id: string; container_number: string | null; lifecycle_status: string | null; eta_confirmed_date: string | null; eta_estimated_date: string | null; available_qty?: number | null }>;
 }) {
   const [source, setSource] = useState<FulfillmentSource>(defaultSource);
   const today = new Date();
@@ -53,12 +53,13 @@ export function SourceAssignmentForm({
                 {containers.map((container) => {
                   const etaRaw = container.eta_confirmed_date ?? container.eta_estimated_date;
                   const eta = etaRaw ? new Date(etaRaw) : null;
+                  const availableQty = Math.max(0, Number(container.available_qty ?? 0));
                   const etaLabel = eta && !Number.isNaN(eta.getTime())
                     ? eta.toLocaleDateString("en-US", { month: "short", day: "numeric", year: today.getFullYear() === eta.getFullYear() ? undefined : "numeric" })
                     : "Pending";
                   return (
                     <option key={container.id} value={container.id}>
-                      {(container.container_number ?? "Container")} · {String(container.lifecycle_status ?? "Pending").replace(/_/g, " ")} · ETA {etaLabel}
+                      {(container.container_number ?? "Container")} · {availableQty} available · ETA {etaLabel}
                     </option>
                   );
                 })}

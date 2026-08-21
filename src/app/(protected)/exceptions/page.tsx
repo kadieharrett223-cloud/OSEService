@@ -34,6 +34,17 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
     const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboRawPayload: order.qbo_invoices?.raw_payload, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
     for (const issue of issues) findings.push({ order, issue });
   }
+  const ordersByNumber = new Map<string, OrderRow[]>();
+  for (const order of (result.data ?? []) as unknown as OrderRow[]) {
+    const key = String(order.qbo_invoices?.invoice_number ?? order.order_number ?? "").trim().toUpperCase();
+    if (!key) continue;
+    ordersByNumber.set(key, [...(ordersByNumber.get(key) ?? []), order]);
+  }
+  for (const [invoiceNumber, orders] of ordersByNumber) {
+    const customerNames = new Set(orders.map((order) => String(order.customers?.company_name ?? order.customers?.full_name ?? "").trim().toUpperCase()).filter(Boolean));
+    if (customerNames.size <= 1) continue;
+    for (const order of orders) findings.push({ order, issue: { severity: "WARNING", code: "AMBIGUOUS_ORDER_NUMBER_BRIDGE", product: null, issue: "Same invoice/order number appears under multiple customers", expected: "Do not bridge by order number alone", actual: `${invoiceNumber}: ${[...customerNames].join(" / ")}`, cause: "Order-number-only identity is ambiguous and must require compatible customer/source evidence before combining demand." } });
+  }
   const params = await searchParams;
   const severity = String(params.severity ?? "").toUpperCase();
   const issueType = String(params.type ?? "");

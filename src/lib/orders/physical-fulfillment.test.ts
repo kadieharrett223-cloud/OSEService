@@ -116,14 +116,39 @@ describe("physical fulfillment totals", () => {
     expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 1, remaining: 1, isPartiallyFulfilled: true });
     expectInvariant(summary);
   });
+
+  it("keeps same-number 11982 customer obligations separate for John Sweeney and Bryant Bray", () => {
+    const john = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["Misc Charge", 1], ["Note", 1], ["Discount-1", 1]], { descriptions: { "Misc Charge": "4032-6 Three level lift", Note: "220 volt motor", "Discount-1": "-- Discount" } }),
+      lines: [
+        line({ id: "john-4032", legacy_item_code: "Misc Charge", product_id: "4032-6", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+    const bryant = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["2PBP-10-1 (deleted)", 1], ["UHJS-750-1 (deleted)", 2], ["2PFC-1-1 (deleted)", 1], ["Note", 1], ["Discount-1", 1]], { descriptions: { Note: "220V motor", "Discount-1": "-- Discount" } }),
+      lines: [
+        line({ id: "stale-4032", legacy_item_code: "4032-6", product_id: "4032-6", approved_qty: 1, fulfilled_qty: 0 }),
+        line({ id: "bryant-lift", legacy_item_code: "2PBP-10", product_id: "2PBP-10", approved_qty: 1, fulfilled_qty: 0 }),
+        line({ id: "bryant-stand", legacy_item_code: "UHJS-750", product_id: "UHJS-750", approved_qty: 2, fulfilled_qty: 0 }),
+        line({ id: "bryant-cradle", legacy_item_code: "2PFC-1", product_id: "2PFC-1", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(john).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(john.items[0].line?.product_id).toBe("4032-6");
+    expect(bryant).toMatchObject({ lineCount: 3, ordered: 4, fulfilled: 0, remaining: 4, isComplete: false });
+    expect(bryant.items.map((item) => item.line?.product_id)).not.toContain("4032-6");
+    expectInvariant(john);
+    expectInvariant(bryant);
+  });
 });
 
-function invoicePayload(items: Array<[string, number]>) {
+function invoicePayload(items: Array<[string, number]>, options: { descriptions?: Record<string, string> } = {}) {
   return {
     Line: items.map(([sku, qty], index) => ({
       Id: String(index + 1),
       DetailType: "SalesItemLineDetail",
-      Description: sku === "Note" ? "Please contact customer" : `Item ${sku}`,
+      Description: options.descriptions?.[sku] ?? (sku === "Note" ? "Please contact customer" : `Item ${sku}`),
       SalesItemLineDetail: { Qty: qty, ItemRef: { name: sku } },
     })),
   };

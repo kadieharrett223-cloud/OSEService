@@ -1559,13 +1559,12 @@ export default async function OrderDetailPage({
                     const assignmentSourceDefault = inferredSource === "DROPSHIP" || inferredSource === "OTHER" || inferredSource === "CONTAINER" ? inferredSource : "WAREHOUSE";
                     const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
                     const descriptionSummary = truncateText(item.description, 30);
-                    const isWarehouseFulfillment = assignmentSourceDefault === "WAREHOUSE";
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
+                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>

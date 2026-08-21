@@ -1435,6 +1435,110 @@ export async function completeOrderShipmentAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Shipment+completed`);
 }
 
+export async function completeSelectedFulfillmentAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const fulfillmentDate = getString(formData, "shipment_date");
+  const idempotencyKey = getString(formData, "idempotency_key");
+  const carrier = getString(formData, "carrier");
+  const trackingNumber = getString(formData, "tracking_number");
+  const reference = getString(formData, "fulfillment_reference")?.trim() || null;
+  const notes = getString(formData, "shipment_notes")?.trim() || null;
+  const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
+  const adminClient = getSupabaseAdmin();
+
+  if (!orderId || !fulfillmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+fulfillment+items+and+a+date`);
+  if (selectedIds.length === 0) redirect(`/orders/${orderId}?error=Select+at+least+one+remaining+line`);
+
+  const selectedQuantities = new Map(selectedIds.map((lineId) => [lineId, getPositiveNumber(formData, `quantity_${lineId}`)]));
+  if ([...selectedQuantities.values()].some((quantity) => quantity <= 0)) redirect(`/orders/${orderId}?error=Fulfillment+quantities+must+be+greater+than+zero`);
+
+  const { data: rows, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
+    .eq("shipping_order_id", orderId)
+    .in("id", selectedIds);
+  if (lineError || rows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
+
+  const lines = (rows ?? []) as unknown as Array<{ id: string; product_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
+  if (lines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+fulfill+an+unmapped+product+line`);
+
+  const warehouseLines = lines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
+  const nonWarehouseLines = lines.filter((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
+  const fulfilledAtIso = `${fulfillmentDate}T12:00:00.000Z`;
+
+  if (warehouseLines.length > 0) {
+    const { data: shipmentId, error } = await adminClient.rpc("complete_order_shipment", {
+      p_order_id: orderId,
+      p_shipped_at: fulfilledAtIso,
+      p_carrier: carrier || null,
+      p_tracking_number: trackingNumber || null,
+      p_notes: notes,
+      p_idempotency_key: `${idempotencyKey}:WAREHOUSE`,
+      p_lines: warehouseLines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
+    } as never);
+    if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+    const { error: shipmentNoteError } = await adminClient
+      .from("order_shipments")
+      .update({ notes } as never)
+      .eq("id", shipmentId)
+      .eq("shipping_order_id", orderId);
+    if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
+  }
+
+  const fulfillmentColumns = await loadTableColumnSet(adminClient, "fulfillments", ["fulfillment_type"]);
+  for (const line of nonWarehouseLines) {
+    const source = String(line.fulfillment_source ?? "").toUpperCase();
+    if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Dropship+and+Other+must+be+assigned+before+non-warehouse+completion`);
+    const quantity = selectedQuantities.get(line.id) ?? 0;
+    const approvedQty = Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0));
+    const fulfilledQty = Number(line.fulfilled_qty ?? 0);
+    const remaining = Math.max(0, approvedQty - fulfilledQty);
+    if (quantity > remaining) redirect(`/orders/${orderId}?error=Fulfillment+quantity+cannot+exceed+remaining+quantity`);
+    const nextFulfilled = fulfilledQty + quantity;
+    const isComplete = nextFulfilled >= approvedQty && approvedQty > 0;
+    const finalNotes = notes || line.fulfillment_notes || (source === "DROPSHIP" ? "Dropship fulfillment completed" : null);
+    if (source === "OTHER" && !finalNotes) redirect(`/orders/${orderId}?error=Explanation+is+required+for+Other+completion`);
+    if (source === "DROPSHIP" && !line.fulfillment_supplier && !carrier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropship+completion`);
+
+    const { error: clearError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", line.id);
+    if (clearError) redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
+
+    const { error: updateError } = await adminClient.from("shipping_order_lines").update({
+      fulfilled_qty: nextFulfilled,
+      fulfillment_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+      warehouse_status: isComplete ? "FULFILLED" : "PARTIALLY_FULFILLED",
+      allocation_status: "UNALLOCATED",
+      fulfillment_supplier: source === "DROPSHIP" ? (line.fulfillment_supplier || carrier || null) : null,
+      fulfillment_reference: source === "DROPSHIP" ? (line.fulfillment_reference || reference || null) : null,
+      fulfillment_tracking: source === "DROPSHIP" ? (line.fulfillment_tracking || trackingNumber || null) : null,
+      fulfillment_notes: finalNotes,
+    } as never).eq("id", line.id);
+    if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+
+    const { error: fulfillmentError } = await adminClient.from("fulfillments").insert({
+      shipping_order_line_id: line.id,
+      fulfilled_qty: quantity,
+      fulfilled_at: fulfilledAtIso,
+      shipment_number: source === "DROPSHIP" ? (line.fulfillment_reference || reference || null) : null,
+      carrier: source === "DROPSHIP" ? (line.fulfillment_supplier || carrier || null) : null,
+      tracking_number: source === "DROPSHIP" ? (line.fulfillment_tracking || trackingNumber || null) : null,
+      reason: source === "DROPSHIP" ? "Dropship fulfillment completed" : `Other fulfillment completed: ${finalNotes}`,
+      source_event_key: `${source}:${idempotencyKey}:${line.id}`,
+      actor_id: user.id,
+      ...(fulfillmentColumns.has("fulfillment_type") ? { fulfillment_type: source } : {}),
+    } as never);
+    if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
+  }
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: selectedIds.join(","), warehouse_count: warehouseLines.length, non_warehouse_count: nonWarehouseLines.length, fulfilled_at: fulfilledAtIso });
+  revalidateOrdersList();
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Fulfillment+completed`);
+}
+
 export async function editOrderShipmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "orderId");

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, useState } from "react";
 import {
-  completeOrderShipmentAction,
+  completeSelectedFulfillmentAction,
   markOrderLinesPickedUpAction,
 } from "../actions";
 
@@ -13,6 +13,7 @@ type SelectionLine = {
   defaultQty: number;
   inStock: number;
   isReserved: boolean;
+  fulfillmentSource: "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
 };
 type SelectedLine = SelectionLine & { quantity: number };
 type ContextValue = {
@@ -144,7 +145,7 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
           aria-label={`Fulfillment quantity of ${line.sku}`}
         />
       ) : null}
-      {line.inStock <= 0 && !line.isReserved ? (
+      {line.fulfillmentSource !== "DROPSHIP" && line.fulfillmentSource !== "OTHER" && line.inStock <= 0 && !line.isReserved ? (
         <span className="ml-1 text-[11px] font-medium text-[#b45309]">
           Inventory shortage: fulfilling {line.defaultQty} with 0 available
         </span>
@@ -162,6 +163,7 @@ export function ShipmentSelectionComposer({
 }) {
   const { active, selected, cancel } = useSelection();
   if (!active) return null;
+  const hasExternalFulfillment = selected.some((line) => line.fulfillmentSource === "DROPSHIP" || line.fulfillmentSource === "OTHER");
   return (
     <div className="mt-4 rounded-xl border border-[#bfdbfe] bg-[#f8fbff] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -184,7 +186,7 @@ export function ShipmentSelectionComposer({
           action={
             pickupMode
               ? markOrderLinesPickedUpAction
-              : completeOrderShipmentAction
+              : completeSelectedFulfillmentAction
           }
           className="mt-4 grid gap-3"
         >
@@ -263,9 +265,20 @@ export function ShipmentSelectionComposer({
                 />
               </label>
               <label className="text-xs font-semibold text-[#64748b]">
-                Carrier
+                {hasExternalFulfillment ? "Carrier / Supplier" : "Carrier"}
                 <input name="carrier" className="input mt-1" />
               </label>
+              {hasExternalFulfillment ? (
+                <label className="text-xs font-semibold text-[#64748b]">
+                  PO / Reference
+                  <input name="fulfillment_reference" className="input mt-1" />
+                </label>
+              ) : null}
+              {hasExternalFulfillment ? (
+                <p className="rounded-lg border border-[#bfdbfe] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">
+                  Dropship/Other completion records customer fulfillment only. Olympic warehouse inventory is not deducted.
+                </p>
+              ) : null}
               <label className="text-xs font-semibold text-[#64748b]">
                 Tracking / PRO number
                 <input name="tracking_number" className="input mt-1" />
@@ -287,6 +300,13 @@ export function ShipmentSelectionComposer({
                 name={pickupMode ? "line_id" : "selected_line_id"}
                 value={line.id}
               />
+              {!pickupMode ? (
+                <input
+                  type="hidden"
+                  name={`fulfillment_source_${line.id}`}
+                  value={line.fulfillmentSource}
+                />
+              ) : null}
               <input
                 type="hidden"
                 name={`${pickupMode ? "pickup_qty" : "quantity"}_${line.id}`}

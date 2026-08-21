@@ -1491,7 +1491,8 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
       p_lines: warehouseLines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
     } as never);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
-    shipmentId = createdShipmentId as string | null;
+    if (!createdShipmentId) redirect(`/orders/${orderId}?error=Unable+to+create+shipment+record`);
+    shipmentId = createdShipmentId as string;
     const { error: shipmentNoteError } = await adminClient
       .from("order_shipments")
       .update({ notes } as never)
@@ -1503,7 +1504,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   if (nonWarehouseLines.length > 0) {
     if (!shipmentId) {
       const shipmentNumber = `SHIP-${Date.now()}`;
-      const { data: createdShipment, error: shipmentError } = await adminClient
+      const { data: createdShipmentData, error: shipmentError } = await adminClient
         .from("order_shipments")
         .insert({
           shipping_order_id: orderId,
@@ -1516,6 +1517,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
         } as never)
         .select("id")
         .single();
+      const createdShipment = createdShipmentData as { id: string } | null;
       if (shipmentError || !createdShipment?.id) {
         redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentError?.message ?? "Unable to create shipment record")}`);
       }

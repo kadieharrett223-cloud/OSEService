@@ -625,7 +625,7 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
     "fulfillment_reference",
     "fulfillment_tracking",
     "fulfillment_notes",
-  ].filter((column) => column === "id" || lineColumnSet.has(column));
+  ].filter((column) => column === "id" || column === "product_id" || lineColumnSet.has(column));
 
   columns.push(
     "customers (company_name, full_name, email, phone)",
@@ -1567,7 +1567,7 @@ export default async function OrderDetailPage({
 
                     return (
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
-                        <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-start gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
+                        <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
                             {shipmentLine && !item.isNonInventory && isWarehouseFulfillment ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()) }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
@@ -1577,8 +1577,8 @@ export default async function OrderDetailPage({
                           <span className="text-[12px]">{fulfilled}</span>
                           <span className="text-[12px]">{needed}</span>
                           <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
-                          <span className="text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
-                          <span><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
+                          <span className="self-center text-center text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
+                          <span className="self-center text-center"><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
                             {line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>

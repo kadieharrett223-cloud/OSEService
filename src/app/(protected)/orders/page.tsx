@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
+import { dedupeOrderParentsByInvoice } from "@/lib/orders/order-identity";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -29,6 +30,7 @@ type OrderSummary = {
   id: string;
   order_number: string | null;
   source_type: string | null;
+  source_invoice_id?: string | null;
   duplicate_of_order_id?: string | null;
   cancellation_status?: string | null;
   notes: string | null;
@@ -96,6 +98,7 @@ function buildOrdersSelect(includeDuplicateField: boolean) {
     "id",
     "order_number",
     "source_type",
+    "source_invoice_id",
     "legacy_customer_name",
     "review_status",
     "cancellation_status",
@@ -192,7 +195,8 @@ const getCachedOrdersDataset = unstable_cache(
       if (leftCreated !== rightCreated) return rightCreated - leftCreated;
       return right.id.localeCompare(left.id);
     });
-    const projectedOrders: ProjectedOrderRow[] = allOrders.map((order) => {
+    const canonicalOrders = dedupeOrderParentsByInvoice(allOrders);
+    const projectedOrders: ProjectedOrderRow[] = canonicalOrders.map((order) => {
       const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
       const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
       const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });

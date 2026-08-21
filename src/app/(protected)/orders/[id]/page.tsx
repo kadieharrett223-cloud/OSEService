@@ -12,6 +12,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
+import { getPhysicalFulfillmentTotals } from "@/lib/orders/physical-fulfillment";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -541,11 +542,6 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       };
     })
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
-}
-
-function isNonInventoryOrderLine(line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]) {
-  const text = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name].filter(Boolean).join(" ").toLowerCase();
-  return /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(text);
 }
 
 function deriveOverallOrderStatus(lines: NonNullable<OrderDetailRow["shipping_order_lines"]>) {
@@ -1372,17 +1368,7 @@ export default async function OrderDetailPage({
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
   const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
-  const orderLineFulfilledTotal = orderLines.reduce((sum, line) => {
-    if (!line.product_id || isNonInventoryOrderLine(line) || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
-    return sum + Math.min(
-      Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)),
-      Math.max(0, Number(line.fulfilled_qty ?? 0)),
-    );
-  }, 0);
-  const orderLineEligibleTotal = orderLines.reduce((sum, line) => {
-    if (!line.product_id || isNonInventoryOrderLine(line) || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
-    return sum + Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0));
-  }, 0);
+  const physicalFulfillmentTotals = getPhysicalFulfillmentTotals(orderLines);
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
   const showNoShippableLinesNotice = !hasShippableLines
@@ -1402,9 +1388,9 @@ export default async function OrderDetailPage({
   );
   const fulfillmentProgressStatus = allVisibleLinesCancelled
     ? "Cancelled"
-    : orderLineEligibleTotal > 0 && orderLineFulfilledTotal >= orderLineEligibleTotal
+    : physicalFulfillmentTotals.ordered > 0 && physicalFulfillmentTotals.remaining === 0
       ? "Complete"
-      : orderLineFulfilledTotal > 0
+      : physicalFulfillmentTotals.fulfilled > 0
         ? "Partially Fulfilled"
         : "Awaiting Fulfillment";
 
@@ -1814,7 +1800,7 @@ export default async function OrderDetailPage({
           </section>
           <section className="rounded-2xl border border-[#bbdec5] bg-[#f1fbf3] p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#356344]">Fulfillment</h2>
-            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{orderLineFulfilledTotal}/{orderLineEligibleTotal} <span className="text-xl">Fulfilled</span></div>
+            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{physicalFulfillmentTotals.fulfilled}/{physicalFulfillmentTotals.ordered} <span className="text-xl">Fulfilled</span></div>
             <p className="mt-1 text-sm font-semibold text-[#356344]">{fulfillmentProgressStatus}</p>
           </section>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">

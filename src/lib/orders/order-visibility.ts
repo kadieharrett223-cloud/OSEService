@@ -6,9 +6,10 @@
  * invoice) or until reconciliation proved it current by leaving an approved, unfulfilled line.
  */
 
+import { getPhysicalFulfillmentLines, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, physicalLineOrderedQty } from "./physical-fulfillment";
+
 const CLOSED_LINE_STATES = ["FULFILLED", "CANCELLED", "REMOVED", "DENIED"];
 const WAREHOUSE_STATES = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"];
-const NON_INVENTORY_TEXT = /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 
 /** Excluded from operational demand pending a data decision. */
 const EXCLUDED_ORDER_NUMBERS = ["126037"];
@@ -49,17 +50,6 @@ export type OrderClassification = {
 const upper = (value: unknown) => String(value ?? "").trim().toUpperCase();
 const isClosed = (line: ClassificationLine) => CLOSED_LINE_STATES.includes(upper(line.fulfillment_status));
 
-function isNonInventoryLine(line: ClassificationLine) {
-  const text = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name].filter(Boolean).join(" ");
-  return NON_INVENTORY_TEXT.test(text);
-}
-
-function remainingOf(line: ClassificationLine) {
-  const approved = Number(line.approved_qty ?? 0);
-  const basis = approved > 0 ? approved : Number(line.ordered_qty ?? 0);
-  return basis - Number(line.fulfilled_qty ?? 0);
-}
-
 export function classifyOrder(
   order: ClassificationOrder,
   options: { manualMappingSkus?: Set<string> } = {},
@@ -92,38 +82,25 @@ export function classifyOrder(
     };
   }
 
-  const physicalLines = allLines.filter((line) => {
-    return Boolean(line.product_id)
-      && !isExcluded
-      && !isVoided
-      && !manualMappingSkus.has(upper(line.products?.sku))
-      && !manualMappingSkus.has(upper(line.legacy_item_code))
-      && !isNonInventoryLine(line)
-      && !["CANCELLED", "REMOVED", "DENIED"].includes(upper(line.fulfillment_status));
-  });
-  const physicalOrderedTotal = physicalLines.reduce((sum, line) => sum + Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)), 0);
-  const physicalFulfilledTotal = physicalLines.reduce((sum, line) => sum + Math.min(
-    Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)),
-    Math.max(0, Number(line.fulfilled_qty ?? 0)),
-  ), 0);
-  const physicalRemainingTotal = Math.max(0, physicalOrderedTotal - physicalFulfilledTotal);
+  const physicalLines = isExcluded || isVoided ? [] : getPhysicalFulfillmentLines(allLines, { manualMappingSkus });
+  const physicalTotals = getPhysicalFulfillmentTotals(physicalLines);
 
   const operationalLines = physicalLines.filter((line) => {
-    const remaining = Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const remaining = Math.max(0, physicalLineOrderedQty(line) - Number(line.fulfilled_qty ?? 0));
     return ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))
       && remaining > 0
       && !isClosed(line);
   });
 
-  const hasUnresolvedLines = allLines.some((line) => !line.product_id && !isNonInventoryLine(line) && !isClosed(line))
+  const hasUnresolvedLines = allLines.some((line) => !line.product_id && !isNonInventoryPhysicalLine(line) && !isClosed(line))
     || (allLines.length === 0 && order.source_type === "QBO_INVOICE");
   const isActivated = upper(order.review_status) !== "PENDING_REVIEW";
 
   const hasOperationalLines = operationalLines.length > 0;
-  const isVisibleOperationalOrder = (physicalRemainingTotal > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines);
+  const isVisibleOperationalOrder = (physicalTotals.remaining > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines);
 
   const anyWarehouse = operationalLines.some((line) => WAREHOUSE_STATES.includes(upper(line.warehouse_status)));
-  const anyShipped = physicalFulfilledTotal > 0 || physicalLines.some((line) => upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
+  const anyShipped = physicalTotals.fulfilled > 0 || physicalLines.some((line) => upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
   const isCompletedServiceOnlyOrder = allLines.length === 0 && upper(order.review_status) === "FULFILLED";
 
   return {
@@ -132,8 +109,8 @@ export function classifyOrder(
     isVisibleOperationalOrder,
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
-    isPartiallyShippedOrder: anyShipped && physicalRemainingTotal > 0,
-    isArchivedOrder: (physicalOrderedTotal > 0 && physicalRemainingTotal === 0) || isCompletedServiceOnlyOrder,
+    isPartiallyShippedOrder: anyShipped && physicalTotals.remaining > 0,
+    isArchivedOrder: (physicalTotals.ordered > 0 && physicalTotals.remaining === 0) || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };
 }

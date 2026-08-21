@@ -7,6 +7,38 @@ import { inferRoleFromName } from "@/lib/roles";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { getQuickbooksConnectionStatus } from "@/lib/quickbooks/integration";
+import { unstable_cache } from "next/cache";
+
+const getCachedQuickbooksIndicator = unstable_cache(
+  async () => {
+    const supabase = getSupabaseAdmin();
+    let quickbooksStatus = { connection: null, error: null } as Awaited<ReturnType<typeof getQuickbooksConnectionStatus>>;
+    let quickbooksSnapshotCount = 0;
+
+    try {
+      quickbooksStatus = await getQuickbooksConnectionStatus();
+    } catch {
+      quickbooksStatus = { connection: null, error: null };
+    }
+
+    try {
+      const { count } = await supabase
+        .from("quickbooks_invoices")
+        .select("id", { count: "exact", head: true });
+
+      quickbooksSnapshotCount = count ?? 0;
+    } catch {
+      quickbooksSnapshotCount = 0;
+    }
+
+    const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
+    return quickbooksTableMissing
+      ? quickbooksSnapshotCount > 0
+      : Boolean(quickbooksStatus.connection);
+  },
+  ["protected-layout-qbo-indicator"],
+  { revalidate: 30 },
+);
 
 export default async function ProtectedLayout({
   children,
@@ -16,30 +48,7 @@ export default async function ProtectedLayout({
   const user = await requireUser();
   const userName = user.fullName ?? "Unknown User";
   const userRole = inferRoleFromName(user.fullName);
-  const supabase = getSupabaseAdmin();
-  let quickbooksStatus = { connection: null, error: null } as Awaited<ReturnType<typeof getQuickbooksConnectionStatus>>;
-  let quickbooksSnapshotCount = 0;
-
-  try {
-    quickbooksStatus = await getQuickbooksConnectionStatus();
-  } catch {
-    quickbooksStatus = { connection: null, error: null };
-  }
-
-  try {
-    const { count } = await supabase
-      .from("quickbooks_invoices")
-      .select("id", { count: "exact", head: true });
-
-    quickbooksSnapshotCount = count ?? 0;
-  } catch {
-    quickbooksSnapshotCount = 0;
-  }
-
-  const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
-  const isQboConnected = quickbooksTableMissing
-    ? quickbooksSnapshotCount > 0
-    : Boolean(quickbooksStatus.connection);
+  const isQboConnected = await getCachedQuickbooksIndicator();
 
   return (
     <div className="flex min-h-screen flex-col bg-[#f5f7fa]">

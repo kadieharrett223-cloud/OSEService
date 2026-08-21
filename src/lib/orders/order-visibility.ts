@@ -69,7 +69,7 @@ export function classifyOrder(
     };
   }
 
-  if (isHistoricalDuplicate || isVoided) {
+  if (isHistoricalDuplicate) {
     return {
       operationalLines: [],
       isActivated: false,
@@ -79,6 +79,19 @@ export function classifyOrder(
       isPartiallyShippedOrder: false,
       isArchivedOrder: false,
       isCancelled: false,
+    };
+  }
+
+  if (isVoided) {
+    return {
+      operationalLines: [],
+      isActivated: false,
+      isVisibleOperationalOrder: false,
+      isNewOrder: false,
+      isWarehouseOrder: false,
+      isPartiallyShippedOrder: false,
+      isArchivedOrder: false,
+      isCancelled: true,
     };
   }
 

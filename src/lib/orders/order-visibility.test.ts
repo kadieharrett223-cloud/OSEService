@@ -181,4 +181,25 @@ describe("orders visibility and activation", () => {
     expect(matchesOrderTab(dormant, "orders")).toBe(false);
     expect(matchesOrderTab(dormant, "new")).toBe(false);
   });
+
+  it("shows a voided invoice in Cancelled even before ERP cancellation is applied", () => {
+    const result = classifyOrder(order({
+      cancellation_status: null,
+      qbo_invoices: { raw_payload: { PrivateNote: "VOIDED" } },
+    }));
+
+    expect(result.isCancelled).toBe(true);
+    expect(matchesOrderTab(result, "cancelled")).toBe(true);
+    expect(matchesOrderTab(result, "orders")).toBe(false);
+  });
+
+  it("keeps historical duplicate rows hidden even if their shared QBO invoice is voided", () => {
+    const result = classifyOrder(order({
+      duplicate_of_order_id: "canonical-order",
+      qbo_invoices: { raw_payload: { PrivateNote: "VOIDED" } },
+    }));
+
+    expect(result.isCancelled).toBe(false);
+    expect(matchesOrderTab(result, "cancelled")).toBe(false);
+  });
 });

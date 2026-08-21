@@ -64,6 +64,21 @@ type OrderSummary = {
   }>;
 };
 
+type ProjectedOrderRow = {
+  id: string;
+  invoiceNumber: string;
+  customerName: string;
+  createdAt: string;
+  searchable: string;
+  hasPhysicalLines: boolean;
+  itemCount: number;
+  totalQty: number;
+  shippedQty: number;
+  remainingQty: number;
+  remainingStatus: string;
+  tabs: string[];
+};
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -158,10 +173,71 @@ const getCachedOrdersDataset = unstable_cache(
       .order("created_at", { ascending: false })
       .order("id", { ascending: true }));
 
-    return { orders, directLines, manualMappingSkus };
+    const manualMappingSkuSet = new Set(manualMappingSkus);
+    const directLinesByOrder = new Map<string, OrderSummary["shipping_order_lines"]>();
+    for (const line of directLines as Array<{ shipping_order_id?: string; [key: string]: unknown }>) {
+      if (!line.shipping_order_id) continue;
+      directLinesByOrder.set(line.shipping_order_id, [
+        ...(directLinesByOrder.get(line.shipping_order_id) ?? []),
+        line as unknown as NonNullable<OrderSummary["shipping_order_lines"]>[number],
+      ]);
+    }
+    const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
+      ...order,
+      shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
+    })).sort((left, right) => {
+      const leftCreated = Date.parse(left.created_at) || 0;
+      const rightCreated = Date.parse(right.created_at) || 0;
+      if (leftCreated !== rightCreated) return rightCreated - leftCreated;
+      return right.id.localeCompare(left.id);
+    });
+    const projectedOrders: ProjectedOrderRow[] = allOrders.map((order) => {
+      const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
+      const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
+      const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
+      const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
+      const totalQty = canonicalSummary.ordered;
+      const hasPhysicalLines = canonicalSummary.lineCount > 0;
+      const inStockQty = canonicalSummary.items
+        .filter(({ line }) => line && ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+        .reduce((sum, { line, quantity }) => sum + Math.max(0, Number(line?.fulfilled_qty ?? 0) >= quantity ? 0 : quantity - Number(line?.fulfilled_qty ?? 0)), 0);
+      const warehouseQty = canonicalSummary.items
+        .filter(({ line }) => line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+        .reduce((sum, { line, quantity }) => sum + Math.max(0, quantity - Number(line?.fulfilled_qty ?? 0)), 0);
+      const shippedQty = canonicalSummary.fulfilled;
+      const remainingQty = canonicalSummary.remaining;
+      const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
+      const remainingAvailable = Math.min(Math.max(0, remainingQty - remainingInWarehouse), Math.max(0, inStockQty - warehouseQty));
+      const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable);
+      const remainingStatusParts: string[] = [];
+      if (remainingAvailable > 0) remainingStatusParts.push(`${remainingAvailable} available`);
+      if (remainingInWarehouse > 0) remainingStatusParts.push(`${remainingInWarehouse} in warehouse`);
+      if (remainingWaiting > 0) remainingStatusParts.push(`${remainingWaiting} waiting`);
+      const remainingStatus = remainingQty === 0 ? "Complete" : remainingStatusParts.length > 0 ? remainingStatusParts.join(" · ") : "Not in stock";
+      const tabs = ["orders", "new", "warehouse", "partial", "archived", "cancelled"].filter((tab) => matchesOrderTab(classification, tab));
+      const searchable = [
+        order.order_number,
+        order.legacy_customer_name,
+        order.customers?.company_name,
+        order.customers?.full_name,
+        order.qbo_invoices?.invoice_number,
+        ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs };
+    });
+    const tabCounts = {
+      orders: projectedOrders.filter((order) => order.tabs.includes("orders")).length,
+      new: projectedOrders.filter((order) => order.tabs.includes("new")).length,
+      warehouse: projectedOrders.filter((order) => order.tabs.includes("warehouse")).length,
+      partial: projectedOrders.filter((order) => order.tabs.includes("partial")).length,
+      archived: projectedOrders.filter((order) => order.tabs.includes("archived")).length,
+      cancelled: projectedOrders.filter((order) => order.tabs.includes("cancelled")).length,
+    };
+
+    return { projectedOrders, tabCounts };
   },
   ["orders-page-dataset"],
-  { revalidate: 10 },
+  { revalidate: 60 },
 );
 
 export default async function OrdersPage({
@@ -174,93 +250,18 @@ export default async function OrdersPage({
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
 
-  let orders: unknown[] = [];
-  let directLines: unknown[] = [];
-  let manualMappingSkus = new Set<string>();
+  let projectedOrders: ProjectedOrderRow[] = [];
+  let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
   let ordersLoadError: Error | null = null;
   try {
     const dataset = await getCachedOrdersDataset();
-    orders = dataset.orders;
-    directLines = dataset.directLines;
-    manualMappingSkus = new Set(dataset.manualMappingSkus);
+    projectedOrders = dataset.projectedOrders;
+    tabCounts = dataset.tabCounts;
   } catch (error) {
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }
 
-  const directLinesByOrder = new Map<string, OrderSummary["shipping_order_lines"]>();
-  for (const line of directLines as Array<{ shipping_order_id?: string; [key: string]: unknown }>) {
-    if (!line.shipping_order_id) continue;
-    directLinesByOrder.set(line.shipping_order_id, [
-      ...(directLinesByOrder.get(line.shipping_order_id) ?? []),
-      line as unknown as NonNullable<OrderSummary["shipping_order_lines"]>[number],
-    ]);
-  }
-
-  const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
-    ...order,
-    shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
-  })).sort((left, right) => {
-    const leftCreated = Date.parse(left.created_at) || 0;
-    const rightCreated = Date.parse(right.created_at) || 0;
-    if (leftCreated !== rightCreated) return rightCreated - leftCreated;
-    return right.id.localeCompare(left.id);
-  });
-
-  function operationalLines(order: OrderSummary) {
-    return classifyOrder(order, { manualMappingSkus }).operationalLines as OrderSummary["shipping_order_lines"];
-  }
-  const liveOrderIdByInvoice = new Map<string, string>();
-  for (const order of allOrders) {
-    const invoice = order.qbo_invoices?.invoice_number ?? order.order_number;
-    if (invoice) liveOrderIdByInvoice.set(invoice.toUpperCase(), order.id);
-  }
-
-  const deniedCustomerByInvoice = new Map<string, string>();
-  for (const order of allOrders) {
-    const customerName = order.customers?.company_name
-      ?? order.customers?.full_name
-      ?? order.legacy_customer_name
-      ?? null;
-
-    if (!customerName) continue;
-
-    const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? null;
-    if (!invoiceNumber) continue;
-
-    deniedCustomerByInvoice.set(invoiceNumber.toUpperCase(), customerName);
-  }
-
-  function matchesTab(order: OrderSummary, tabId: string) {
-    return matchesOrderTab(classifyOrder(order, { manualMappingSkus }), tabId);
-  }
-
-  const orderSummaries = allOrders.filter((order) => {
-    if (!matchesTab(order, activeTab)) return false;
-    if (!searchText) return true;
-
-    const searchable = [
-      order.order_number,
-      order.legacy_customer_name,
-      order.customers?.company_name,
-      order.customers?.full_name,
-      order.qbo_invoices?.invoice_number,
-      ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-
-    return searchable.includes(searchText);
-  });
-
-  const tabCounts = {
-    orders: allOrders.filter((order) => matchesTab(order, "orders")).length,
-    new: allOrders.filter((order) => matchesTab(order, "new")).length,
-    warehouse: allOrders.filter((order) => matchesTab(order, "warehouse")).length,
-    partial: allOrders.filter((order) => matchesTab(order, "partial")).length,
-    archived: allOrders.filter((order) => matchesTab(order, "archived")).length,
-    cancelled: allOrders.filter((order) => matchesTab(order, "cancelled")).length,
-  };
+  const orderSummaries = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || order.searchable.includes(searchText))).slice(0, 100);
 
   const tabs = [
     { id: "new", label: "New Orders" },
@@ -359,49 +360,21 @@ export default async function OrdersPage({
               </thead>
               <tbody>
             {orderSummaries.map((order) => {
-              const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
-              const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
-              const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
-              const totalQty = canonicalSummary.ordered;
-              const hasPhysicalLines = canonicalSummary.lineCount > 0;
-              const inStockQty = canonicalSummary.items
-                .filter(({ line }) => line && ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
-                .reduce((sum, { line, quantity }) => sum + Math.max(0, Number(line?.fulfilled_qty ?? 0) >= quantity ? 0 : quantity - Number(line?.fulfilled_qty ?? 0)), 0);
-              const warehouseQty = canonicalSummary.items
-                .filter(({ line }) => line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
-                .reduce((sum, { line, quantity }) => sum + Math.max(0, quantity - Number(line?.fulfilled_qty ?? 0)), 0);
-              const shippedQty = canonicalSummary.fulfilled;
-              const remainingQty = Math.max(0, totalQty - shippedQty);
-              const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
-              const remainingAvailable = Math.min(
-                Math.max(0, remainingQty - remainingInWarehouse),
-                Math.max(0, inStockQty - warehouseQty),
-              );
-              const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable);
-              const remainingStatusParts: string[] = [];
-              if (remainingAvailable > 0) remainingStatusParts.push(`${remainingAvailable} available`);
-              if (remainingInWarehouse > 0) remainingStatusParts.push(`${remainingInWarehouse} in warehouse`);
-              if (remainingWaiting > 0) remainingStatusParts.push(`${remainingWaiting} waiting`);
-              const remainingStatus = remainingQty === 0
-                ? "Complete"
-                : remainingStatusParts.length > 0
-                  ? remainingStatusParts.join(" · ")
-                  : "Not in stock";
               return (
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
                   <td className="px-3 py-3">
-                    <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{invoiceNumber}</Link>
-                    <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
+                    <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{order.invoiceNumber}</Link>
+                    <div className="mt-1 text-xs text-[#64748b]">{order.customerName}</div>
                   </td>
-                  <td className="px-3 py-3 font-semibold">{hasPhysicalLines ? `${canonicalSummary.lineCount} items · ${totalQty} units` : "Service / no inventory"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{hasPhysicalLines ? `${shippedQty} of ${totalQty}` : "—"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#b45309]">{hasPhysicalLines ? remainingQty : "—"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#334155]">{hasPhysicalLines ? remainingStatus : "No physical fulfillment"}</td>
-                  <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.created_at)}</td>
+                  <td className="px-3 py-3 font-semibold">{order.hasPhysicalLines ? `${order.itemCount} items · ${order.totalQty} units` : "Service / no inventory"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{order.hasPhysicalLines ? `${order.shippedQty} of ${order.totalQty}` : "—"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#b45309]">{order.hasPhysicalLines ? order.remainingQty : "—"}</td>
+                  <td className="px-3 py-3 font-semibold text-[#334155]">{order.hasPhysicalLines ? order.remainingStatus : "No physical fulfillment"}</td>
+                  <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.createdAt)}</td>
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {activeTab === "new" && hasPhysicalLines ? (
+                    {activeTab === "new" && order.hasPhysicalLines ? (
                       <form action={moveOrderToWarehouseAction}>
                         <input type="hidden" name="orderId" value={order.id} />
                         <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>

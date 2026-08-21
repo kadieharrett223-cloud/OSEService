@@ -12,6 +12,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
+import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -1357,8 +1358,9 @@ export default async function OrderDetailPage({
     return { item, supply, needed, inStock, fulfilled, status };
   });
 
-  const visibleOpenTotal = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
-  const visibleShippedTotal = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
+  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: orderLines });
+  const visibleOpenTotal = canonicalPhysicalSummary.remaining;
+  const visibleShippedTotal = canonicalPhysicalSummary.fulfilled;
   const visibleBackorderedTotal = itemStockSummary.reduce((sum, row) => sum + Math.max(0, row.needed - row.inStock), 0);
   const visibleUnallocatedCount = itemStockSummary.reduce((sum, row) => {
     if (row.item.isNonInventory || row.needed <= 0 || row.inStock > 0) return sum;
@@ -1367,11 +1369,11 @@ export default async function OrderDetailPage({
     return sum + row.needed;
   }, 0);
 
-  const totalUnitsNeeded = itemStockSummary.reduce((sum, row) => sum + row.needed, 0);
+  const totalUnitsNeeded = canonicalPhysicalSummary.remaining;
   const totalUnitsInStock = itemStockSummary.reduce((sum, row) => sum + Math.min(row.needed, row.inStock), 0);
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
-  const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
-  const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
+  const totalUnitsShipped = canonicalPhysicalSummary.fulfilled;
+  const totalEligibleInventoryUnits = canonicalPhysicalSummary.ordered;
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
   const showNoShippableLinesNotice = !hasShippableLines

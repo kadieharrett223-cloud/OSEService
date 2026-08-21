@@ -786,9 +786,20 @@ export default async function InventoryPage({
 
       // Unallocated open demand still consumes floor stock, matching the OLD_ERP Available = On Floor - Sold rule.
       const committedFloor = Math.max(group.floorCommitted, Math.min(group.openDemand, group.onFloor));
+      let groupIncomingDemand = Math.max(0, group.openDemand - committedFloor);
       const incomingContainers = group.incomingContainers
         .slice()
-        .sort((left, right) => left.etaSort.localeCompare(right.etaSort));
+        .sort((left, right) => left.etaSort.localeCompare(right.etaSort))
+        .map((container) => {
+          const resolverCommitted = Math.min(container.qty, groupIncomingDemand);
+          groupIncomingDemand = Math.max(0, groupIncomingDemand - resolverCommitted);
+          const committed = Math.max(container.committed, resolverCommitted);
+          return {
+            ...container,
+            committed,
+            available: Math.max(0, container.qty - committed),
+          };
+        });
       const customerQueue = group.customerQueue
         .slice()
         .sort((left, right) => {

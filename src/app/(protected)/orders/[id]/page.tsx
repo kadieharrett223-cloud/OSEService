@@ -531,7 +531,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
         || normalizedDescription.startsWith("--")
         || normalizedSku === "note"
         || normalizedSku.startsWith("note:")
-        || /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
+        || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
 
       return {
         sku,

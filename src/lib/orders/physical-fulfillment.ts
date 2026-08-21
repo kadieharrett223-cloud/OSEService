@@ -1,4 +1,4 @@
-const NON_INVENTORY_TEXT = /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
+const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
 
 export type PhysicalFulfillmentLine = {

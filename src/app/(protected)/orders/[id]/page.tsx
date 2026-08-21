@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { isOpenDemandLine } from "@/lib/demand/product-demand";
 import {
@@ -13,6 +14,7 @@ import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -786,6 +788,18 @@ export default async function OrderDetailPage({
 
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
+  }
+
+  if (orderRecord.source_invoice_id) {
+    const { data: siblingOrders } = await supabase
+      .from("shipping_orders")
+      .select("id, source_type, source_system, created_at, source_invoice_id")
+      .eq("source_invoice_id", orderRecord.source_invoice_id)
+      .order("created_at", { ascending: true });
+    const canonicalOrder = resolveCanonicalOrderParent(siblingOrders ?? []);
+    if (canonicalOrder?.id && canonicalOrder.id !== orderRecord.id) {
+      redirect(`/orders/${canonicalOrder.id}?message=Opened+canonical+QuickBooks+order+for+this+invoice`);
+    }
   }
 
   if ((orderRecord.shipping_order_lines ?? []).length === 0 && parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload).some((item) => !item.isNonInventory && item.qty > 0)) {

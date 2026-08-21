@@ -111,6 +111,28 @@ async function hasRemainingShippableLinesForOrder(
   });
 }
 
+async function resolveCanonicalSiblingOrderId(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+) {
+  const { data: current } = await supabase
+    .from("shipping_orders")
+    .select("id, source_invoice_id")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (!current?.source_invoice_id) return null;
+
+  const { data: siblings } = await supabase
+    .from("shipping_orders")
+    .select("id, source_type, source_system, created_at, source_invoice_id")
+    .eq("source_invoice_id", current.source_invoice_id)
+    .order("created_at", { ascending: true });
+
+  const canonical = resolveCanonicalOrderParent(siblings ?? []);
+  if (!canonical?.id || canonical.id === orderId) return null;
+  return canonical.id;
+}
+
 export async function completeServiceOnlyOrderAction(formData: FormData) {
   await requireUser();
   const orderId = getString(formData, "orderId");
@@ -1141,6 +1163,13 @@ export async function markOrderLineShippedAction(formData: FormData) {
   const shipQty = getPositiveNumber(formData, "ship_qty");
   const adminClient = getSupabaseAdmin();
 
+  if (orderId) {
+    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
+    if (canonicalOrderId) {
+      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+shipment+completion`);
+    }
+  }
+
   if (!orderId || !lineId) {
     redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
   }
@@ -1261,6 +1290,12 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const pickupDate = getString(formData, "pickup_date")?.trim();
   const notes = getString(formData, "pickup_notes")?.trim() || null;
   const adminClient = getSupabaseAdmin();
+  if (orderId) {
+    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
+    if (canonicalOrderId) {
+      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+pickup+completion`);
+    }
+  }
   const actorId = await safeAccessUserId(adminClient, user.id);
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
 
@@ -1310,6 +1345,12 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   const carrier = (getString(formData, "carrier") ?? "").trim();
   const selectedIds = formData.getAll("line_id").map((value) => String(value).trim()).filter(Boolean);
   const adminClient = getSupabaseAdmin();
+  if (orderId) {
+    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
+    if (canonicalOrderId) {
+      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+shipment+completion`);
+    }
+  }
 
   if (!orderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
   if (selectedIds.length === 0) {
@@ -1404,6 +1445,12 @@ export async function completeOrderShipmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes");
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
+  if (orderId) {
+    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
+    if (canonicalOrderId) {
+      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+shipment+completion`);
+    }
+  }
   if (!orderId || !shipmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
   if (selectedIds.length === 0) {
     const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
@@ -1457,6 +1504,12 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes")?.trim() || null;
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
+  if (orderId) {
+    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
+    if (canonicalOrderId) {
+      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+fulfillment`);
+    }
+  }
   const actorId = await safeAccessUserId(adminClient, user.id);
 
   if (!orderId || !fulfillmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+fulfillment+items+and+a+date`);

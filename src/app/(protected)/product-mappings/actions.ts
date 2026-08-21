@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 
 type MappingQueueEntry = {
   id: string;
@@ -100,6 +101,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
 
   revalidatePath("/product-mappings");
   revalidatePath("/inventory");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   if (returnTo.startsWith("/orders/")) {
     redirect(`${returnTo}?message=Product+mapping+saved`);
@@ -185,6 +187,7 @@ export async function createFocusedProductMappingAction(formData: FormData) {
   }
 
   revalidatePath("/product-mappings");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   if (returnTo.startsWith("/orders/")) {
     revalidatePath(returnTo.split("?")[0]);
@@ -251,6 +254,7 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
   await recalculateProductQueues([productId]);
   revalidatePath("/product-mappings");
   revalidatePath("/inventory");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   redirect("/product-mappings?message=SKU+mapped+across+all+matching+line+items");
 }

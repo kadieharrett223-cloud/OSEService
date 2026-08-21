@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { unstable_cache } from "next/cache";
 import { moveOrderToWarehouseAction } from "./actions";
@@ -237,18 +238,20 @@ const getCachedOrdersDataset = unstable_cache(
     return { projectedOrders, tabCounts };
   },
   ["orders-page-dataset"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] },
 );
 
 export default async function OrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; q?: string; message?: string; error?: string }>;
+  searchParams: Promise<{ tab?: string; q?: string; page?: string; message?: string; error?: string }>;
 }) {
   await requireUser();
   const params = await searchParams;
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
+  const pageSize = 100;
+  const currentPage = Math.max(1, Number.parseInt(String(params.page ?? "1"), 10) || 1);
 
   let projectedOrders: ProjectedOrderRow[] = [];
   let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
@@ -261,7 +264,15 @@ export default async function OrdersPage({
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }
 
-  const orderSummaries = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || order.searchable.includes(searchText))).slice(0, 100);
+  const filteredOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || order.searchable.includes(searchText)));
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const pageHref = (page: number) => {
+    const query = new URLSearchParams({ tab: activeTab, page: String(page) });
+    if (searchText) query.set("q", searchText);
+    return `/orders?${query.toString()}`;
+  };
 
   const tabs = [
     { id: "new", label: "New Orders" },
@@ -387,6 +398,19 @@ export default async function OrdersPage({
             })}
               </tbody>
             </table>
+          </div>
+        ) : null}
+
+        {filteredOrders.length > pageSize ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-[#475569]">
+            <span>
+              Showing {(safePage - 1) * pageSize + 1}-{Math.min(safePage * pageSize, filteredOrders.length)} of {filteredOrders.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Link href={pageHref(Math.max(1, safePage - 1))} className={`btn-secondary ${safePage <= 1 ? "pointer-events-none opacity-50" : ""}`}>Previous</Link>
+              <span className="font-semibold text-[#334155]">Page {safePage} of {totalPages}</span>
+              <Link href={pageHref(Math.min(totalPages, safePage + 1))} className={`btn-secondary ${safePage >= totalPages ? "pointer-events-none opacity-50" : ""}`}>Next</Link>
+            </div>
           </div>
         ) : null}
 

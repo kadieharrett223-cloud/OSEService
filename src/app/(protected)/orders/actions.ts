@@ -9,6 +9,12 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
 import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
+
+function revalidateOrdersList() {
+  revalidateOrdersProjection();
+  revalidatePath("/orders");
+}
 
 async function loadTableColumnSet(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -113,7 +119,7 @@ export async function completeServiceOnlyOrderAction(formData: FormData) {
   const { error } = await adminClient.from("shipping_orders").update({ review_status: "FULFILLED" } as never).eq("id", orderId);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   await writeOrderActivity(adminClient, orderId, "SERVICE_ONLY_ORDER_COMPLETED", { message: "Service-only invoice completed without inventory movement" });
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Service+invoice+completed`);
 }
@@ -139,7 +145,7 @@ export async function cancelVoidedOrderAction(formData: FormData) {
   if (error) redirect(`/exceptions?error=${encodeURIComponent(error.message)}`);
   await recalculateProductQueues((affectedLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
   revalidatePath("/exceptions");
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -344,7 +350,7 @@ export async function updateOrderLineStatusAction(formData: FormData) {
     await writeOrderActivity(adminClient, orderId, auditAction, auditDetails);
   }
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
 }
@@ -393,7 +399,7 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
   await recalculateProductQueues(openLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
   await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_TO_WAREHOUSE", { line_count: openLines.length });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
   redirect(`/orders/${orderId}?message=Order+moved+to+warehouse`);
@@ -435,7 +441,7 @@ export async function moveOrderLineBackToOrdersAction(formData: FormData) {
   if (line.product_id) await recalculateProductQueues([line.product_id]);
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_MOVED_BACK_TO_ORDERS", { line_id: lineId });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
   redirect(`/orders/${orderId}?message=Item+moved+back+to+Orders`);
@@ -470,7 +476,7 @@ export async function moveOrderBackToOrdersAction(formData: FormData) {
 
   await recalculateProductQueues(movableLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
   await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_BACK_TO_ORDERS", { line_count: movableLines.length });
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
   redirect(`/orders/${orderId}?message=${encodeURIComponent(`${movableLines.length} item${movableLines.length === 1 ? "" : "s"} moved back to Orders`)}`);
@@ -542,7 +548,7 @@ async function activateExistingQuickbooksOrder(
   });
 
   if (plan.productIds.length > 0) await recalculateProductQueues(plan.productIds);
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
 }
 
@@ -627,7 +633,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
 
   if (lineError) redirect(`/orders/new?error=${encodeURIComponent(lineError.message)}`);
   await recalculateProductQueues(mappedInvoiceLines.map((line) => line.product_id));
-  revalidatePath("/orders");
+  revalidateOrdersList();
   redirect(`/orders?tab=new&message=QuickBooks+invoice+added+to+New+Orders`);
 }
 
@@ -670,7 +676,7 @@ export async function overrideProductQueuePositionAction(formData: FormData) {
     reason,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${line.shipping_order_id}`);
   revalidatePath("/inventory");
   redirect(`/orders/${line.shipping_order_id}?message=Product+queue+reordered`);
@@ -725,7 +731,7 @@ export async function updateOrderScheduleAction(formData: FormData) {
     shipping_method: payload.shipping_method ?? null,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Schedule+updated`);
 }
@@ -739,7 +745,7 @@ export async function updateOrderFulfillmentMethodAction(formData: FormData) {
   const { error } = await adminClient.from("shipping_orders").update({ fulfillment_method: method } as never).eq("id", orderId);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_FULFILLMENT_METHOD_UPDATED", { fulfillment_method: method });
-  revalidatePath("/orders"); revalidatePath(`/orders/${orderId}`);
+  revalidateOrdersList(); revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Fulfillment+method+updated`);
 }
 
@@ -776,7 +782,7 @@ export async function updateOrderOperationsAction(formData: FormData) {
   if (methodError) redirect(`/orders/${orderId}?error=${encodeURIComponent(methodError.message)}`);
 
   await writeOrderActivity(adminClient, orderId, "ORDER_OPERATIONS_UPDATED", { warehouse_state: warehouseState, fulfillment_method: fulfillmentMethod });
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
   redirect(`/orders/${orderId}?message=Order+operations+updated`);
@@ -817,7 +823,7 @@ export async function addOrderNoteAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(`Unable to save note: ${error.message}`)}`);
   }
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
 }
@@ -1107,7 +1113,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
     fulfilled_at: fulfilledAtIso,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1228,7 +1234,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
     shipment_date: shipmentDate,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1280,7 +1286,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const pickup = await pickupTable.insert({ id: pickupId, shipping_order_id: orderId, pickup_person_name: pickupPersonName, pickup_at: pickedAt, completed_by: user.id, notes, acknowledgment_document_id: acknowledgmentDocumentId, drivers_license_document_id: driversLicenseDocumentId });
   if (pickup.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(pickup.error.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_PICKUP_COMPLETED", { pickup_id: pickupId, pickup_person_name: pickupPersonName, line_count: lines?.length ?? 0, notes });
-  revalidatePath("/orders"); revalidatePath("/inventory"); revalidatePath(`/orders/${orderId}`);
+  revalidateOrdersList(); revalidatePath("/inventory"); revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Pickup+completed`);
 }
 
@@ -1370,7 +1376,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
     shipment_date: shipmentDate,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1422,7 +1428,7 @@ export async function completeOrderShipmentAction(formData: FormData) {
     .eq("shipping_order_id", orderId);
   if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1462,7 +1468,7 @@ export async function editOrderShipmentAction(formData: FormData) {
     line_count: selectedIds.length,
     message: `Shipment edited by ${user.fullName ?? "employee"}`,
   });
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1500,7 +1506,7 @@ export async function updateOrderShipmentAction(formData: FormData) {
     tracking_number: payload.tracking_number,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Shipment+updated#shipments`);
 }
@@ -1584,7 +1590,7 @@ export async function addOrderShipmentLineAction(formData: FormData) {
     ship_qty: quantity,
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
@@ -1654,7 +1660,7 @@ export async function uploadOrderAttachmentAction(formData: FormData) {
     details: { file_count: files.length },
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
 }
@@ -1701,7 +1707,7 @@ export async function deleteOrderAttachmentAction(formData: FormData) {
     details: { file_name: attachmentRow.file_name },
   });
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);
 }
@@ -1762,7 +1768,7 @@ export async function updateDeniedArchiveReasonAction(formData: FormData) {
     redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}error=${encodeURIComponent(rawUpdateError.message)}`);
   }
 
-  revalidatePath("/orders");
+  revalidateOrdersList();
   revalidatePath("/order-archive");
   redirect(`${returnPath}${returnPath.includes("?") ? "&" : "?"}message=Denied+invoice+reason+updated`);
 }

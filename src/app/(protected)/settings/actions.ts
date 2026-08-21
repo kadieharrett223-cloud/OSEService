@@ -11,6 +11,7 @@ import {
   unlockAdminForUser,
 } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import {
   disconnectQuickbooksConnection,
   syncQuickbooksInvoices,
@@ -109,6 +110,7 @@ export async function syncQuickbooksAction() {
     revalidatePath("/settings");
     revalidatePath("/cases/new");
     revalidatePath("/shipping-review");
+    revalidateOrdersProjection();
     revalidatePath("/orders");
     revalidatePath("/orders/[id]", "page");
     redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.`)}`);

@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 
 const execFileAsync = promisify(execFile);
 const IMPORTS_DIR = path.join(process.cwd(), "imports", "backlog");
@@ -302,6 +303,7 @@ export async function bulkImportOrdersAction(formData: FormData) {
 
     const reportName = await runImporter({ stagedPath, mode: pendingSession.mode });
 
+    revalidateOrdersProjection();
     revalidatePath("/orders");
     revalidatePath("/orders/import");
     redirect(`/orders/import?mode=${pendingSession.mode}&report=${encodeURIComponent(reportName)}&message=${encodeURIComponent("Import applied")}`);
@@ -332,6 +334,7 @@ export async function bulkImportOrdersAction(formData: FormData) {
   const stagedPath = await stagePayload(sourceLabel, normalizedPayloadText);
   const reportName = await runImporter({ stagedPath, mode });
 
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   revalidatePath("/orders/import");
   redirect(`/orders/import?mode=${mode}&report=${encodeURIComponent(reportName)}&message=${encodeURIComponent(mode === "apply" ? "Import applied" : "Preview generated")}`);

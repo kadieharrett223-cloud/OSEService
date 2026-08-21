@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { loadContainerReceipt, UNPLANNED_RECEIPT_REF } from "@/lib/containers/container-coverage";
 import { computeCoverage } from "@/lib/containers/coverage-math";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 function emptyToNull(value: FormDataEntryValue | null) {
@@ -376,6 +377,7 @@ export async function receiveContainerAction(formData: FormData) {
   revalidatePath("/containers");
   revalidatePath(`/containers/${containerId}`);
   revalidatePath("/inventory");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   revalidatePath("/order-queue");
   revalidatePath("/my-sales");
@@ -423,6 +425,7 @@ export async function updateContainerArrivalDatesAction(formData: FormData) {
   revalidatePath(`/containers/${containerId}`);
   revalidatePath("/inventory");
   revalidatePath("/dashboard");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
 
   redirect(`/containers/${containerId}?success=${encodeURIComponent("Arrival dates updated.")}`);

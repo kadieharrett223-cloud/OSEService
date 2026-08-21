@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { clearAdminUnlock, isAdminUnlockedForUser, isValidAdminCode, unlockAdminForUser } from "@/lib/admin-access";
 import { requireUser } from "@/lib/auth";
+import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -349,6 +350,7 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
   await recalculateProductQueues([line.product_id]);
 
   revalidatePath("/inventory");
+  revalidateOrdersProjection();
   revalidatePath("/orders");
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved ${direction === "up" ? "up" : "down"} one position.`)}`);
 }

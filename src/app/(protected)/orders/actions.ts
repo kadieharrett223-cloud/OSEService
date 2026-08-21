@@ -775,7 +775,6 @@ export async function updateOrderOperationsAction(formData: FormData) {
   const { error: methodError } = await adminClient.from("shipping_orders").update({ fulfillment_method: fulfillmentMethod } as never).eq("id", orderId);
   if (methodError) redirect(`/orders/${orderId}?error=${encodeURIComponent(methodError.message)}`);
 
-  await recalculateProductQueues(openLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
   await writeOrderActivity(adminClient, orderId, "ORDER_OPERATIONS_UPDATED", { warehouse_state: warehouseState, fulfillment_method: fulfillmentMethod });
   revalidatePath("/orders");
   revalidatePath(`/orders/${orderId}`);

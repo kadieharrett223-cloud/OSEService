@@ -80,10 +80,11 @@ export function planQuickbooksOrderRefresh(
 
   for (const invoiceLine of invoiceLines) {
     if (isNonInventoryQuickbooksLine(invoiceLine)) continue;
+    const rawOrderedQty = Number(invoiceLine.ordered_qty ?? Number.NaN);
+    if (Number.isFinite(rawOrderedQty) && rawOrderedQty <= 0) continue;
     const productId = invoiceLine.product_id
       ?? qboSkuCandidates(invoiceLine.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
       ?? null;
-    const rawOrderedQty = Number(invoiceLine.ordered_qty ?? 0);
     const orderedQty = rawOrderedQty > 0 ? rawOrderedQty : 1;
     const existing = existingByInvoiceLine.get(invoiceLine.id);
 

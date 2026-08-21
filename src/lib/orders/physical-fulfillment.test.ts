@@ -117,6 +117,18 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("ignores explicit zero-qty deleted QBO lines when computing canonical totals", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PXL-10B (deleted-1)", 0], ["4PXL-10B", 1]]),
+      lines: [
+        line({ id: "lift", legacy_item_code: "4PXL-10B", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 0, remaining: 1, isPartiallyFulfilled: false, isComplete: false });
+    expectInvariant(summary);
+  });
+
   it("prefers the fulfilled mapped duplicate over a stale unmapped duplicate with the same legacy SKU", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PTA-6", 1]]),

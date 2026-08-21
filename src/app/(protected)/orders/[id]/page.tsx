@@ -521,8 +521,10 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       if (!sku && !rawDescription && detailType !== "SalesItemLineDetail") return null;
       const description = rawDescription || sku || "Invoice line";
 
-      const qtyRaw = item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0;
-      const qty = Number(qtyRaw);
+      const detailQtyRaw = item.SalesItemLineDetail?.Qty;
+      const topLevelQtyRaw = item.Qty;
+      const hasExplicitQty = detailQtyRaw !== undefined || topLevelQtyRaw !== undefined;
+      const qty = Number(detailQtyRaw ?? topLevelQtyRaw ?? Number.NaN);
       const amount = Number(item.Amount ?? 0);
       const normalizedDescription = description.trim().toLowerCase();
       const normalizedSku = (sku ?? "").trim().toLowerCase();
@@ -532,6 +534,8 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
         || normalizedSku === "note"
         || normalizedSku.startsWith("note:")
         || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
+
+      if (!isNonInventory && hasExplicitQty && Number.isFinite(qty) && qty <= 0) return null;
 
       return {
         sku,

@@ -127,8 +127,12 @@ function parseInvoicePhysicalItems(rawPayload: unknown) {
       || String(sku ?? "").trim().toLowerCase() === "note"
       || String(sku ?? "").trim().toLowerCase().startsWith("note:")
       || NON_INVENTORY_TEXT.test(text);
-    const qty = Number(item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0);
+    const detailQtyRaw = item.SalesItemLineDetail?.Qty;
+    const topLevelQtyRaw = item.Qty;
+    const hasExplicitQty = detailQtyRaw !== undefined || topLevelQtyRaw !== undefined;
+    const qty = Number(detailQtyRaw ?? topLevelQtyRaw ?? Number.NaN);
     if (isNonInventory) return null;
+    if (hasExplicitQty && Number.isFinite(qty) && qty <= 0) return null;
     return {
       key: String(item.Id ?? `${sku ?? "invoice-line"}-${index}`),
       sku,

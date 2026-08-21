@@ -1334,12 +1334,17 @@ export default async function OrderDetailPage({
     const needed = Math.max(0, orderedQty - fulfilled);
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(needed, floorAvailable);
+    const fulfillmentSource = String(item.shippingLine?.fulfillment_source ?? "").toUpperCase();
     const status = item.isNonInventory
       ? "N/A"
       : needed === 0 && orderedQty > 0
       ? "Shipped"
       : fulfilled > 0
         ? "Partially Shipped"
+        : fulfillmentSource === "DROPSHIP"
+          ? "Dropship Assigned"
+        : fulfillmentSource === "OTHER"
+          ? "Other Assigned"
         : supply.fulfillment === "Preparing"
           ? "Preparing"
         : inStock >= needed
@@ -1490,7 +1495,7 @@ export default async function OrderDetailPage({
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
-                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{Math.max(0, totalUnitsNeeded - totalUnitsShipped)} remaining</span>
+                <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsNeeded} remaining</span>
                 {isServiceOnlyOrder ? (
                   <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>
                 ) : (

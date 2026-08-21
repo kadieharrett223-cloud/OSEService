@@ -40,7 +40,7 @@ type OrderSummary = {
   qbo_invoices?: {
     invoice_number: string | null;
     payment_status: string | null;
-    raw_payload?: { PrivateNote?: string | null } | null;
+    raw_payload?: { PrivateNote?: string | null; Line?: unknown[] } | null;
     invoice_date: string | null;
   } | null;
   shipping_order_lines?: Array<{
@@ -52,6 +52,7 @@ type OrderSummary = {
     ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
+    qbo_invoice_line_id?: string | null;
     source_system: string | null;
     legacy_item_code?: string | null;
     product_id?: string | null;
@@ -70,6 +71,72 @@ function formatDate(value: string | null | undefined) {
     month: "short",
     day: "numeric",
     year: "numeric",
+  });
+}
+
+const nonInventoryText = /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
+const normalizeSkuKey = (value: unknown) => String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+function qboSkuCandidates(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [] as string[];
+  const candidates = [raw.toUpperCase()];
+  if (/\(deleted/i.test(raw)) {
+    let liveSku = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim().toUpperCase();
+    if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
+    while (/[-\s]1$/.test(liveSku)) {
+      liveSku = liveSku.replace(/[-\s]1$/, "").trim();
+      if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
+    }
+  }
+  return candidates;
+}
+
+function parseVisiblePhysicalInvoiceItems(rawPayload: OrderSummary["qbo_invoices"] extends infer T ? T extends { raw_payload?: infer R } ? R : unknown : unknown) {
+  const lines = Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line) ? (rawPayload as { Line: unknown[] }).Line : [];
+  return lines.map((line) => {
+    if (!line || typeof line !== "object") return null;
+    const item = line as { DetailType?: unknown; Description?: unknown; Qty?: unknown; SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } } };
+    const sku = typeof item.SalesItemLineDetail?.ItemRef?.name === "string" ? item.SalesItemLineDetail.ItemRef.name.trim() : null;
+    const description = typeof item.Description === "string" ? item.Description.trim() : "";
+    const detailType = typeof item.DetailType === "string" ? item.DetailType : "";
+    if (!sku && !description && detailType !== "SalesItemLineDetail") return null;
+    const text = `${sku ?? ""} ${description}`;
+    const isNonInventory = detailType !== "SalesItemLineDetail"
+      || description.startsWith("--")
+      || String(sku ?? "").trim().toLowerCase() === "note"
+      || String(sku ?? "").trim().toLowerCase().startsWith("note:")
+      || nonInventoryText.test(text);
+    const qty = Number(item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0);
+    return { sku, qty: Number.isFinite(qty) && qty > 0 ? qty : (isNonInventory ? 0 : 1), isNonInventory };
+  }).filter((item): item is { sku: string | null; qty: number; isNonInventory: boolean } => Boolean(item && !item.isNonInventory && item.qty > 0));
+}
+
+function canonicalOrderListLines(order: OrderSummary) {
+  const physicalInvoiceItems = parseVisiblePhysicalInvoiceItems(order.qbo_invoices?.raw_payload);
+  const sourceLines = order.shipping_order_lines ?? [];
+  if (physicalInvoiceItems.length === 0) {
+    return sourceLines.filter((line) => {
+      const orderedQty = Number(line.approved_qty ?? line.ordered_qty ?? 0);
+      const fulfilledQty = Number(line.fulfilled_qty ?? 0);
+      return Boolean(line.product_id)
+        && !nonInventoryText.test([line.legacy_item_code, line.products?.sku, line.products?.canonical_name].filter(Boolean).join(" "))
+        && !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
+        && (orderedQty > 0 || fulfilledQty > 0);
+    }).map((line) => ({ line, qty: Number(line.approved_qty ?? line.ordered_qty ?? 0) }));
+  }
+
+  const usedLineIds = new Set<string>();
+  return physicalInvoiceItems.map((item) => {
+    const skuKeys = qboSkuCandidates(item.sku).map(normalizeSkuKey).filter(Boolean);
+    const line = sourceLines.find((candidate) => {
+      if (usedLineIds.has(candidate.id)) return false;
+      if (!candidate.product_id || ["CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase())) return false;
+      const candidateKeys = [candidate.legacy_item_code, candidate.products?.sku, candidate.products?.canonical_name].map(normalizeSkuKey).filter(Boolean);
+      return skuKeys.some((skuKey) => candidateKeys.some((candidateKey) => candidateKey === skuKey || candidateKey.includes(skuKey) || skuKey.includes(candidateKey)));
+    }) ?? null;
+    if (line) usedLineIds.add(line.id);
+    return { line, qty: item.qty };
   });
 }
 
@@ -124,6 +191,7 @@ const getCachedOrdersDataset = unstable_cache(
         id,
         shipping_order_id,
         product_id,
+        qbo_invoice_line_id,
         approval_status,
         warehouse_status,
         fulfillment_status,
@@ -358,22 +426,16 @@ export default async function OrdersPage({
             {orderSummaries.map((order) => {
               const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
               const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
-              const lines = (order.shipping_order_lines ?? []).filter((line) => {
-                const orderedQty = Number(line.approved_qty ?? line.ordered_qty ?? 0);
-                const fulfilledQty = Number(line.fulfilled_qty ?? 0);
-                return Boolean(line.product_id)
-                  && !["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())
-                  && (orderedQty > 0 || fulfilledQty > 0);
-              });
-              const totalQty = lines.reduce((sum, line) => sum + Number(line.approved_qty ?? line.ordered_qty ?? 0), 0);
-              const hasPhysicalLines = lines.length > 0;
-              const inStockQty = lines
-                .filter((line) => ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
-                .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-              const warehouseQty = lines
-                .filter((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
-                .reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);
-              const shippedQty = lines.reduce((sum, line) => sum + Number(line.fulfilled_qty ?? 0), 0);
+              const canonicalLines = canonicalOrderListLines(order);
+              const totalQty = canonicalLines.reduce((sum, item) => sum + item.qty, 0);
+              const hasPhysicalLines = canonicalLines.length > 0;
+              const inStockQty = canonicalLines
+                .filter(({ line }) => line && ["ON_FLOOR", "IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+                .reduce((sum, { line, qty }) => sum + Math.max(0, Math.min(qty, Number(line?.fulfilled_qty ?? 0) >= qty ? 0 : qty - Number(line?.fulfilled_qty ?? 0))), 0);
+              const warehouseQty = canonicalLines
+                .filter(({ line }) => line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
+                .reduce((sum, { line, qty }) => sum + Math.max(0, qty - Number(line?.fulfilled_qty ?? 0)), 0);
+              const shippedQty = canonicalLines.reduce((sum, { line, qty }) => sum + Math.min(qty, Math.max(0, Number(line?.fulfilled_qty ?? 0))), 0);
               const remainingQty = Math.max(0, totalQty - shippedQty);
               const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
               const remainingAvailable = Math.min(
@@ -396,7 +458,7 @@ export default async function OrdersPage({
                     <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{invoiceNumber}</Link>
                     <div className="mt-1 text-xs text-[#64748b]">{customerName}</div>
                   </td>
-                  <td className="px-3 py-3 font-semibold">{hasPhysicalLines ? `${lines.length} items · ${totalQty} units` : "Service / no inventory"}</td>
+                  <td className="px-3 py-3 font-semibold">{hasPhysicalLines ? `${canonicalLines.length} items · ${totalQty} units` : "Service / no inventory"}</td>
                   <td className="px-3 py-3 font-semibold text-[#0f766e]">{hasPhysicalLines ? `${shippedQty} of ${totalQty}` : "—"}</td>
                   <td className="px-3 py-3 font-semibold text-[#b45309]">{hasPhysicalLines ? remainingQty : "—"}</td>
                   <td className="px-3 py-3 font-semibold text-[#334155]">{hasPhysicalLines ? remainingStatus : "No physical fulfillment"}</td>

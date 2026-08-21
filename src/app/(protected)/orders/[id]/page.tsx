@@ -543,6 +543,11 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
+function isNonInventoryOrderLine(line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]) {
+  const text = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name].filter(Boolean).join(" ").toLowerCase();
+  return /discount|shipping|freight|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(text);
+}
+
 function deriveOverallOrderStatus(lines: NonNullable<OrderDetailRow["shipping_order_lines"]>) {
   if (lines.length === 0) return "Pending";
   const allFulfilled = lines.every((line) => (line.fulfillment_status ?? "PENDING") === "FULFILLED");
@@ -1368,14 +1373,14 @@ export default async function OrderDetailPage({
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
   const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
   const orderLineFulfilledTotal = orderLines.reduce((sum, line) => {
-    if (!line.product_id || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
+    if (!line.product_id || isNonInventoryOrderLine(line) || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
     return sum + Math.min(
       Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)),
       Math.max(0, Number(line.fulfilled_qty ?? 0)),
     );
   }, 0);
   const orderLineEligibleTotal = orderLines.reduce((sum, line) => {
-    if (!line.product_id || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
+    if (!line.product_id || isNonInventoryOrderLine(line) || ["CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase())) return sum;
     return sum + Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0));
   }, 0);
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
@@ -1398,7 +1403,7 @@ export default async function OrderDetailPage({
   const fulfillmentProgressStatus = allVisibleLinesCancelled
     ? "Cancelled"
     : orderLineEligibleTotal > 0 && orderLineFulfilledTotal >= orderLineEligibleTotal
-      ? "Fulfilled"
+      ? "Complete"
       : orderLineFulfilledTotal > 0
         ? "Partially Fulfilled"
         : "Awaiting Fulfillment";

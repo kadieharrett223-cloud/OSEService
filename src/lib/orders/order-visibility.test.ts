@@ -153,6 +153,22 @@ describe("orders visibility and activation", () => {
     expect(fullyShipped.isArchivedOrder).toBe(true);
   });
 
+  it("archives fully fulfilled physical orders even when a note line remains open", () => {
+    const result = classifyOrder(order({
+      shipping_order_lines: [
+        line({ product_id: "lift", approved_qty: 2, fulfilled_qty: 2, fulfillment_status: "FULFILLED" }),
+        line({ product_id: "motor", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ product_id: "note-product", legacy_item_code: "Note", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING", products: { sku: "Note" } }),
+      ],
+    }));
+
+    expect(result.isArchivedOrder).toBe(true);
+    expect(result.isVisibleOperationalOrder).toBe(false);
+    expect(result.isNewOrder).toBe(false);
+    expect(result.isWarehouseOrder).toBe(false);
+    expect(result.isPartiallyShippedOrder).toBe(false);
+  });
+
   it("maps classifications onto the correct tabs", () => {    const active = classifyOrder(order());
     expect(matchesOrderTab(active, "orders")).toBe(true);
     expect(matchesOrderTab(active, "new")).toBe(true);

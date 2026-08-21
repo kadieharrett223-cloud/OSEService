@@ -12,7 +12,6 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
-import { getPhysicalFulfillmentTotals } from "@/lib/orders/physical-fulfillment";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -1368,7 +1367,6 @@ export default async function OrderDetailPage({
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = itemStockSummary.reduce((sum, row) => sum + row.fulfilled, 0);
   const totalEligibleInventoryUnits = totalUnitsNeeded + totalUnitsShipped;
-  const physicalFulfillmentTotals = getPhysicalFulfillmentTotals(orderLines);
   // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
   const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
   const showNoShippableLinesNotice = !hasShippableLines
@@ -1388,9 +1386,9 @@ export default async function OrderDetailPage({
   );
   const fulfillmentProgressStatus = allVisibleLinesCancelled
     ? "Cancelled"
-    : physicalFulfillmentTotals.ordered > 0 && physicalFulfillmentTotals.remaining === 0
+    : totalEligibleInventoryUnits > 0 && totalUnitsNeeded === 0
       ? "Complete"
-      : physicalFulfillmentTotals.fulfilled > 0
+      : totalUnitsShipped > 0
         ? "Partially Fulfilled"
         : "Awaiting Fulfillment";
 
@@ -1800,7 +1798,7 @@ export default async function OrderDetailPage({
           </section>
           <section className="rounded-2xl border border-[#bbdec5] bg-[#f1fbf3] p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#356344]">Fulfillment</h2>
-            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{physicalFulfillmentTotals.fulfilled}/{physicalFulfillmentTotals.ordered} <span className="text-xl">Fulfilled</span></div>
+            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{totalUnitsShipped}/{totalEligibleInventoryUnits} <span className="text-xl">Fulfilled</span></div>
             <p className="mt-1 text-sm font-semibold text-[#356344]">{fulfillmentProgressStatus}</p>
           </section>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">

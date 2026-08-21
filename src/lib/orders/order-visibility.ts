@@ -6,7 +6,7 @@
  * invoice) or until reconciliation proved it current by leaving an approved, unfulfilled line.
  */
 
-import { getPhysicalFulfillmentLines, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, physicalLineOrderedQty } from "./physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentLines, isNonInventoryPhysicalLine, physicalLineOrderedQty } from "./physical-fulfillment";
 
 const CLOSED_LINE_STATES = ["FULFILLED", "CANCELLED", "REMOVED", "DENIED"];
 const WAREHOUSE_STATES = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"];
@@ -33,7 +33,7 @@ export type ClassificationOrder = {
   duplicate_of_order_id?: string | null;
   cancellation_status?: string | null;
   shipping_order_lines?: ClassificationLine[] | null;
-  qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null } | null;
+  qbo_invoices?: { raw_payload?: ({ PrivateNote?: string | null } & Record<string, unknown>) | null } | null;
 };
 
 export type OrderClassification = {
@@ -82,8 +82,10 @@ export function classifyOrder(
     };
   }
 
+  const canonicalSummary = isExcluded || isVoided
+    ? { ordered: 0, fulfilled: 0, remaining: 0, lineCount: 0, items: [], isPartiallyFulfilled: false, isComplete: false }
+    : getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: allLines, manualMappingSkus });
   const physicalLines = isExcluded || isVoided ? [] : getPhysicalFulfillmentLines(allLines, { manualMappingSkus });
-  const physicalTotals = getPhysicalFulfillmentTotals(physicalLines);
 
   const operationalLines = physicalLines.filter((line) => {
     const remaining = Math.max(0, physicalLineOrderedQty(line) - Number(line.fulfilled_qty ?? 0));
@@ -97,10 +99,10 @@ export function classifyOrder(
   const isActivated = upper(order.review_status) !== "PENDING_REVIEW";
 
   const hasOperationalLines = operationalLines.length > 0;
-  const isVisibleOperationalOrder = (physicalTotals.remaining > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines);
+  const isVisibleOperationalOrder = (canonicalSummary.remaining > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines);
 
   const anyWarehouse = operationalLines.some((line) => WAREHOUSE_STATES.includes(upper(line.warehouse_status)));
-  const anyShipped = physicalTotals.fulfilled > 0 || physicalLines.some((line) => upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
+  const anyShipped = canonicalSummary.fulfilled > 0 || physicalLines.some((line) => upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
   const isCompletedServiceOnlyOrder = allLines.length === 0 && upper(order.review_status) === "FULFILLED";
 
   return {
@@ -109,8 +111,8 @@ export function classifyOrder(
     isVisibleOperationalOrder,
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
     isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
-    isPartiallyShippedOrder: anyShipped && physicalTotals.remaining > 0,
-    isArchivedOrder: (physicalTotals.ordered > 0 && physicalTotals.remaining === 0) || isCompletedServiceOnlyOrder,
+    isPartiallyShippedOrder: anyShipped && canonicalSummary.remaining > 0,
+    isArchivedOrder: canonicalSummary.isComplete || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };
 }

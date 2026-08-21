@@ -1,3 +1,5 @@
+import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals } from "./physical-fulfillment";
+
 export type HealthSeverity = "INFO" | "WARNING" | "ERROR";
 
 export type OrderHealthIssue = {
@@ -46,6 +48,7 @@ export type OrderHealthInput = {
   shipments?: HealthShipment[];
   fulfillments?: HealthFulfillmentEvidence[];
   qboLines?: Array<{ qbo_sku?: string | null; ordered_qty?: number | null; product_id?: string | null }>;
+  qboRawPayload?: unknown;
   qboVoided?: boolean;
   cancelled?: boolean;
 };
@@ -70,6 +73,21 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
   if (input.qboVoided && !input.cancelled) {
     issues.push({ severity: "ERROR", code: "VOIDED_ACTIVE", product: null, issue: "QuickBooks invoice is voided but the ERP order is not cancelled", expected: "Cancelled", actual: "Active", cause: "The invoice status changed after import." });
   }
+
+  const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: input.qboRawPayload, lines: input.lines });
+  const rawPhysicalTotals = getPhysicalFulfillmentTotals(input.lines);
+  if (canonicalSummary.ordered !== rawPhysicalTotals.ordered || canonicalSummary.fulfilled !== rawPhysicalTotals.fulfilled) {
+    issues.push({
+      severity: "WARNING",
+      code: "ORDER_SUMMARY_MISMATCH",
+      product: null,
+      issue: "Raw operational rows disagree with canonical physical order summary",
+      expected: `${canonicalSummary.lineCount} items / ${canonicalSummary.ordered} ordered / ${canonicalSummary.fulfilled} fulfilled / ${canonicalSummary.remaining} remaining`,
+      actual: `${rawPhysicalTotals.lineCount} rows / ${rawPhysicalTotals.ordered} ordered / ${rawPhysicalTotals.fulfilled} fulfilled / ${rawPhysicalTotals.remaining} remaining`,
+      cause: "Duplicate, orphan, or non-applicable operational rows would display different customer-facing quantities without canonical dedupe.",
+    });
+  }
+
   for (const line of input.lines) {
     const product = productLabel(line);
     const open = remaining(line);

@@ -31,7 +31,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
   const findings: Array<{ order: OrderRow; issue: OrderHealthIssue }> = [];
   for (const order of (result.data ?? []) as unknown as OrderRow[]) {
     const qboVoided = String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED";
-    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
+    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboRawPayload: order.qbo_invoices?.raw_payload, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
     for (const issue of issues) findings.push({ order, issue });
   }
   const params = await searchParams;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "./physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "./physical-fulfillment";
 
 function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfillmentLine {
   return {
@@ -38,4 +38,104 @@ describe("physical fulfillment totals", () => {
     expect(isNonInventoryPhysicalLine(line({ products: { sku: "NOTE", canonical_name: "Memo" } }))).toBe(true);
     expect(isNonInventoryPhysicalLine(line({ products: { sku: "SKU-1", canonical_name: "Service call" } }))).toBe(true);
   });
+
+  it("summarizes 12310 as 4 ordered, 3 fulfilled, 1 remaining despite orphan 4PHR row", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([
+        ["AB1", 1],
+        ["4PHR-9-1", 1],
+        ["HPU1103", 1],
+        ["HLCJ-6", 1],
+      ]),
+      lines: [
+        line({ id: "ab1", legacy_item_code: "AB1", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "4phr", legacy_item_code: "4PHR-9-1", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "hpu", legacy_item_code: "HPU1103", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "hlcj", legacy_item_code: "HLCJ-6", approved_qty: 1, fulfilled_qty: 0 }),
+        line({ id: "orphan", legacy_item_code: "4PHR-9X", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 4, ordered: 4, fulfilled: 3, remaining: 1, isPartiallyFulfilled: true, isComplete: false });
+    expectInvariant(summary);
+  });
+
+  it("summarizes 126111 as 4 ordered, 2 fulfilled, 2 remaining", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["A", 1], ["B", 1], ["C", 1], ["D", 1]]),
+      lines: [
+        line({ id: "a", legacy_item_code: "A", fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "b", legacy_item_code: "B", fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "c", legacy_item_code: "C", fulfilled_qty: 0 }),
+        line({ id: "d", legacy_item_code: "D", fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 4, ordered: 4, fulfilled: 2, remaining: 2, isPartiallyFulfilled: true });
+    expectInvariant(summary);
+  });
+
+  it("summarizes 126163 as complete when physical lines are fulfilled and note is open", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PHR-9X", 2], ["HPU1103", 1], ["Note", 1]]),
+      lines: [
+        line({ id: "lift", legacy_item_code: "4PHR-9X", approved_qty: 2, fulfilled_qty: 2, fulfillment_status: "FULFILLED" }),
+        line({ id: "hpu", legacy_item_code: "HPU1103", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "note", legacy_item_code: "Note", product_id: "note-product", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 3, fulfilled: 3, remaining: 0, isComplete: true });
+    expectInvariant(summary);
+  });
+
+  it("counts duplicate OLD_ERP/QBO representations once for 122285 Deana Bonetto", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PXL-10", 1], ["HPU2203", 1]]),
+      lines: [
+        line({ id: "qbo-lift", legacy_item_code: "4PXL-10", approved_qty: 1 }),
+        line({ id: "old-lift", legacy_item_code: "4PXL-10", approved_qty: 1 }),
+        line({ id: "qbo-hpu", legacy_item_code: "HPU2203", approved_qty: 1 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 0, remaining: 2 });
+    expectInvariant(summary);
+  });
+
+  it("counts duplicate representations once for 125957 Salvador Arias", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["2PBP-8", 1], ["HPU1103", 1]]),
+      lines: [
+        line({ id: "qbo-platform", legacy_item_code: "2PBP-8", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "old-platform", legacy_item_code: "2PBP-8", approved_qty: 1, fulfilled_qty: 0 }),
+        line({ id: "hpu", legacy_item_code: "HPU1103", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 1, remaining: 1, isPartiallyFulfilled: true });
+    expectInvariant(summary);
+  });
 });
+
+function invoicePayload(items: Array<[string, number]>) {
+  return {
+    Line: items.map(([sku, qty], index) => ({
+      Id: String(index + 1),
+      DetailType: "SalesItemLineDetail",
+      Description: sku === "Note" ? "Please contact customer" : `Item ${sku}`,
+      SalesItemLineDetail: { Qty: qty, ItemRef: { name: sku } },
+    })),
+  };
+}
+
+function expectInvariant(summary: ReturnType<typeof getCanonicalPhysicalOrderSummary>) {
+  expect(summary.ordered).toBe(summary.fulfilled + summary.remaining);
+  expect(summary.remaining).toBeGreaterThanOrEqual(0);
+  expect(summary.fulfilled).toBeLessThanOrEqual(summary.ordered);
+  if (summary.isPartiallyFulfilled) {
+    expect(summary.fulfilled).toBeGreaterThan(0);
+    expect(summary.remaining).toBeGreaterThan(0);
+  }
+  if (summary.isComplete) expect(summary.remaining).toBe(0);
+}

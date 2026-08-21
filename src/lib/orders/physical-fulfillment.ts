@@ -2,7 +2,9 @@ const NON_INVENTORY_TEXT = /discount|shipping|freight|sales tax|tax adjustment|\
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
 
 export type PhysicalFulfillmentLine = {
+  id?: string | null;
   product_id?: string | null;
+  qbo_invoice_line_id?: string | null;
   approval_status?: string | null;
   warehouse_status?: string | null;
   fulfillment_status?: string | null;
@@ -18,6 +20,21 @@ export type PhysicalFulfillmentTotals = {
   fulfilled: number;
   remaining: number;
   lineCount: number;
+};
+
+export type CanonicalPhysicalLineItem = {
+  key: string;
+  sku: string | null;
+  quantity: number;
+  fulfilled: number;
+  remaining: number;
+  line: PhysicalFulfillmentLine | null;
+};
+
+export type CanonicalPhysicalOrderSummary = PhysicalFulfillmentTotals & {
+  items: CanonicalPhysicalLineItem[];
+  isPartiallyFulfilled: boolean;
+  isComplete: boolean;
 };
 
 const upper = (value: unknown) => String(value ?? "").trim().toUpperCase();
@@ -71,4 +88,114 @@ export function getPhysicalFulfillmentTotals(
     remaining: Math.max(0, ordered - fulfilled),
     lineCount: physicalLines.length,
   };
+}
+
+function normalizeSkuKey(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function qboSkuCandidates(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [] as string[];
+  const candidates = [raw.toUpperCase()];
+  if (/\(deleted/i.test(raw)) {
+    let liveSku = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim().toUpperCase();
+    if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
+    while (/[-\s]1$/.test(liveSku)) {
+      liveSku = liveSku.replace(/[-\s]1$/, "").trim();
+      if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
+    }
+  }
+  return candidates;
+}
+
+function parseInvoicePhysicalItems(rawPayload: unknown) {
+  const lines = Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)
+    ? (rawPayload as { Line: unknown[] }).Line
+    : [];
+
+  return lines.map((line, index) => {
+    if (!line || typeof line !== "object") return null;
+    const item = line as { Id?: unknown; DetailType?: unknown; Description?: unknown; Qty?: unknown; SalesItemLineDetail?: { Qty?: unknown; ItemRef?: { name?: unknown } } };
+    const sku = typeof item.SalesItemLineDetail?.ItemRef?.name === "string" ? item.SalesItemLineDetail.ItemRef.name.trim() : null;
+    const description = typeof item.Description === "string" ? item.Description.trim() : "";
+    const detailType = typeof item.DetailType === "string" ? item.DetailType : "";
+    if (!sku && !description && detailType !== "SalesItemLineDetail") return null;
+    const text = `${sku ?? ""} ${description}`;
+    const isNonInventory = detailType !== "SalesItemLineDetail"
+      || description.startsWith("--")
+      || String(sku ?? "").trim().toLowerCase() === "note"
+      || String(sku ?? "").trim().toLowerCase().startsWith("note:")
+      || NON_INVENTORY_TEXT.test(text);
+    const qty = Number(item.SalesItemLineDetail?.Qty ?? item.Qty ?? 0);
+    if (isNonInventory) return null;
+    return {
+      key: String(item.Id ?? `${sku ?? "invoice-line"}-${index}`),
+      sku,
+      quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+    };
+  }).filter((item): item is { key: string; sku: string | null; quantity: number } => Boolean(item && item.quantity > 0));
+}
+
+function lineMatchesInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
+  const invoiceKeys = qboSkuCandidates(invoiceSku).map(normalizeSkuKey).filter(Boolean);
+  if (invoiceKeys.length === 0) return false;
+  const lineKeys = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name].map(normalizeSkuKey).filter(Boolean);
+  return invoiceKeys.some((invoiceKey) => lineKeys.some((lineKey) => lineKey === invoiceKey || lineKey.includes(invoiceKey) || invoiceKey.includes(lineKey)));
+}
+
+export function getCanonicalPhysicalOrderSummary({
+  rawPayload,
+  lines,
+  manualMappingSkus,
+}: {
+  rawPayload?: unknown;
+  lines: PhysicalFulfillmentLine[] | null | undefined;
+  manualMappingSkus?: Set<string>;
+}): CanonicalPhysicalOrderSummary {
+  const sourceLines = lines ?? [];
+  const invoiceItems = parseInvoicePhysicalItems(rawPayload);
+
+  if (invoiceItems.length === 0) {
+    const physicalLines = getPhysicalFulfillmentLines(sourceLines, { manualMappingSkus });
+    const items = physicalLines.map((line, index) => {
+      const quantity = physicalLineOrderedQty(line);
+      const fulfilled = Math.min(quantity, Math.max(0, Number(line.fulfilled_qty ?? 0)));
+      return {
+        key: String(line.id ?? `${line.product_id ?? "line"}-${index}`),
+        sku: line.legacy_item_code ?? line.products?.sku ?? null,
+        quantity,
+        fulfilled,
+        remaining: Math.max(0, quantity - fulfilled),
+        line,
+      };
+    });
+    const ordered = items.reduce((sum, item) => sum + item.quantity, 0);
+    const fulfilled = items.reduce((sum, item) => sum + item.fulfilled, 0);
+    const remaining = Math.max(0, ordered - fulfilled);
+    return { items, ordered, fulfilled, remaining, lineCount: items.length, isPartiallyFulfilled: fulfilled > 0 && remaining > 0, isComplete: ordered > 0 && remaining === 0 };
+  }
+
+  const usedLineIds = new Set<string>();
+  const items = invoiceItems.map((item) => {
+    const line = sourceLines.find((candidate) => {
+      if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
+      if (candidate.id && usedLineIds.has(candidate.id)) return false;
+      return lineMatchesInvoiceSku(candidate, item.sku);
+    }) ?? null;
+    if (line?.id) usedLineIds.add(line.id);
+    const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));
+    return {
+      key: item.key,
+      sku: item.sku,
+      quantity: item.quantity,
+      fulfilled,
+      remaining: Math.max(0, item.quantity - fulfilled),
+      line,
+    };
+  });
+  const ordered = items.reduce((sum, item) => sum + item.quantity, 0);
+  const fulfilled = items.reduce((sum, item) => sum + item.fulfilled, 0);
+  const remaining = Math.max(0, ordered - fulfilled);
+  return { items, ordered, fulfilled, remaining, lineCount: items.length, isPartiallyFulfilled: fulfilled > 0 && remaining > 0, isComplete: ordered > 0 && remaining === 0 };
 }

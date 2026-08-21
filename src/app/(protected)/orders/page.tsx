@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { unstable_cache } from "next/cache";
 import { moveOrderToWarehouseAction } from "./actions";
 import { OrdersTabLinks } from "./orders-tab-links";
 
@@ -105,31 +106,18 @@ async function fetchRowsByIds<T>(
   return rows;
 }
 
-export default async function OrdersPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ tab?: string; q?: string; message?: string; error?: string }>;
-}) {
-  await requireUser();
-  const supabase = getSupabaseAdmin();
-  const params = await searchParams;
-  const activeTab = params.tab ?? "new";
-  const searchText = String(params.q ?? "").trim().toLowerCase();
+const getCachedOrdersDataset = unstable_cache(
+  async () => {
+    const supabase = getSupabaseAdmin();
+    const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
+    const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
+    const { data: manualMappingRows } = await supabase
+      .from("manual_product_mapping_queue")
+      .select("source_sku")
+      .eq("status", "OPEN");
+    const manualMappingSkus = (manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase());
 
-  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
-  const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
-
-  const { data: manualMappingRows } = await supabase
-    .from("manual_product_mapping_queue")
-    .select("source_sku")
-    .eq("status", "OPEN");
-  const manualMappingSkus = new Set((manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase()));
-
-  let orders: unknown[] = [];
-  let directLines: unknown[] = [];
-  let ordersLoadError: Error | null = null;
-  try {
-    const [lineRows, qboParentRows] = await Promise.all([
+    const [directLines, qboParentRows] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from("shipping_order_lines")
         .select(`
@@ -156,17 +144,42 @@ export default async function OrdersPage({
         .order("created_at", { ascending: false })
         .range(from, to)),
     ]);
-    directLines = lineRows;
     const parentIds = [...new Set([
       ...(directLines as Array<{ shipping_order_id?: string }>).map((line) => line.shipping_order_id),
       ...(qboParentRows as Array<{ id?: string }>).map((order) => order.id),
     ].filter(Boolean))] as string[];
-    orders = await fetchRowsByIds(parentIds, (chunk) => supabase
+    const orders = await fetchRowsByIds(parentIds, (chunk) => supabase
       .from("shipping_orders")
       .select(ordersSelect)
       .in("id", chunk)
       .order("created_at", { ascending: false })
       .order("id", { ascending: true }));
+
+    return { orders, directLines, manualMappingSkus };
+  },
+  ["orders-page-dataset"],
+  { revalidate: 10 },
+);
+
+export default async function OrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; q?: string; message?: string; error?: string }>;
+}) {
+  await requireUser();
+  const params = await searchParams;
+  const activeTab = params.tab ?? "new";
+  const searchText = String(params.q ?? "").trim().toLowerCase();
+
+  let orders: unknown[] = [];
+  let directLines: unknown[] = [];
+  let manualMappingSkus = new Set<string>();
+  let ordersLoadError: Error | null = null;
+  try {
+    const dataset = await getCachedOrdersDataset();
+    orders = dataset.orders;
+    directLines = dataset.directLines;
+    manualMappingSkus = new Set(dataset.manualMappingSkus);
   } catch (error) {
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }

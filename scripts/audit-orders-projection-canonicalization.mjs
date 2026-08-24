@@ -189,59 +189,44 @@ const transactionsByLine = groupBy(transactions.filter((row) => row.shipping_ord
 const manualMappingSkus = new Set(mappingRows.map((row) => upper(row.source_sku)).filter(Boolean));
 const directParentIds = new Set(lines.map((line) => line.shipping_order_id));
 const relevantParents = orders.filter((order) => directParentIds.has(order.id) || order.source_type === "QBO_INVOICE").map((order) => ({ ...order, lines: linesByOrder.get(order.id) ?? [] }));
-const activeBySource = groupBy(relevantParents.filter((order) => !order.duplicate_of_order_id && order.source_invoice_id), "source_invoice_id");
-const selectedBySource = new Map();
-for (const [sourceInvoiceId, parents] of activeBySource) selectedBySource.set(sourceInvoiceId, [...parents].sort((left, right) => {
+const activeParents = relevantParents.filter((order) => !order.duplicate_of_order_id);
+const activeByLogicalOrder = new Map();
+for (const order of activeParents) {
+  const logicalOrderId = String(order.source_invoice_id ?? order.id).trim() || order.id;
+  activeByLogicalOrder.set(logicalOrderId, [...(activeByLogicalOrder.get(logicalOrderId) ?? []), order]);
+}
+const logicalOrders = [...activeByLogicalOrder.values()].map((parents) => {
+  const canonical = [...parents].sort((left, right) => {
   const leftQbo = left.source_type === "QBO_INVOICE" ? 0 : 1;
   const rightQbo = right.source_type === "QBO_INVOICE" ? 0 : 1;
   return leftQbo - rightQbo || String(left.created_at).localeCompare(String(right.created_at));
-})[0]);
+  })[0];
+  return { ...canonical, lines: parents.flatMap((parent) => parent.lines) };
+});
 
 const beforeRows = relevantParents.map((order) => ({ order, tabs: classify(order, manualMappingSkus) }));
-const currentRows = relevantParents.filter((order) => !order.source_invoice_id || selectedBySource.get(order.source_invoice_id)?.id === order.id).map((order) => ({ order, tabs: classify(order, manualMappingSkus) }));
+const currentRows = logicalOrders.map((order) => ({ order, tabs: classify(order, manualMappingSkus) }));
 const beforeCounts = Object.fromEntries(TABS.map((tab) => [tab, beforeRows.filter((row) => row.tabs.includes(tab)).length]));
 const currentCounts = Object.fromEntries(TABS.map((tab) => [tab, currentRows.filter((row) => row.tabs.includes(tab)).length]));
-const disappeared = [];
-for (const row of beforeRows) {
-  const selected = row.order.source_invoice_id ? selectedBySource.get(row.order.source_invoice_id) : row.order;
-  const currentTabs = selected?.id === row.order.id ? currentRows.find((current) => current.order.id === row.order.id)?.tabs ?? [] : currentRows.find((current) => current.order.id === selected?.id)?.tabs ?? [];
-  const disappearedTabs = row.tabs.filter((tab) => !currentTabs.includes(tab));
-  if (!disappearedTabs.length || !selected) continue;
-  const parent = parentDetail(row.order, manualMappingSkus, fulfillmentsByLine, shipmentsByLine, allocationsByLine, transactionsByLine);
-  const canonical = parentDetail(selected, manualMappingSkus, fulfillmentsByLine, shipmentsByLine, allocationsByLine, transactionsByLine);
-  const hasIndependentEvidence = parent.remainingQty > 0 || parent.fulfilledQty > 0 || parent.shipmentEvidence.count > 0 || parent.fulfillmentEvidence.count > 0 || parent.reservations.quantity > 0 || parent.inventoryTransactions.count > 0;
-  const hasUniqueProduct = parent.products.some((product) => !canonical.products.some((candidate) => candidate.productId === product.productId && candidate.fulfilled >= product.fulfilled && candidate.remaining >= product.remaining));
-  const category = !hasIndependentEvidence ? "SAFE_DUPLICATE_COLLAPSE" : hasUniqueProduct ? "LEGITIMATE_DATA_LOST_FROM_PROJECTION" : currentTabs.length > 0 ? "MOVED_TO_OTHER_VALID_TAB" : "AMBIGUOUS_PARENT_SELECTION";
-  disappeared.push({
-    category,
-    invoice: selected.qbo_invoices?.invoice_number ?? selected.order_number ?? row.order.order_number,
-    customer: selected.customers?.company_name ?? selected.customers?.full_name ?? selected.legacy_customer_name ?? row.order.legacy_customer_name ?? null,
-    previousTabs: row.tabs,
-    currentTabs,
-    disappearedTabs,
-    sourceInvoiceId: row.order.source_invoice_id,
-    rawParentIds: activeBySource.get(row.order.source_invoice_id ?? "")?.map((parentOrder) => parentOrder.id) ?? [row.order.id],
-    canonicalParentId: selected.id,
-    parent,
-    canonical,
-    reason: category === "LEGITIMATE_DATA_LOST_FROM_PROJECTION"
-      ? "The excluded parent has product, quantity, or lifecycle evidence not represented by the selected parent."
-      : category === "MOVED_TO_OTHER_VALID_TAB"
-        ? "The selected parent remains visible, but lifecycle classification differs."
-        : category === "SAFE_DUPLICATE_COLLAPSE"
-          ? "The excluded parent has no operational quantity or linked evidence."
-          : "The excluded parent has operational evidence, but comparison cannot prove whether it is duplicate or unique.",
-  });
-}
+const missingEvidence = [...activeByLogicalOrder.entries()].flatMap(([logicalOrderId, parents]) => {
+  const logicalOrder = logicalOrders.find((order) => order.id === [...parents].sort((left, right) => {
+    const leftQbo = left.source_type === "QBO_INVOICE" ? 0 : 1;
+    const rightQbo = right.source_type === "QBO_INVOICE" ? 0 : 1;
+    return leftQbo - rightQbo || String(left.created_at).localeCompare(String(right.created_at));
+  })[0].id);
+  const projectedLineIds = new Set(logicalOrder?.lines.map((line) => line.id) ?? []);
+  return parents.flatMap((parent) => parent.lines.filter((line) => !projectedLineIds.has(line.id)).map((line) => ({ logicalOrderId, parentId: parent.id, lineId: line.id })));
+});
 
 const reconciliation = {
   generatedAt: new Date().toISOString(),
   readOnly: true,
-  baseline: "Pre-831ad22 raw-parent projection",
-  current: "Current selected-parent projection",
-  tabCounts: TABS.map((tab) => ({ tab, before: beforeCounts[tab], current: currentCounts[tab], difference: currentCounts[tab] - beforeCounts[tab], safeCollapses: disappeared.filter((row) => row.category === "SAFE_DUPLICATE_COLLAPSE" && row.disappearedTabs.includes(tab)).length, unexplained: disappeared.filter((row) => ["LEGITIMATE_DATA_LOST_FROM_PROJECTION", "AMBIGUOUS_PARENT_SELECTION"].includes(row.category) && row.disappearedTabs.includes(tab)).length })),
-  summary: Object.fromEntries(["SAFE_DUPLICATE_COLLAPSE", "MOVED_TO_OTHER_VALID_TAB", "LEGITIMATE_DATA_LOST_FROM_PROJECTION", "AMBIGUOUS_PARENT_SELECTION"].map((category) => [category, disappeared.filter((row) => row.category === category).length])),
-  disappeared,
+  baseline: "Raw active-parent projection",
+  current: "Combined active same-invoice logical projection",
+  tabCounts: TABS.map((tab) => ({ tab, before: beforeCounts[tab], current: currentCounts[tab], difference: currentCounts[tab] - beforeCounts[tab] })),
+  summary: { logicalOrders: logicalOrders.length, activeParents: activeParents.length, missingEvidence: missingEvidence.length },
+  missingEvidence,
 };
 fs.writeFileSync("tmp/import-reports/orders-projection-canonicalization-audit.json", JSON.stringify(reconciliation, null, 2));
 console.log(JSON.stringify({ readOnly: true, tabCounts: reconciliation.tabCounts, summary: reconciliation.summary, report: "tmp/import-reports/orders-projection-canonicalization-audit.json" }, null, 2));
+if (missingEvidence.length > 0) process.exitCode = 1;

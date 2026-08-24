@@ -34,4 +34,19 @@ describe("logical Orders projection", () => {
     expect(projection).toHaveLength(1);
     expect(projection[0]?.shipping_order_lines.map((line) => line.id)).toEqual(["current"]);
   });
+
+  it("projects every active invoice group once without joining unrelated invoices", () => {
+    const projection = buildLogicalOrdersProjection([
+      { id: "qbo-1", source_type: "QBO_INVOICE", source_invoice_id: "source-1", shipping_order_lines: [{ id: "line-1" }] },
+      { id: "erp-1", source_type: "OLD_ERP", source_invoice_id: "source-1", shipping_order_lines: [{ id: "line-2" }] },
+      { id: "qbo-2", source_type: "QBO_INVOICE", source_invoice_id: "source-2", shipping_order_lines: [{ id: "line-3" }] },
+      { id: "unlinked", source_type: "INTERNAL", shipping_order_lines: [{ id: "line-4" }] },
+    ]);
+
+    expect(projection.map((order) => ({ id: order.id, lines: order.shipping_order_lines.map((line) => line.id) }))).toEqual([
+      { id: "qbo-1", lines: ["line-1", "line-2"] },
+      { id: "qbo-2", lines: ["line-3"] },
+      { id: "unlinked", lines: ["line-4"] },
+    ]);
+  });
 });

@@ -4,8 +4,8 @@ export type ProjectedParent = {
 };
 
 /**
- * Orders must classify every active physical parent until a logical-order
- * merger can prove that all parent evidence is represented once.
+ * Preserves active physical parents for evidence/audit surfaces. Customer-facing
+ * lists use buildLogicalOrdersProjection to represent this evidence once.
  */
 export function parentsForOrdersProjection<T extends ProjectedParent>(parents: T[]): T[] {
   return parents.filter((parent) => !parent.duplicate_of_order_id);

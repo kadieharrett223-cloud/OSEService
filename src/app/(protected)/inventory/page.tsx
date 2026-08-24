@@ -502,6 +502,12 @@ export default async function InventoryPage({
   const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
   const completedQboLineIds = new Set<string>();
   const completedQboInvoiceIds = new Set<string>();
+  const queueLinesBySourceInvoiceId = new Map<string, typeof bridgedQueueLineRows>();
+  for (const line of bridgedQueueLineRows) {
+    const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
+    if (!sourceInvoiceId) continue;
+    queueLinesBySourceInvoiceId.set(sourceInvoiceId, [...(queueLinesBySourceInvoiceId.get(sourceInvoiceId) ?? []), line]);
+  }
   for (const [orderId, lines] of queueLinesByOrderId) {
     const rawPayload = lines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
     if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) {
@@ -517,6 +523,17 @@ export default async function InventoryPage({
       for (const item of summary.items) {
         if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
       }
+    }
+  }
+  for (const [sourceInvoiceId, lines] of queueLinesBySourceInvoiceId) {
+    const qboLines = lines.filter((line) => line.shipping_orders?.source_type === "QBO_INVOICE");
+    const rawPayload = qboLines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
+    if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) continue;
+    const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
+    if (!summary.isComplete) continue;
+    completedQboInvoiceIds.add(sourceInvoiceId);
+    for (const item of summary.items) {
+      if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
     }
   }
   const canonicalQueueLineRows = bridgedQueueLineRows.filter((line) => {

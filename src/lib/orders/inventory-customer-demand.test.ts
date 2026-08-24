@@ -36,4 +36,36 @@ describe("Inventory customer demand", () => {
     expect(item.remaining).toBe(0);
     expect(item.remaining > 0).toBe(false);
   });
+
+  it("recognizes an invoice as complete when fulfillment evidence is split across QBO and INTERNAL siblings", () => {
+    const qboLiftLine = {
+      id: "qbo-lift",
+      product_id: "lift",
+      ordered_qty: 1,
+      fulfilled_qty: 1,
+      fulfillment_status: "FULFILLED",
+      products: { sku: "LIFT" },
+    };
+    const internalAccessoryLine = {
+      id: "internal-accessory",
+      product_id: "accessory",
+      ordered_qty: 1,
+      approved_qty: 1,
+      fulfilled_qty: 1,
+      fulfillment_status: "FULFILLED",
+      legacy_item_code: "ACCESSORY",
+      products: { sku: "ACCESSORY" },
+    };
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: {
+        Line: [
+          { Id: "1", DetailType: "SalesItemLineDetail", SalesItemLineDetail: { Qty: 1, ItemRef: { name: "LIFT" } } },
+          { Id: "2", DetailType: "SalesItemLineDetail", SalesItemLineDetail: { Qty: 1, ItemRef: { name: "ACCESSORY" } } },
+        ],
+      },
+      lines: [qboLiftLine, internalAccessoryLine],
+    });
+
+    expect(summary).toMatchObject({ ordered: 2, fulfilled: 2, remaining: 0, isComplete: true });
+  });
 });

@@ -18,8 +18,8 @@ function line(id: string, remaining_qty: number, queue_position_start: number, o
   };
 }
 
-function container(container_id: string, container_number: string, available_qty: number, eta_confirmed_date: string): ProductContainerSupply {
-  return { container_id, container_number, available_qty, eta_confirmed_date, eta_estimated_date: null, entered_date: null };
+function container(container_id: string, container_number: string, available_qty: number, eta_confirmed_date: string | null, overrides: Partial<ProductContainerSupply> = {}): ProductContainerSupply {
+  return { container_id, container_number, available_qty, eta_confirmed_date, eta_estimated_date: null, entered_date: null, ...overrides };
 }
 
 describe("shared product coverage resolver", () => {
@@ -38,6 +38,38 @@ describe("shared product coverage resolver", () => {
       "D:2:Container 2:2026-09-10",
     ]);
     expect(result.lines.get("D")?.completeEtaDate).toBe("2026-09-10");
+  });
+
+  it("exhausts an earlier reliable-ETA container before committing a later container", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 0]]),
+      queueLinesByProduct: new Map([[productId, [line("A", 10, 1), line("B", 10, 11)]]]),
+      containerSupplyByProduct: new Map([[productId, [
+        container("c254", "254", 12, "2026-11-30"),
+        container("c240", "240", 24, "2026-10-15"),
+      ]]]),
+    });
+
+    expect(result.allocations.map((allocation) => `${allocation.orderLineId}:${allocation.quantity}:${allocation.sourceLabel}`)).toEqual([
+      "A:10:240",
+      "B:10:240",
+    ]);
+  });
+
+  it("uses older container chronology before a newer dated container when ETA is missing", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 0]]),
+      queueLinesByProduct: new Map([[productId, [line("A", 24, 1), line("B", 12, 25)]]]),
+      containerSupplyByProduct: new Map([[productId, [
+        container("c254", "254", 12, "2026-11-30"),
+        container("c240", "240", 24, null, { entered_date: "2026-08-01" }),
+      ]]]),
+    });
+
+    expect(result.allocations.map((allocation) => `${allocation.orderLineId}:${allocation.quantity}:${allocation.sourceLabel}`)).toEqual([
+      "A:24:240",
+      "B:12:254",
+    ]);
   });
 
   it("cascades coverage when earlier demand is cancelled without changing supply", () => {

@@ -149,13 +149,17 @@ function sortQueueLines(lines: OpenQueueLine[]) {
 
 function sortContainersByEta(containers: ProductContainerSupply[]) {
   return [...containers].sort((left, right) => {
-    const leftEta = getContainerEta(left).etaDate;
-    const rightEta = getContainerEta(right).etaDate;
-
-    const leftTime = leftEta ? new Date(leftEta).getTime() : Number.MAX_SAFE_INTEGER;
-    const rightTime = rightEta ? new Date(rightEta).getTime() : Number.MAX_SAFE_INTEGER;
+    const leftReliableEta = left.eta_confirmed_date ?? left.eta_estimated_date;
+    const rightReliableEta = right.eta_confirmed_date ?? right.eta_estimated_date;
+    const leftArrival = leftReliableEta ?? left.entered_date;
+    const rightArrival = rightReliableEta ?? right.entered_date;
+    const leftTime = leftArrival ? new Date(leftArrival).getTime() : Number.MAX_SAFE_INTEGER;
+    const rightTime = rightArrival ? new Date(rightArrival).getTime() : Number.MAX_SAFE_INTEGER;
 
     if (leftTime !== rightTime) return leftTime - rightTime;
+    const leftEntered = left.entered_date ? new Date(left.entered_date).getTime() : Number.MAX_SAFE_INTEGER;
+    const rightEntered = right.entered_date ? new Date(right.entered_date).getTime() : Number.MAX_SAFE_INTEGER;
+    if (leftEntered !== rightEntered) return leftEntered - rightEntered;
     return (left.container_number ?? "").localeCompare(right.container_number ?? "");
   });
 }

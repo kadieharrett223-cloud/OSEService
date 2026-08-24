@@ -44,6 +44,7 @@ type ContainerLineRow = {
     eta_confirmed_date: string | null;
     eta_estimated_date: string | null;
     port_date: string | null;
+    entered_date: string | null;
   } | null;
 };
 
@@ -374,7 +375,7 @@ export default async function InventoryPage({
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase
       .from("container_lines")
-      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date)"),
+      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
     queueLinesPromise,
     getCachedPackageDimensionsBySku(),
   ]);
@@ -603,7 +604,7 @@ export default async function InventoryPage({
       committed,
       available: Math.max(0, qty - committed),
       eta: formatShortDate(eta),
-      etaSort: eta ? new Date(eta).toISOString() : "9999-12-31",
+      etaSort: eta ? new Date(eta).toISOString() : line.containers?.entered_date ? new Date(line.containers.entered_date).toISOString() : "9999-12-31",
       status: formatStatus(line.containers?.lifecycle_status),
     });
     incomingContainersByProduct.set(line.product_id, rows);
@@ -728,7 +729,7 @@ export default async function InventoryPage({
       available_qty: qty,
       eta_confirmed_date: line.containers?.eta_confirmed_date ?? null,
       eta_estimated_date: line.containers?.eta_estimated_date ?? line.containers?.port_date ?? null,
-      entered_date: null,
+      entered_date: line.containers?.entered_date ?? null,
     });
     coverageContainerSupplyByProduct.set(line.product_id, rows);
   }

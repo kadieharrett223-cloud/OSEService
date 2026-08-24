@@ -15,6 +15,7 @@ import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
+import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import {
   addOrderNoteAction,
@@ -408,6 +409,9 @@ function parseInvoiceLineItems(rawPayload: unknown) {
 }
 
 function formatAssignmentSource(line: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]) {
+  const savedSource = formatSavedFulfillmentSource(line.fulfillment_source, line.fulfillment_supplier);
+  if (savedSource) return savedSource;
+
   const allocations = line.inventory_allocations ?? [];
   if (allocations.length === 0) return "Unassigned";
 

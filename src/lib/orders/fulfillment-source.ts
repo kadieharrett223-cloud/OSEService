@@ -15,3 +15,13 @@ export function shouldMoveWarehouseInventory(source: string | null | undefined) 
 export function shouldCreateWarehouseReservation(source: string | null | undefined) {
   return normalizeFulfillmentSource(source) === "WAREHOUSE";
 }
+
+export function formatSavedFulfillmentSource(
+  source: string | null | undefined,
+  supplier: string | null | undefined,
+) {
+  const normalized = normalizeFulfillmentSource(source);
+  if (normalized === "DROPSHIP") return supplier ? `Dropship · ${supplier}` : "Dropship";
+  if (normalized === "OTHER") return "Other fulfillment";
+  return null;
+}

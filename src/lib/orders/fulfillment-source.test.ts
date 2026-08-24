@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "./fulfillment-source";
+import { formatSavedFulfillmentSource, normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "./fulfillment-source";
 
 describe("fulfillment source safety rules", () => {
   it("treats Warehouse/Floor as the only inventory-moving source", () => {
@@ -15,5 +15,11 @@ describe("fulfillment source safety rules", () => {
     expect(shouldCreateWarehouseReservation("DROPSHIP")).toBe(false);
     expect(shouldCreateWarehouseReservation("OTHER")).toBe(false);
     expect(shouldCreateWarehouseReservation(null)).toBe(false);
+  });
+
+  it("labels saved external fulfillment without implying a warehouse allocation", () => {
+    expect(formatSavedFulfillmentSource("DROPSHIP", "Ebay")).toBe("Dropship · Ebay");
+    expect(formatSavedFulfillmentSource("OTHER", null)).toBe("Other fulfillment");
+    expect(formatSavedFulfillmentSource("WAREHOUSE", null)).toBeNull();
   });
 });

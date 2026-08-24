@@ -17,6 +17,7 @@ export type DemandLineLike = {
   fulfilled_qty?: number | null;
   approval_status?: string | null;
   fulfillment_status?: string | null;
+  warehouse_status?: string | null;
   qbo_invoice_line_id?: string | null;
   source_record_id?: string | null;
   logical_demand_key?: string | null;
@@ -34,7 +35,8 @@ export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
   if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
-  return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
+  if (CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase())) return false;
+  return !["FULFILLED", "SHIPPED", "COMPLETED"].includes(String(line.warehouse_status ?? "").toUpperCase());
 }
 
 /**

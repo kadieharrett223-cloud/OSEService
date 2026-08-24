@@ -24,4 +24,15 @@ describe("shared active logical demand", () => {
     expect(isOpenDemandLine({ id: "cancelled", approved_qty: 1, parent_cancellation_status: "CANCELLED", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "voided", approved_qty: 1, parent_qbo_voided: true, fulfillment_status: "PENDING" })).toBe(false);
   });
+
+  it("excludes warehouse-shipped rows even if a historical fulfilled quantity is stale", () => {
+    expect(isOpenDemandLine({
+      id: "shipped",
+      approved_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      warehouse_status: "FULFILLED",
+    })).toBe(false);
+  });
 });

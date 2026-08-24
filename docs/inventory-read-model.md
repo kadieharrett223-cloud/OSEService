@@ -80,11 +80,30 @@ Cosmos export snapshot was taken. `HL-2PBP-8` does not exist in either system; i
 
 ## Package dimensions
 
-The Inventory list has a per-product `Dims` expander for preserved packaged freight measurements. It
-does not write product data or infer package measurements from lift descriptions. The archived source
-currently represents one package per product; records without complete length, width, and height do
-not expose the control. Multi-carton shipment support requires authoritative source data before it can
-be displayed.
+The Inventory list has a row-click package-details expander for preserved packaged freight
+measurements. It does not write product data or infer package measurements from lift descriptions.
+The archived source currently represents one package per product; records without complete length,
+width, and height do not expose the control. Multi-carton shipment support requires authoritative
+source data before it can be displayed.
+
+The server normalizes `lengthInches`, `widthInches`, `heightInches`, and `weightLbs` into a small
+SKU-to-package map cached for five minutes. Inventory rows receive only their own package object.
+Expanding a row is client-side state: it does not change the URL, navigate, refresh the route, refetch
+inventory, or re-read OLD_ERP source records. Customer List, Reorder, and other interactive controls
+retain their normal actions and do not toggle the package section.
+
+### Performance profile
+
+The 2026-08-24 read-only baseline found 298 active products, 419 aliases, 419 inventory
+transactions, 57 container lines, 930 eligible order lines, and 300 OLD_ERP Product source records.
+The seven parallel base reads completed in approximately 423 ms; the full OLD_ERP package-payload
+read was on the critical path. The package lookup cache removes that source-record read from
+subsequent Inventory renders, reducing the base request fan-out from seven to six queries.
+
+Orders and its Warehouse tab share the existing 60-second Orders projection cache. ERP Health is
+intentionally uncached because it is a live diagnostic view; it currently reads its 500-order health
+graph and the active source-linked parent set. Its data-preservation diagnostics must remain correct
+before any caching or pagination change is considered.
 
 ## Known gaps
 

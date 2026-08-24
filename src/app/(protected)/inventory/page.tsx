@@ -258,6 +258,20 @@ async function fetchAllRows<T>(
   }
 }
 
+async function fetchRowsByIds<T>(
+  ids: string[],
+  fetchBatch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const batchSize = 100;
+  const batches = Array.from({ length: Math.ceil(ids.length / batchSize) }, (_, index) => ids.slice(index * batchSize, (index + 1) * batchSize));
+  const rows = await Promise.all(batches.map(async (batch) => {
+    const { data, error } = await fetchBatch(batch);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  }));
+  return rows.flat();
+}
+
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];
   if (allocations.length === 0) return "Unassigned";
@@ -330,7 +344,6 @@ export default async function InventoryPage({
           legacy_customer_name,
           qbo_invoices (
             invoice_number,
-            raw_payload,
             customers (company_name, full_name)
           )
         ),
@@ -404,12 +417,32 @@ export default async function InventoryPage({
   for (const alias of productAliasRows) {
     if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
   }
-  const { data: qboLineRows } = sourceInvoiceIds.length
-    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", sourceInvoiceIds)
-    : { data: [] };
-  const { data: qboParentRows } = orderNumbers.length
-    ? await supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", orderNumbers).eq("source_type", "QBO_INVOICE")
-    : { data: [] };
+  const [qboInvoiceRows, qboLineRows, qboParentRows] = await Promise.all([
+    sourceInvoiceIds.length
+      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids))
+      : Promise.resolve([]),
+    sourceInvoiceIds.length
+      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
+      : Promise.resolve([]),
+    orderNumbers.length
+      ? fetchRowsByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", numbers).eq("source_type", "QBO_INVOICE"))
+      : Promise.resolve([]),
+  ]);
+  const qboRawPayloadByInvoiceId = new Map(qboInvoiceRows.map((invoice) => [invoice.id, invoice.raw_payload]));
+  const queueLineRowsWithRawPayload = queueLineRows.map((line) => {
+    const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
+    if (!sourceInvoiceId || !line.shipping_orders?.qbo_invoices) return line;
+    return {
+      ...line,
+      shipping_orders: {
+        ...line.shipping_orders,
+        qbo_invoices: {
+          ...line.shipping_orders.qbo_invoices,
+          raw_payload: qboRawPayloadByInvoiceId.get(sourceInvoiceId) ?? null,
+        },
+      },
+    };
+  });
   const typedQboParentRows = (qboParentRows ?? []) as unknown as Array<{ id: string; order_number: string | null; source_invoice_id: string | null; legacy_customer_name?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null; customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>;
   const activeQboParentsByOrderNumber = new Map<string, typeof typedQboParentRows>();
   for (const row of typedQboParentRows.filter((candidate) => !candidate.duplicate_of_order_id && String(candidate.cancellation_status ?? "").toUpperCase() !== "CANCELLED" && String(candidate.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() !== "VOIDED")) {
@@ -417,9 +450,9 @@ export default async function InventoryPage({
   }
   const qboParentInvoiceIds = [...new Set(typedQboParentRows.map((row) => row.source_invoice_id).filter(Boolean))] as string[];
   const extraQboLineRows = qboParentInvoiceIds.length
-    ? await supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", qboParentInvoiceIds)
-    : { data: [] };
-  const allQboLineRows = [...(qboLineRows ?? []), ...(extraQboLineRows.data ?? [])].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
+    ? await fetchRowsByIds(qboParentInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
+    : [];
+  const allQboLineRows = [...qboLineRows, ...extraQboLineRows].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
   const invoiceQtyByInvoiceProduct = new Map<string, number>();
   const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty?: number | null }>) {
@@ -434,7 +467,7 @@ export default async function InventoryPage({
     candidates.push(qboLine);
     qboCandidatesByParentProduct.set(key, candidates);
   }
-  const bridgedQueueLineRows = queueLineRows.map((line) => {
+  const bridgedQueueLineRows = queueLineRowsWithRawPayload.map((line) => {
     const parentFields = {
       parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
       parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,

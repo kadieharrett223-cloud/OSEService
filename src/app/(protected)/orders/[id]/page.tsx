@@ -13,7 +13,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
-import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import {
   addOrderNoteAction,
@@ -1392,8 +1392,11 @@ export default async function OrderDetailPage({
   // Fulfillment is authoritative on order lines; invoice display matching must not undercount it.
   const totalUnitsShipped = canonicalPhysicalSummary.fulfilled;
   const totalEligibleInventoryUnits = canonicalPhysicalSummary.ordered;
-  // Shipment selection is independent of stock and warehouse state; any open order demand can ship.
-  const hasShippableLines = visibleItems.some((item) => !item.isNonInventory && item.shippingLine && Math.max(Number(item.shippingLine.approved_qty ?? 0), Number(item.shippingLine.ordered_qty ?? 0)) > Number(item.shippingLine.fulfilled_qty ?? 0));
+  // Fulfillment selection is independent of stock, allocation, and source assignment.
+  const selectablePhysicalLines = orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
+  const worksheetPhysicalLineIds = new Set(canonicalPhysicalSummary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId)));
+  const unrepresentedPhysicalLines = selectablePhysicalLines.filter((line) => !worksheetPhysicalLineIds.has(line.id));
+  const hasShippableLines = selectablePhysicalLines.length > 0;
   const showNoShippableLinesNotice = !hasShippableLines
     && !isServiceOnlyOrder
     && normalizedError.includes("no remaining physical inventory lines available for shipment selection");
@@ -1697,6 +1700,27 @@ export default async function OrderDetailPage({
                           </div>
                         </div> : null}
                       </details>
+                    );
+                  })}
+                  {unrepresentedPhysicalLines.map((line) => {
+                    const remainingQty = Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0));
+                    const source = String(line.fulfillment_source ?? "WAREHOUSE").toUpperCase();
+                    const fulfillmentSource = source === "DROPSHIP" || source === "OTHER" ? source : "WAREHOUSE";
+                    return (
+                      <div key={line.id} className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 border-b border-dashed border-[#dbe3ee] bg-[#f8fafc] px-2 py-2.5 text-[13px] text-[#1f2937]">
+                        <span>
+                          <ShipmentSelectionCheckbox line={{ id: line.id, sku: line.legacy_item_code ?? line.products?.sku ?? "Mapped item", remainingQty, defaultQty: remainingQty, inStock: 0, isReserved: false, fulfillmentSource }} />
+                          <span className="font-semibold text-[#111827]">{line.legacy_item_code ?? line.products?.sku ?? "Mapped item"}</span>
+                          <span className="mt-1 block text-xs text-[#64748b]">Additional physical order line</span>
+                        </span>
+                        <span className="text-[12px]">{Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0))}</span>
+                        <span className="text-[12px]">{Number(line.fulfilled_qty ?? 0)}</span>
+                        <span className="text-[12px]">{remainingQty}</span>
+                        <span className="text-[11px] font-medium text-[#111827]">{source === "CONTAINER" ? "Container" : source === "DROPSHIP" ? "Dropship" : source === "OTHER" ? "Other" : "Unassigned / Warehouse"}</span>
+                        <span className="text-center text-[11px] text-[#475569]">—</span>
+                        <span className="text-center"><span className="inline-flex rounded-full bg-[#eef2ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#475569]">Ready to select</span></span>
+                        <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
+                      </div>
                     );
                   })}
                 </div>

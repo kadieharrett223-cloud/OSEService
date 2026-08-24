@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "./physical-fulfillment";
+import { isRemainingPhysicalFulfillmentLine } from "./physical-fulfillment";
 
 function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfillmentLine {
   return {
@@ -14,6 +15,21 @@ function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfill
 }
 
 describe("physical fulfillment totals", () => {
+  it("keeps every remaining mapped physical line eligible regardless of fulfillment source or assignment", () => {
+    for (const fulfillmentSource of [null, "WAREHOUSE", "CONTAINER", "DROPSHIP", "OTHER"]) {
+      expect(isRemainingPhysicalFulfillmentLine({
+        id: `line-${fulfillmentSource ?? "unassigned"}`,
+        product_id: "product-1",
+        ordered_qty: 2,
+        approved_qty: 2,
+        fulfilled_qty: 0,
+        fulfillment_status: "PENDING",
+        products: { sku: "LIFT-1" },
+        fulfillment_source: fulfillmentSource,
+      })).toBe(true);
+    }
+  });
+
   it("excludes note, service, freight, tax, and cancelled rows from physical demand", () => {
     const totals = getPhysicalFulfillmentTotals([
       line({ approved_qty: 2, fulfilled_qty: 2, fulfillment_status: "FULFILLED" }),

@@ -8,6 +8,7 @@ export type PhysicalFulfillmentLine = {
   approval_status?: string | null;
   warehouse_status?: string | null;
   fulfillment_status?: string | null;
+  fulfillment_source?: string | null;
   ordered_qty?: number | null;
   approved_qty?: number | null;
   fulfilled_qty?: number | null;
@@ -62,6 +63,14 @@ export function isPhysicalFulfillmentLine(
     && !manualMappingSkus.has(upper(line.legacy_item_code))
     && !isNonInventoryPhysicalLine(line)
     && !EXCLUDED_PHYSICAL_STATES.has(upper(line.fulfillment_status));
+}
+
+export function isRemainingPhysicalFulfillmentLine(
+  line: PhysicalFulfillmentLine,
+  options: { manualMappingSkus?: Set<string> } = {},
+) {
+  return isPhysicalFulfillmentLine(line, options)
+    && physicalLineOrderedQty(line) > Math.max(0, Number(line.fulfilled_qty ?? 0));
 }
 
 export function getPhysicalFulfillmentLines(

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { hasCurrentOperationalDemandEvidence } from "@/lib/demand/product-demand";
 import { getCanonicalPhysicalOrderSummary } from "./physical-fulfillment";
 
 describe("Inventory customer demand", () => {
@@ -36,23 +35,5 @@ describe("Inventory customer demand", () => {
     expect(item.line?.id).toBe("qbo-4pxl");
     expect(item.remaining).toBe(0);
     expect(item.remaining > 0).toBe(false);
-  });
-
-  it("keeps dormant pending-review imports out of current customer demand", () => {
-    const canonicalRemainingQty = 1;
-    const dormantImportLine = {
-      id: "dormant-4pxl",
-      product_id: "product-4pxl",
-      approved_qty: 0,
-      fulfilled_qty: 0,
-      approval_status: "PENDING_REVIEW",
-      fulfillment_status: "PENDING",
-    };
-
-    expect(canonicalRemainingQty).toBe(1);
-    expect(hasCurrentOperationalDemandEvidence({
-      reviewStatuses: ["PENDING_REVIEW"],
-      lines: [dormantImportLine],
-    })).toBe(false);
   });
 });

@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, hasCurrentOperationalDemandEvidence, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -73,7 +73,6 @@ type QueueLine = {
     id: string;
     source_invoice_id?: string | null;
     source_type?: string | null;
-    review_status?: string | null;
     order_number?: string | null;
     duplicate_of_order_id?: string | null;
     cancellation_status?: string | null;
@@ -334,7 +333,6 @@ export default async function InventoryPage({
         shipping_orders (
           id,
           source_invoice_id,
-          review_status,
           ${duplicateParentField}
           ${cancellationField}
           created_at,
@@ -521,22 +519,11 @@ export default async function InventoryPage({
     const canonicalLineIds = canonicalLineIdsByLogicalInvoice.get(logicalInvoiceId);
     return canonicalLineIds === null || canonicalLineIds === undefined || canonicalLineIds.has(line.id);
   });
-  const hasEligibleCurrentParent = (line: QueueLine) =>
+  const activeQueueLineRows = canonicalQueueLineRows.filter((line) =>
     !line.shipping_orders?.duplicate_of_order_id
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
-    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED";
-  const currentOperationalLogicalInvoiceIds = new Set<string>();
-  for (const [logicalInvoiceId, lines] of queueLinesByLogicalInvoice) {
-    const eligibleLines = lines.filter(hasEligibleCurrentParent);
-    if (hasCurrentOperationalDemandEvidence({
-      reviewStatuses: eligibleLines.map((line) => line.shipping_orders?.review_status),
-      lines: eligibleLines,
-    })) currentOperationalLogicalInvoiceIds.add(logicalInvoiceId);
-  }
-  const activeQueueLineRows = canonicalQueueLineRows.filter((line) => {
-    const logicalInvoiceId = line.shipping_orders?.source_invoice_id ?? line.shipping_orders?.id;
-    return hasEligibleCurrentParent(line) && Boolean(logicalInvoiceId && currentOperationalLogicalInvoiceIds.has(logicalInvoiceId));
-  });
+    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
+  );
   const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase

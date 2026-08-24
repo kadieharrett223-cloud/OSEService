@@ -109,10 +109,9 @@ before any caching or pagination change is considered.
 - 18 canonical products still have conflicting legacy SKU identities (574 units) excluded from the
   opening balance; these need a business decision before they can be merged.
 
-### Operational Demand Gate
+### Canonical Sibling Resolution
 
-The Inventory projection counts canonical remaining demand only for logical orders with operational
-activation: a parent that left `PENDING_REVIEW`, or a reconciliation-approved open line. This keeps
-dormant historical imports as source evidence while excluding them from Customer List,
-Sold/Committed, and available-stock calculations. Fulfilled canonical QBO evidence always takes
-precedence over an open OLD_ERP sibling.
+The Inventory projection preserves the established open-line demand population, then resolves
+sibling parent evidence by logical invoice before building Customer List, Sold/Committed, and queue
+values. A fulfilled canonical QBO physical line always takes precedence over an open OLD_ERP
+sibling, so stale sibling metadata cannot resurrect a completed customer obligation.

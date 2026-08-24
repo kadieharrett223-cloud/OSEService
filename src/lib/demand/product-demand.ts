@@ -25,11 +25,6 @@ export type DemandLineLike = {
   parent_qbo_voided?: boolean;
 };
 
-type OperationalDemandEvidence = {
-  reviewStatuses: Array<string | null | undefined>;
-  lines: DemandLineLike[];
-};
-
 export function openQtyOf(line: DemandLineLike) {
   return Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
 }
@@ -40,18 +35,6 @@ export function isOpenDemandLine(line: DemandLineLike) {
   if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
   return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
-}
-
-/**
- * A historical import becomes current operational demand only after it was activated or
- * reconciliation left an approved open line. Canonical remaining quantity is checked separately.
- */
-export function hasCurrentOperationalDemandEvidence({ reviewStatuses, lines }: OperationalDemandEvidence) {
-  const isActivated = reviewStatuses.some((status) => {
-    const normalized = String(status ?? "").trim().toUpperCase();
-    return Boolean(normalized) && normalized !== "PENDING_REVIEW";
-  });
-  return isActivated || lines.some(isOpenDemandLine);
 }
 
 /**

@@ -168,6 +168,19 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("prefers a fulfilled active sibling over the canonical parent's stale matching line", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["URJT-45-1", 1]]),
+      lines: [
+        line({ id: "qbo-urjt", legacy_item_code: "URJT-45-1", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING" }),
+        line({ id: "old-erp-urjt", legacy_item_code: "000182", products: { sku: "URJT-45", canonical_name: "Universal Expandable Width Rolling Jack Tray URJT-45" }, approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(summary.items[0].line?.id).toBe("old-erp-urjt");
+  });
+
   it("keeps same-number 11982 customer obligations separate for John Sweeney and Bryant Bray", () => {
     const john = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["Misc Charge", 1], ["Note", 1], ["Discount-1", 1]], { descriptions: { "Misc Charge": "4032-6 Three level lift", Note: "220 volt motor", "Discount-1": "-- Discount" } }),

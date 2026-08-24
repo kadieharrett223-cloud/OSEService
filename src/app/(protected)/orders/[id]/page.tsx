@@ -13,7 +13,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
-import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import {
   addOrderNoteAction,
@@ -904,6 +904,8 @@ export default async function OrderDetailPage({
   const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<
     NonNullable<OrderDetailRow["shipping_order_lines"]>[number] & { shipping_order_id: string }
   >;
+  const operationalLines = [...orderLines, ...siblingPhysicalLines]
+    .sort(prioritizePhysicalFulfillmentLine);
 
   const lineIds = orderLines.map((line) => line.id);
   const { data: fulfillmentRows } = lineIds.length
@@ -925,7 +927,7 @@ export default async function OrderDetailPage({
 
   const loggedShipmentNumbers = new Set(shipments.map((shipment) => shipment.shipment_number));
   const historicalShipments = new Map<string, ShipmentEntry>();
-  for (const line of orderLines) {
+  for (const line of operationalLines) {
     for (const fulfillment of fulfillmentsByLine[line.id] ?? []) {
       if (fulfillment.fulfillment_type && fulfillment.fulfillment_type !== "SHIPMENT") continue;
       if (!fulfillment.shipment_number || loggedShipmentNumbers.has(fulfillment.shipment_number)) continue;
@@ -1154,7 +1156,7 @@ export default async function OrderDetailPage({
   orderHealthIssues = [...orderHealthIssues, ...coverageHealthIssues];
 
   const shippingLineBySkuKey = new Map<string, NonNullable<OrderDetailRow["shipping_order_lines"]>[number]>();
-  for (const line of orderLines) {
+  for (const line of operationalLines) {
     const keys = [
       normalizeSkuKey(line.products?.sku),
       normalizeSkuKey(line.legacy_item_code),
@@ -1177,7 +1179,7 @@ export default async function OrderDetailPage({
   const bestCanonicalLineMatch = (skuKey: string | null, description: string) => {
     if (!skuKey) return null;
     const descriptionKey = normalizeSkuKey(description);
-    return orderLines
+    return operationalLines
       .map((candidate) => {
         const canonical = normalizeSkuKey(candidate.products?.canonical_name);
         const directIndex = canonical?.indexOf(skuKey) ?? -1;
@@ -1186,7 +1188,7 @@ export default async function OrderDetailPage({
         return { candidate, score: directIndex >= 0 ? directIndex : 10000 + descriptionIndex };
       })
       .filter((match): match is { candidate: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]; score: number } => Boolean(match))
-      .sort((left, right) => left.score - right.score)[0]?.candidate ?? null;
+      .sort((left, right) => left.score - right.score || prioritizePhysicalFulfillmentLine(left.candidate, right.candidate))[0]?.candidate ?? null;
   };
 
   const lineForInvoiceSku = (skuKey: string | null, description: string) => {
@@ -1217,11 +1219,7 @@ export default async function OrderDetailPage({
     const shippingLine = skuKey
       ? skuKeys.map((key) => lineForInvoiceSku(key, item.description)).find(Boolean)
         ?? lineForInvoiceSku(skuKey, item.description)
-        ?? orderLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
-        ?? siblingPhysicalLines.find((candidate) => {
-          const candidateSku = normalizeSkuKey(candidate.legacy_item_code ?? candidate.products?.sku);
-          return Boolean(candidateSku && skuKeys.some((key) => candidateSku === key));
-        })
+        ?? operationalLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
         ?? null
       : item.description === "Invoice line" ? null : orderLines[index] ?? null;
     return {
@@ -1405,7 +1403,7 @@ export default async function OrderDetailPage({
     return { item, supply, needed, inStock, fulfilled, status };
   });
 
-  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: [...orderLines, ...siblingPhysicalLines] });
+  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: operationalLines });
   const visibleOpenTotal = canonicalPhysicalSummary.remaining;
   const visibleShippedTotal = canonicalPhysicalSummary.fulfilled;
   const visibleBackorderedTotal = itemStockSummary.reduce((sum, row) => sum + Math.max(0, row.needed - row.inStock), 0);

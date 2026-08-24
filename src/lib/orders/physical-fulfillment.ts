@@ -157,7 +157,7 @@ function lineMatchesInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string
   return invoiceKeys.some((invoiceKey) => lineKeys.some((lineKey) => lineKey === invoiceKey || lineKey.includes(invoiceKey) || invoiceKey.includes(lineKey)));
 }
 
-function prioritizeMatchingLine(left: PhysicalFulfillmentLine, right: PhysicalFulfillmentLine) {
+export function prioritizePhysicalFulfillmentLine(left: PhysicalFulfillmentLine, right: PhysicalFulfillmentLine) {
   const leftCompleted = upper(left.fulfillment_status) === "FULFILLED" ? 1 : 0;
   const rightCompleted = upper(right.fulfillment_status) === "FULFILLED" ? 1 : 0;
   if (leftCompleted !== rightCompleted) return leftCompleted > rightCompleted ? -1 : 1;
@@ -217,7 +217,7 @@ export function getCanonicalPhysicalOrderSummary({
         if (candidate.id && usedLineIds.has(candidate.id)) return false;
         return lineMatchesInvoiceSku(candidate, item.sku);
       })
-      .sort((left, right) => prioritizeMatchingLine(left, right));
+      .sort((left, right) => prioritizePhysicalFulfillmentLine(left, right));
     const line = matches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));

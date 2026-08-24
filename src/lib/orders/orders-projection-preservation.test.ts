@@ -1,43 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { parentsForOrdersProjection } from "./orders-projection-preservation";
+import { buildLogicalOrdersProjection } from "./logical-orders-projection";
 
 describe("Orders projection preservation", () => {
-  it("keeps active same-invoice parents independent until their evidence is safely merged", () => {
-    const parents = parentsForOrdersProjection([
+  it("keeps all active same-invoice evidence in one canonical logical row", () => {
+    const projection = buildLogicalOrdersProjection([
       {
         id: "qbo-parent",
+        source_type: "QBO_INVOICE",
         source_invoice_id: "source-12310",
-        customerListMember: true,
-        archivedHistory: true,
-        cancelledHistory: true,
+        shipping_order_lines: [{ id: "qbo-line", fulfilledQty: 2 }],
       },
       {
         id: "old-erp-parent",
         source_invoice_id: "source-12310",
-        activeDemand: 1,
-        inWarehouseDemand: 1,
-        partiallyFulfilledDemand: 1,
-        fulfilledQuantity: 3,
-        shipmentEvidence: 3,
-        queuePositions: 4,
-        reservations: 1,
-        containerAllocations: 1,
-        inventoryEvidence: 6,
+        shipping_order_lines: [{ id: "old-erp-line", fulfilledQty: 1 }],
       },
-      { id: "retired-parent", source_invoice_id: "source-12310", duplicate_of_order_id: "qbo-parent" },
+      { id: "retired-parent", source_invoice_id: "source-12310", duplicate_of_order_id: "qbo-parent", shipping_order_lines: [{ id: "retired-line" }] },
     ]);
 
-    expect(parents.map((parent) => parent.id)).toEqual(["qbo-parent", "old-erp-parent"]);
-    expect(parents[1]).toMatchObject({
-      activeDemand: 1,
-      inWarehouseDemand: 1,
-      partiallyFulfilledDemand: 1,
-      fulfilledQuantity: 3,
-      shipmentEvidence: 3,
-      queuePositions: 4,
-      reservations: 1,
-      containerAllocations: 1,
-      inventoryEvidence: 6,
-    });
+    expect(projection).toHaveLength(1);
+    expect(projection[0]?.id).toBe("qbo-parent");
+    expect(projection[0]?.shipping_order_lines).toEqual([
+      { id: "qbo-line", fulfilledQty: 2 },
+      { id: "old-erp-line", fulfilledQty: 1 },
+    ]);
   });
 });

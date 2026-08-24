@@ -78,13 +78,12 @@ const checks = shipmentLines.map((shipmentLine) => {
   const inventoryEvents = (transactionsByLine.get(shipmentLine.shipping_order_line_id) ?? [])
     .filter((row) => String(row.source_event_key ?? "").startsWith(eventPrefix));
   const floorDelta = inventoryEvents.filter((row) => row.bucket === "ON_FLOOR").reduce((sum, row) => sum + number(row.delta), 0);
-  const soldDelta = inventoryEvents.filter((row) => row.bucket === "SOLD").reduce((sum, row) => sum + number(row.delta), 0);
   const demand = Math.max(number(line?.approved_qty), number(line?.ordered_qty));
   const remaining = Math.max(0, demand - number(line?.fulfilled_qty));
   const external = source === "DROPSHIP" || source === "OTHER";
   const inventoryPass = external
     ? inventoryEvents.length === 0
-    : floorDelta === -quantity && soldDelta === quantity;
+    : floorDelta === -quantity && inventoryEvents.every((row) => row.bucket === "ON_FLOOR");
   const customerDemandPass = Math.abs(fulfillmentLedger - number(line?.fulfilled_qty)) < 0.001
     && remaining === Math.max(0, demand - fulfillmentLedger);
   return {
@@ -98,7 +97,6 @@ const checks = shipmentLines.map((shipmentLine) => {
     shipmentEvidence,
     fulfillmentLedger,
     floorDelta,
-    soldDelta,
     inventoryEvents: inventoryEvents.length,
     checks: {
       shipmentEvidence: shipmentEvidence === quantity,

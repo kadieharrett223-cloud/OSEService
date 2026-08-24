@@ -247,27 +247,6 @@ async function recordFulfillmentInventory(
     actor_id: actorId ?? null,
   }, { onConflict: "source_type,source_event_key", ignoreDuplicates: true });
   if (floorEvent.error) throw new Error(floorEvent.error.message);
-
-  const { data: soldRows, error: soldError } = await supabase
-    .from("inventory_transactions")
-    .select("delta")
-    .eq("product_id", productId)
-    .eq("bucket", "SOLD");
-  if (soldError) throw new Error(soldError.message);
-  const currentSold = (soldRows ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
-  const soldEvent = await supabase.from("inventory_transactions").upsert({
-    product_id: productId,
-    bucket: "SOLD",
-    delta: quantity,
-    before_qty: currentSold,
-    after_qty: currentSold + quantity,
-    reason: "Fulfillment completed",
-    source_type: "FULFILLMENT",
-    source_event_key: `${sourceEventKey}:SOLD`,
-    shipping_order_line_id: lineId,
-    actor_id: actorId ?? null,
-  }, { onConflict: "source_type,source_event_key", ignoreDuplicates: true });
-  if (soldEvent.error) throw new Error(soldEvent.error.message);
 }
 
 async function syncOrderSummaryState(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeDemandLines, isOpenDemandLine, totalOpenDemand } from "./product-demand";
+import { dedupeDemandLines, excludeCompletedQboSiblings, isOpenDemandLine, totalOpenDemand } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -25,14 +25,15 @@ describe("shared active logical demand", () => {
     expect(isOpenDemandLine({ id: "voided", approved_qty: 1, parent_qbo_voided: true, fulfillment_status: "PENDING" })).toBe(false);
   });
 
-  it("excludes warehouse-shipped rows even if a historical fulfilled quantity is stale", () => {
-    expect(isOpenDemandLine({
-      id: "shipped",
-      approved_qty: 1,
-      fulfilled_qty: 0,
-      approval_status: "APPROVED",
-      fulfillment_status: "PENDING",
-      warehouse_status: "FULFILLED",
-    })).toBe(false);
+  it("removes only a bridged OLD ERP sibling of a fulfilled QBO line", () => {
+    const rows = [
+      { id: "old", logical_demand_key: "qbo-line", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "qbo", qbo_invoice_line_id: "qbo-line", approved_qty: 0, fulfilled_qty: 1, fulfillment_status: "FULFILLED" },
+      { id: "open", logical_demand_key: "other-qbo-line", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+    ];
+    const lines = excludeCompletedQboSiblings(rows, new Set(["qbo-line"]));
+
+    expect(lines.map((line) => line.id)).toEqual(["qbo", "open"]);
+    expect(excludeCompletedQboSiblings(rows, new Set()).map((line) => line.id)).toEqual(["old", "qbo", "open"]);
   });
 });

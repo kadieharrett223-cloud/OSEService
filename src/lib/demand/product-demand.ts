@@ -35,8 +35,16 @@ export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
   if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
-  if (CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase())) return false;
-  return !["FULFILLED", "SHIPPED", "COMPLETED"].includes(String(line.warehouse_status ?? "").toUpperCase());
+  return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
+}
+
+/**
+ * A bridged OLD_ERP row is stale only when its exact QBO invoice-line sibling conclusively proves
+ * the same physical obligation belongs to a completed QBO order. This does not otherwise change
+ * demand eligibility.
+ */
+export function excludeCompletedQboSiblings<T extends DemandLineLike>(lines: T[], completedQboLineIds: ReadonlySet<string>) {
+  return lines.filter((line) => line.qbo_invoice_line_id || !line.logical_demand_key || !completedQboLineIds.has(line.logical_demand_key));
 }
 
 /**

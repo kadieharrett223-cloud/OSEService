@@ -39,15 +39,6 @@ export function isOpenDemandLine(line: DemandLineLike) {
 }
 
 /**
- * A bridged OLD_ERP row is stale only when its exact QBO invoice-line sibling conclusively proves
- * the same physical obligation belongs to a completed QBO order. This does not otherwise change
- * demand eligibility.
- */
-export function excludeCompletedQboSiblings<T extends DemandLineLike>(lines: T[], completedQboLineIds: ReadonlySet<string>) {
-  return lines.filter((line) => line.qbo_invoice_line_id || !line.logical_demand_key || !completedQboLineIds.has(line.logical_demand_key));
-}
-
-/**
  * Identity of the logical obligation behind a line: the QuickBooks invoice line, or the OLD_ERP
  * queue record. Two rows only represent the same obligation when they share one of these.
  */

@@ -45,9 +45,9 @@ export function excludeCompletedQboSiblings<T extends DemandLineLike>(lines: T[]
   return lines.filter((line) => line.qbo_invoice_line_id || !line.logical_demand_key || !completedQboLineIds.has(line.logical_demand_key));
 }
 
-/** Keeps completed QBO invoices from being resurrected by all of their INTERNAL sibling rows. */
+/** Keeps completed QBO invoices from being resurrected by any non-QBO sibling row. */
 export function excludeCompletedQboOrderSiblings<T extends DemandLineLike>(lines: T[], completedQboInvoiceIds: ReadonlySet<string>) {
-  return lines.filter((line) => line.parent_source_type !== "INTERNAL" || !line.parent_source_invoice_id || !completedQboInvoiceIds.has(line.parent_source_invoice_id));
+  return lines.filter((line) => line.parent_source_type === "QBO_INVOICE" || !line.parent_source_invoice_id || !completedQboInvoiceIds.has(line.parent_source_invoice_id));
 }
 
 /**

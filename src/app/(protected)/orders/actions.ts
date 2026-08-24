@@ -1504,52 +1504,45 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes")?.trim() || null;
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
-  const fulfillmentOrderId = resolveSingleFulfillmentOwner(
-    selectedIds.map((lineId) => ({ ownerOrderId: getString(formData, `owner_order_id_${lineId}`) })),
-    orderId ?? "",
-  );
-  if (!fulfillmentOrderId && selectedIds.length > 0) redirect(`/orders/${orderId ?? ""}?error=Fulfill+items+from+separate+preserved+parents+in+separate+submissions`);
-  if (!fulfillmentOrderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+remaining+line`);
-  if (orderId && fulfillmentOrderId && fulfillmentOrderId !== orderId) {
+  if (selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+remaining+line`);
+  if (!orderId) redirect(`/orders/?error=Select+fulfillment+items+and+a+date`);
+  const ownerOrderIdByLineId = new Map(selectedIds.map((lineId) => [lineId, getString(formData, `owner_order_id_${lineId}`) ?? orderId]));
+  const fulfillmentOrderIds = Array.from(new Set(ownerOrderIdByLineId.values()));
+  {
     const { data: parentRows, error: parentError } = await adminClient
       .from("shipping_orders")
       .select("id,source_invoice_id,duplicate_of_order_id")
-      .in("id", [orderId, fulfillmentOrderId]);
+      .in("id", [orderId, ...fulfillmentOrderIds]);
     const typedParentRows = (parentRows ?? []) as unknown as Array<{ id: string; source_invoice_id: string | null; duplicate_of_order_id?: string | null }>;
-    const pageParent = typedParentRows.find((parent) => parent.id === orderId);
-    const fulfillmentParent = typedParentRows.find((parent) => parent.id === fulfillmentOrderId);
-    if (parentError || !isActiveSameInvoiceSiblingOwner(orderId, fulfillmentOrderId, typedParentRows)) {
+    if (parentError || fulfillmentOrderIds.some((ownerOrderId) => !isActiveSameInvoiceSiblingOwner(orderId, ownerOrderId, typedParentRows))) {
       redirect(`/orders/${orderId}?error=Selected+fulfillment+line+does+not+belong+to+an+active+sibling+parent`);
-    }
-  }
-  if (fulfillmentOrderId === orderId && orderId) {
-    const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
-    if (canonicalOrderId) {
-      redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+fulfillment`);
     }
   }
   const actorId = await safeAccessUserId(adminClient, user.id);
 
-  if (!orderId || !fulfillmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+fulfillment+items+and+a+date`);
-  if (selectedIds.length === 0) redirect(`/orders/${orderId}?error=Select+at+least+one+remaining+line`);
+  if (!fulfillmentDate || !idempotencyKey) redirect(`/orders/${orderId}?error=Select+fulfillment+items+and+a+date`);
 
   const selectedQuantities = new Map(selectedIds.map((lineId) => [lineId, getPositiveNumber(formData, `quantity_${lineId}`)]));
   if ([...selectedQuantities.values()].some((quantity) => quantity <= 0)) redirect(`/orders/${orderId}?error=Fulfillment+quantities+must+be+greater+than+zero`);
 
   const { data: rows, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
-    .eq("shipping_order_id", fulfillmentOrderId)
+    .select("id, shipping_order_id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
     .in("id", selectedIds);
   if (lineError || rows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
 
-  const lines = (rows ?? []) as unknown as Array<{ id: string; product_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
+  const lines = (rows ?? []) as unknown as Array<{ id: string; shipping_order_id: string; product_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
+  if (lines.some((line) => ownerOrderIdByLineId.get(line.id) !== line.shipping_order_id)) redirect(`/orders/${orderId}?error=Selected+line+owner+does+not+match+its+operational+record`);
   if (lines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+fulfill+an+unmapped+product+line`);
 
-  const warehouseLines = lines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
-  const nonWarehouseLines = lines.filter((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"));
   const fulfilledAtIso = `${fulfillmentDate}T12:00:00.000Z`;
-  for (const line of nonWarehouseLines) {
+  const linesByOwner = new Map<string, typeof lines>();
+  for (const line of lines) {
+    const ownerLines = linesByOwner.get(line.shipping_order_id) ?? [];
+    ownerLines.push(line);
+    linesByOwner.set(line.shipping_order_id, ownerLines);
+  }
+  for (const line of lines.filter((candidate) => !shouldMoveWarehouseInventory(candidate.fulfillment_source ?? "WAREHOUSE"))) {
     const source = String(line.fulfillment_source ?? "").toUpperCase();
     if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Dropship+and+Other+must+be+assigned+before+non-warehouse+completion`);
     const quantity = selectedQuantities.get(line.id) ?? 0;
@@ -1572,30 +1565,28 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
   }
 
-  const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
-    p_order_id: fulfillmentOrderId,
-    p_shipped_at: fulfilledAtIso,
-    p_carrier: carrier || null,
-    p_tracking_number: trackingNumber || null,
-    p_notes: notes,
-    p_idempotency_key: `${idempotencyKey}:FULFILLMENT`,
-    p_lines: lines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
-  } as never);
-  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
-  if (!createdShipmentId) redirect(`/orders/${orderId}?error=Unable+to+create+shipment+record`);
-  const shipmentId = createdShipmentId as string;
-  const { error: shipmentNoteError } = await adminClient
-    .from("order_shipments")
-    .update({ notes } as never)
-    .eq("id", shipmentId)
-    .eq("shipping_order_id", fulfillmentOrderId);
-  if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
-
-  await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: selectedIds.join(","), warehouse_count: warehouseLines.length, non_warehouse_count: nonWarehouseLines.length, fulfilled_at: fulfilledAtIso });
+  for (const [fulfillmentOrderId, ownerLines] of linesByOwner) {
+    const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
+      p_order_id: fulfillmentOrderId,
+      p_shipped_at: fulfilledAtIso,
+      p_carrier: carrier || null,
+      p_tracking_number: trackingNumber || null,
+      p_notes: notes,
+      p_idempotency_key: `${idempotencyKey}:FULFILLMENT:${fulfillmentOrderId}`,
+      p_lines: ownerLines.map((line) => ({ line_id: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
+    } as never);
+    if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+    if (!createdShipmentId) redirect(`/orders/${orderId}?error=Unable+to+create+shipment+record`);
+    const shipmentId = createdShipmentId as string;
+    const { error: shipmentNoteError } = await adminClient.from("order_shipments").update({ notes } as never).eq("id", shipmentId).eq("shipping_order_id", fulfillmentOrderId);
+    if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
+    const warehouseCount = ownerLines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE")).length;
+    await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: ownerLines.map((line) => line.id).join(","), warehouse_count: warehouseCount, non_warehouse_count: ownerLines.length - warehouseCount, fulfilled_at: fulfilledAtIso });
+  }
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
-  if (fulfillmentOrderId !== orderId) revalidatePath(`/orders/${fulfillmentOrderId}`);
+  for (const fulfillmentOrderId of fulfillmentOrderIds) if (fulfillmentOrderId !== orderId) revalidatePath(`/orders/${fulfillmentOrderId}`);
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Fulfillment+completed`);
 }

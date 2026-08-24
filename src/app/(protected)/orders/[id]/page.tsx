@@ -151,6 +151,7 @@ type FulfillmentEntry = {
 
 type ShipmentEntry = {
   id: string;
+  shipping_order_id?: string;
   shipment_number: string;
   shipped_at: string;
   carrier: string | null;
@@ -772,14 +773,14 @@ export default async function OrderDetailPage({
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
     hasOrderShipmentsTables
-      ? supabase.from("order_shipments").select(`id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
+      ? supabase.from("order_shipments").select(`id, shipping_order_id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
       : Promise.resolve({ data: [] as ShipmentEntry[] }),
   ]);
 
   const orderRecord = order as OrderDetailRow | null;
   const activities = (activityRows ?? []) as OrderActivityEntry[];
   const attachments = (attachmentResult.data ?? []) as OrderAttachmentEntry[];
-  const shipments = (shipmentRows ?? []) as unknown as ShipmentEntry[];
+  let shipments = (shipmentRows ?? []) as unknown as ShipmentEntry[];
   const documentCountsByShipment = new Map<string, number>();
   for (const attachment of attachments as Array<OrderAttachmentEntry & { shipment_id?: string | null }>) {
     if (attachment.shipment_id) documentCountsByShipment.set(attachment.shipment_id, (documentCountsByShipment.get(attachment.shipment_id) ?? 0) + 1);
@@ -805,6 +806,15 @@ export default async function OrderDetailPage({
     if (canonicalOrder?.id && canonicalOrder.id !== orderRecord.id) {
       redirect(`/orders/${canonicalOrder.id}?message=Opened+canonical+QuickBooks+order+for+this+invoice`);
     }
+  }
+
+  if (hasOrderShipmentsTables && siblingOrderIds.length > 1) {
+    const { data: siblingShipmentRows } = await supabase
+      .from("order_shipments")
+      .select(`id, shipping_order_id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`)
+      .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
+      .order("shipped_at", { ascending: false });
+    shipments = [...shipments, ...((siblingShipmentRows ?? []) as unknown as ShipmentEntry[])];
   }
 
   if ((orderRecord.shipping_order_lines ?? []).length === 0 && parseQuickbooksInvoiceItems(orderRecord.qbo_invoices?.raw_payload).some((item) => !item.isNonInventory && item.qty > 0)) {
@@ -1208,6 +1218,10 @@ export default async function OrderDetailPage({
       ? skuKeys.map((key) => lineForInvoiceSku(key, item.description)).find(Boolean)
         ?? lineForInvoiceSku(skuKey, item.description)
         ?? orderLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
+        ?? siblingPhysicalLines.find((candidate) => {
+          const candidateSku = normalizeSkuKey(candidate.legacy_item_code ?? candidate.products?.sku);
+          return Boolean(candidateSku && skuKeys.some((key) => candidateSku === key));
+        })
         ?? null
       : item.description === "Invoice line" ? null : orderLines[index] ?? null;
     return {
@@ -1391,7 +1405,7 @@ export default async function OrderDetailPage({
     return { item, supply, needed, inStock, fulfilled, status };
   });
 
-  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: orderLines });
+  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: [...orderLines, ...siblingPhysicalLines] });
   const visibleOpenTotal = canonicalPhysicalSummary.remaining;
   const visibleShippedTotal = canonicalPhysicalSummary.fulfilled;
   const visibleBackorderedTotal = itemStockSummary.reduce((sum, row) => sum + Math.max(0, row.needed - row.inStock), 0);
@@ -1734,7 +1748,7 @@ export default async function OrderDetailPage({
             </div>
             <div className="mt-4 space-y-3">
               {shipmentLog.map((shipment) => (
-                <ShipmentHistoryCard key={shipment.id} orderId={orderRecord.id} shipment={shipment} editableLines={editableShipmentLinesByShipment.get(shipment.id) ?? []} />
+                <ShipmentHistoryCard key={shipment.id} orderId={shipment.shipping_order_id ?? orderRecord.id} shipment={shipment} editableLines={editableShipmentLinesByShipment.get(shipment.id) ?? []} />
               ))}
               {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}
             </div>

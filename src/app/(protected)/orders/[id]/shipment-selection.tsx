@@ -53,6 +53,10 @@ export function ShipmentSelectionProvider({
         delete next[line.id];
         return next;
       }
+      const selectedOwnerOrderId = Object.values(current)[0]?.ownerOrderId;
+      if (selectedOwnerOrderId && selectedOwnerOrderId !== (line.ownerOrderId ?? selectedOwnerOrderId)) {
+        return { [line.id]: { ...line, quantity: line.defaultQty } };
+      }
       return { ...current, [line.id]: { ...line, quantity: line.defaultQty } };
     });
   }
@@ -117,7 +121,7 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
   if (!active) return null;
   const selectedLine = selected.find((item) => item.id === line.id);
   const selectedOwnerOrderId = resolveSingleFulfillmentOwner(selected, line.ownerOrderId ?? "");
-  const belongsToDifferentOwner = Boolean(
+  const switchesOwnerGroup = Boolean(
     selectedOwnerOrderId
     && selectedOwnerOrderId !== (line.ownerOrderId ?? selectedOwnerOrderId),
   );
@@ -131,15 +135,13 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
         type="button"
         aria-pressed={Boolean(selectedLine)}
         aria-label={`Include ${line.sku} in fulfillment`}
-        disabled={belongsToDifferentOwner}
-        title={belongsToDifferentOwner ? "Fulfill preserved sibling-parent lines in a separate submission." : undefined}
+        title={switchesOwnerGroup ? "Select this preserved item for a separate fulfillment submission." : undefined}
         onPointerDown={(event) => {
           event.stopPropagation();
-          if (belongsToDifferentOwner) return;
           toggle(line);
         }}
         onClick={(event) => event.stopPropagation()}
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none disabled:cursor-not-allowed disabled:border-[#cbd5e1] disabled:bg-[#f1f5f9] ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}
+        className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}
       >
         {selectedLine ? "✓" : ""}
       </button>
@@ -160,9 +162,9 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
           Inventory shortage: fulfilling {line.defaultQty} with 0 available
         </span>
       ) : null}
-      {belongsToDifferentOwner ? (
+      {switchesOwnerGroup ? (
         <span className="ml-1 text-[11px] font-medium text-[#64748b]">
-          Submit this preserved parent separately.
+          Selects this item for a separate fulfillment submission.
         </span>
       ) : null}
     </span>

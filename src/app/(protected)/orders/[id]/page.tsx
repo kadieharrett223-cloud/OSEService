@@ -13,7 +13,8 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
-import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import {
   addOrderNoteAction,
@@ -159,6 +160,7 @@ type ShipmentEntry = {
   notes: string | null;
   created_by?: string | null;
   created_at?: string;
+  idempotency_key?: string | null;
   creator?: { full_name: string | null } | null;
   document_count?: number;
   lines?: Array<{ quantity: number | null; shipping_order_line_id: string; shipping_order_lines?: { products?: { sku: string | null; canonical_name: string | null } | null } | null }>;
@@ -740,13 +742,14 @@ export default async function OrderDetailPage({
     "fulfillment_reference", "fulfillment_tracking", "fulfillment_notes",
   ]);
   const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);
-  const shipmentColumns = await loadTableColumnSet(supabase, "order_shipments", ["id", "created_by", "created_at"]);
+  const shipmentColumns = await loadTableColumnSet(supabase, "order_shipments", ["id", "created_by", "created_at", "idempotency_key"]);
   const hasOrderShipmentsTables = shipmentColumns.has("id");
   const fulfillmentColumns = await loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]);
   const hasOrderAttachmentsTable = attachmentColumns.has("id");
   const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet, shippingOrderLineColumnSet);
   const attachmentSelect = ["id", "file_name", "file_path", "file_size", "mime_type", "created_at", ...["document_type", "note", "is_restricted", "shipment_id"].filter((column) => attachmentColumns.has(column))].join(", ");
   const fulfillmentSelect = ["id", "shipping_order_line_id", "fulfilled_qty", "fulfilled_at", "shipment_number", "carrier", "tracking_number", "reason", ...(fulfillmentColumns.has("fulfillment_type") ? ["fulfillment_type"] : [])].join(", ");
+  const shipmentSelect = `id, shipping_order_id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("idempotency_key") ? "idempotency_key," : ""} ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`;
 
   const [{ data: order }, { data: activityRows }, attachmentResult, { data: containerRows }, { data: shipmentRows }] = await Promise.all([
     supabase
@@ -773,7 +776,7 @@ export default async function OrderDetailPage({
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("eta_confirmed_date", { ascending: true, nullsFirst: false }),
     hasOrderShipmentsTables
-      ? supabase.from("order_shipments").select(`id, shipping_order_id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
+      ? supabase.from("order_shipments").select(shipmentSelect).eq("shipping_order_id", id).order("shipped_at", { ascending: false })
       : Promise.resolve({ data: [] as ShipmentEntry[] }),
   ]);
 
@@ -811,7 +814,7 @@ export default async function OrderDetailPage({
   if (hasOrderShipmentsTables && siblingOrderIds.length > 1) {
     const { data: siblingShipmentRows } = await supabase
       .from("order_shipments")
-      .select(`id, shipping_order_id, shipment_number, shipped_at, carrier, tracking_number, notes, ${shipmentColumns.has("created_by") ? "created_by," : ""} ${shipmentColumns.has("created_at") ? "created_at," : ""} creator:access_users(full_name), lines:order_shipment_lines(quantity, shipping_order_line_id, shipping_order_lines(products(sku, canonical_name)))`)
+      .select(shipmentSelect)
       .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
       .order("shipped_at", { ascending: false });
     shipments = [...shipments, ...((siblingShipmentRows ?? []) as unknown as ShipmentEntry[])];
@@ -945,6 +948,7 @@ export default async function OrderDetailPage({
     }
   }
   const shipmentLog = [...shipments, ...historicalShipments.values()];
+  const logicalShipmentLog = groupLogicalShipments(shipmentLog);
   let orderHealthIssues = evaluateOrderHealth({
     lines: orderLines,
     shipments: shipmentLog.map((shipment) => ({ lines: (shipment.lines ?? []).map((line) => ({ shipping_order_line_id: line.shipping_order_line_id, quantity: line.quantity })) })),
@@ -1200,6 +1204,8 @@ export default async function OrderDetailPage({
       const byProduct = shippingLineByProductId.get(resolved.id);
       if (byProduct) return byProduct;
     }
+    const physicalMatch = operationalLines.find((candidate) => matchesPhysicalLineToInvoiceSku(candidate, skuKey));
+    if (physicalMatch) return physicalMatch;
     // Old-ERP lines can retain a numeric SKU while the invoice uses the model code in its description.
     return bestCanonicalLineMatch(skuKey, description);
   };
@@ -1740,15 +1746,15 @@ export default async function OrderDetailPage({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-[#111827]">Shipments</h2>
-                <p className="mt-1 text-sm text-[#5a5a5a]">Each completed physical shipment remains an independent record.</p>
+                <p className="mt-1 text-sm text-[#5a5a5a]">Completed customer shipments.</p>
               </div>
-              <span className="rounded-full bg-[#f1f5f9] px-3 py-1 text-xs font-semibold text-[#475569]">{shipmentLog.length} records</span>
+              <span className="rounded-full bg-[#f1f5f9] px-3 py-1 text-xs font-semibold text-[#475569]">{logicalShipmentLog.length} {logicalShipmentLog.length === 1 ? "shipment" : "shipments"}</span>
             </div>
             <div className="mt-4 space-y-3">
-              {shipmentLog.map((shipment) => (
+              {logicalShipmentLog.map((shipment) => (
                 <ShipmentHistoryCard key={shipment.id} orderId={shipment.shipping_order_id ?? orderRecord.id} shipment={shipment} editableLines={editableShipmentLinesByShipment.get(shipment.id) ?? []} />
               ))}
-              {shipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}
+              {logicalShipmentLog.length === 0 ? <p className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-sm text-[#64748b]">No completed shipments yet.</p> : null}
             </div>
           </section>
 

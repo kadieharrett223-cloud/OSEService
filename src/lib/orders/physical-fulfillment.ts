@@ -150,10 +150,17 @@ function parseInvoicePhysicalItems(rawPayload: unknown) {
   }).filter((item): item is { key: string; sku: string | null; quantity: number } => Boolean(item && item.quantity > 0));
 }
 
-function lineMatchesInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
+export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
   const invoiceKeys = qboSkuCandidates(invoiceSku).map(normalizeSkuKey).filter(Boolean);
   if (invoiceKeys.length === 0) return false;
-  const lineKeys = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name].map(normalizeSkuKey).filter(Boolean);
+  const canonicalTokens = String(line.products?.canonical_name ?? "")
+    .split(/[^A-Za-z0-9-]+/)
+    .map(normalizeSkuKey)
+    .filter((token) => Boolean(token) && /\d/.test(token));
+  const lineKeys = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name]
+    .map(normalizeSkuKey)
+    .filter(Boolean)
+    .concat(canonicalTokens);
   return invoiceKeys.some((invoiceKey) => lineKeys.some((lineKey) => lineKey === invoiceKey || lineKey.includes(invoiceKey) || invoiceKey.includes(lineKey)));
 }
 
@@ -215,7 +222,7 @@ export function getCanonicalPhysicalOrderSummary({
       .filter((candidate) => {
         if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
         if (candidate.id && usedLineIds.has(candidate.id)) return false;
-        return lineMatchesInvoiceSku(candidate, item.sku);
+        return matchesPhysicalLineToInvoiceSku(candidate, item.sku);
       })
       .sort((left, right) => prioritizePhysicalFulfillmentLine(left, right));
     const line = matches[0] ?? null;

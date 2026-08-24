@@ -173,7 +173,7 @@ describe("physical fulfillment totals", () => {
       rawPayload: invoicePayload([["URJT-45-1", 1]]),
       lines: [
         line({ id: "qbo-urjt", legacy_item_code: "URJT-45-1", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING" }),
-        line({ id: "old-erp-urjt", legacy_item_code: "000182", products: { sku: "URJT-45", canonical_name: "Universal Expandable Width Rolling Jack Tray URJT-45" }, approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "old-erp-urjt", legacy_item_code: "RJT-U", products: { sku: "000182", canonical_name: "URJT-45 UNIVERSAL EXPANDABLE WIDTH ROLLING JACK TRAY|URJT-45" }, approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
       ],
     });
 

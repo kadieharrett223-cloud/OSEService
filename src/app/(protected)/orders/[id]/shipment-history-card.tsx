@@ -32,12 +32,14 @@ export function ShipmentHistoryCard({
     notes: string | null;
     creator?: { full_name: string | null } | null;
     document_count?: number;
+    owner_shipment_ids?: string[];
     lines?: HistoryLine[];
   };
   editableLines: EditableLine[];
 }) {
   const [editing, setEditing] = useState(false);
   const historical = shipment.id.startsWith("historical-");
+  const logicalGroup = (shipment.owner_shipment_ids?.length ?? 1) > 1;
 
   return (
     <div className="rounded-xl border border-[#e2e8f0] bg-[#fafbfc] p-4">
@@ -74,7 +76,7 @@ export function ShipmentHistoryCard({
       <div className="mt-3 flex flex-wrap gap-2">
         {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="btn-secondary text-xs">View Tracking</a> : null}
         {shipment.document_count ? <a href="#documents" className="btn-secondary text-xs">Documents: {shipment.document_count}</a> : null}
-        {!historical ? <button type="button" className="btn-secondary text-xs" onClick={() => setEditing((value) => !value)}>{editing ? "Close Editor" : "Edit Shipment"}</button> : null}
+        {!historical && !logicalGroup ? <button type="button" className="btn-secondary text-xs" onClick={() => setEditing((value) => !value)}>{editing ? "Close Editor" : "Edit Shipment"}</button> : null}
       </div>
       {editing ? <ShipmentEditForm orderId={orderId} shipmentId={shipment.id} shippedAt={shipment.shipped_at} carrier={shipment.carrier} trackingNumber={shipment.tracking_number} notes={shipment.notes} lines={editableLines} onCancel={() => setEditing(false)} /> : null}
     </div>

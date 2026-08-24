@@ -643,8 +643,13 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
     : { error: null };
 
   if (lineError) redirect(`/orders/new?error=${encodeURIComponent(lineError.message)}`);
-  await recalculateProductQueues(mappedInvoiceLines.map((line) => line.product_id));
-  revalidateOrdersList();
+  try {
+    await recalculateProductQueues(mappedInvoiceLines.map((line) => line.product_id));
+    revalidateOrdersList();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Order was created, but its queue could not be refreshed";
+    redirect(`/orders/${order.id}?error=${encodeURIComponent(`Order created, but queue refresh failed: ${message}`)}`);
+  }
   redirect(`/orders?tab=new&message=QuickBooks+invoice+added+to+New+Orders`);
 }
 

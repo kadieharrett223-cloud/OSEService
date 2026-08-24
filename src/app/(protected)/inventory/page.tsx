@@ -7,6 +7,7 @@ import { AdminRowEditor } from "@/app/(protected)/inventory/admin-row-editor";
 import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
 import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-button";
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
+import { PackageDimensionsDetails } from "@/components/package-dimensions-details";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
@@ -14,6 +15,7 @@ import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { getPackageDimensions, type PackageDimensions } from "@/lib/products/package-dimensions";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -23,6 +25,18 @@ type ProductRow = {
   canonical_name: string | null;
   inventory_group?: string | null;
   inventory_sort_order?: number | null;
+};
+
+type ProductSourceRecord = {
+  raw_payload?: {
+    sku?: string | null;
+    itemCode?: string | null;
+    qbMatchText?: string | null;
+    lengthInches?: unknown;
+    widthInches?: unknown;
+    heightInches?: unknown;
+    weightLbs?: unknown;
+  } | null;
 };
 
 type InventoryTransactionRow = {
@@ -120,6 +134,7 @@ type InventoryViewRow = {
   availableAfterIncoming: number;
   backorderedAfterIncoming: number;
   nextEta: string;
+  packageDimensions: PackageDimensions | null;
   incomingContainers: Array<{
     containerNumber: string;
     qty: number;
@@ -268,7 +283,7 @@ function getAssignmentLabel(line: QueueLine) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; mapError?: string; mapMessage?: string }>;
+  searchParams: Promise<{ q?: string; dims?: string; mapError?: string; mapMessage?: string }>;
 }) {
   const currentUser = await requireUser();
   const adminMode = await isAdminUnlockedForUser(currentUser.id);
@@ -293,6 +308,7 @@ export default async function InventoryPage({
     { data: transactions },
     { data: containerLines },
     { data: queueLines },
+    { data: sourceProductRecords },
   ] = await Promise.all([
     supabase
       .from("products")
@@ -348,6 +364,10 @@ export default async function InventoryPage({
       .in("approval_status", ["APPROVED", "PARTIAL", "FULFILLED"])
       .neq("fulfillment_status", "CANCELLED")
       .order("queue_position_start", { ascending: true, nullsFirst: false }),
+    supabase
+      .from("old_erp_source_records")
+      .select("raw_payload")
+      .eq("source_container", "Products"),
   ]);
 
   // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
@@ -373,6 +393,17 @@ export default async function InventoryPage({
   const groupNames = [...groupSortByName.entries()].sort((left, right) => left[1] - right[1]).map(([name]) => name);
 
   const productRows = (products ?? []) as ProductRow[];
+  const packageDimensionsBySku = new Map<string, PackageDimensions>();
+  for (const sourceRecord of (sourceProductRecords ?? []) as ProductSourceRecord[]) {
+    const dimensions = getPackageDimensions(sourceRecord.raw_payload);
+    if (!dimensions) continue;
+    for (const sourceSku of [sourceRecord.raw_payload?.itemCode, sourceRecord.raw_payload?.sku, sourceRecord.raw_payload?.qbMatchText]) {
+      const key = canonicalSkuKey(sourceSku);
+      if (!key) continue;
+      const existing = packageDimensionsBySku.get(key);
+      if (!existing || (existing.weightPounds === null && dimensions.weightPounds !== null)) packageDimensionsBySku.set(key, dimensions);
+    }
+  }
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
@@ -706,6 +737,7 @@ export default async function InventoryPage({
       availableAfterIncoming: 0,
       backorderedAfterIncoming: 0,
       nextEta: "—",
+      packageDimensions: packageDimensionsBySku.get(canonicalKey) ?? null,
       incomingContainers: [],
       customerQueue: [],
     };
@@ -715,6 +747,7 @@ export default async function InventoryPage({
     group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
     group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];
     group.productIds = [...group.productIds, product.id];
+    if (!group.packageDimensions) group.packageDimensions = packageDimensionsBySku.get(canonicalKey) ?? null;
 
     // Merged legacy identities can disagree; keep the earliest real placement.
     const assignedGroup = product.inventory_group?.trim();
@@ -860,6 +893,14 @@ export default async function InventoryPage({
     if (current && current.name === row.group) current.rows.push(row);
     else sections.push({ name: row.group, rows: [row] });
   }
+  const expandedDimensionsProductId = String(params.dims ?? "").trim();
+  const dimensionsHref = (productId: string) => {
+    const query = new URLSearchParams();
+    if (params.q) query.set("q", params.q);
+    if (expandedDimensionsProductId !== productId) query.set("dims", productId);
+    const search = query.toString();
+    return search ? `/inventory?${search}` : "/inventory";
+  };
 
   return (
     <div className="space-y-5">
@@ -918,7 +959,7 @@ export default async function InventoryPage({
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="max-w-full overflow-x-auto">
-          <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
+          <table className="w-full min-w-[1152px] table-fixed text-left text-sm">
             <colgroup>
               <col className="w-[280px]" />
               <col className="w-[82px]" />
@@ -928,6 +969,7 @@ export default async function InventoryPage({
               <col className="w-[176px]" />
               <col className="w-[128px]" />
               <col className="w-[156px]" />
+              <col className="w-[72px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
@@ -939,24 +981,26 @@ export default async function InventoryPage({
                 <th className="px-2 py-2.5">Available/Incoming</th>
                 <th className="px-2 py-2.5">Next Arrival</th>
                 <th className="px-2 py-2.5">Customer List</th>
+                <th className="px-2 py-2.5 text-right">Package</th>
               </tr>
             </thead>
             <tbody>
               {displayRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
+                  <td colSpan={9} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
                 sections.map((section) => (
                   <Fragment key={section.name}>
                     <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
-                      <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
+                      <th colSpan={9} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
                         {section.name}
                         <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>
                       </th>
                     </tr>
                     {section.rows.map((row) => (
-                      <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
+                      <Fragment key={row.productId}>
+                      <tr className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
                       <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#64748b]">
@@ -1012,7 +1056,20 @@ export default async function InventoryPage({
                         adminMode={adminMode}
                       />
                     </td>
+                    <td className="px-2 py-3 text-right">
+                      {row.packageDimensions ? (
+                        <Link href={dimensionsHref(row.productId)} className="btn-secondary inline-flex px-2 py-1 text-xs">
+                          {expandedDimensionsProductId === row.productId ? "Hide" : "Dims"}
+                        </Link>
+                      ) : <span className="text-xs text-[#94a3b8]" title="No package dimensions on file">—</span>}
+                    </td>
                       </tr>
+                      {expandedDimensionsProductId === row.productId && row.packageDimensions ? (
+                        <tr className="border-b border-[#dbeafe] bg-[#f8fbff]">
+                          <td colSpan={9} className="px-4 py-3"><PackageDimensionsDetails dimensions={row.packageDimensions} /></td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     ))}
                   </Fragment>
                 ))

@@ -8,7 +8,7 @@
  * quantities must be SUMMED. Collapsing by invoice with MAX(qty) silently drops real demand.
  */
 
-export const CLOSED_DEMAND_STATES = ["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
+export const CLOSED_DEMAND_STATES = ["FULFILLED", "SHIPPED", "ARCHIVED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
 
 export type DemandLineLike = {
   id: string;
@@ -23,6 +23,7 @@ export type DemandLineLike = {
   logical_demand_key?: string | null;
   parent_duplicate_of_order_id?: string | null;
   parent_cancellation_status?: string | null;
+  parent_review_status?: string | null;
   parent_qbo_voided?: boolean;
   parent_source_invoice_id?: string | null;
   parent_source_type?: string | null;
@@ -35,7 +36,7 @@ export function openQtyOf(line: DemandLineLike) {
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
-  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
+  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || String(line.parent_review_status ?? "").toUpperCase() === "ARCHIVED" || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
   return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
 }

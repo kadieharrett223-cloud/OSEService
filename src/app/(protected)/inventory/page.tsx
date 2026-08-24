@@ -337,6 +337,7 @@ export default async function InventoryPage({
           source_type,
           ${duplicateParentField}
           ${cancellationField}
+          review_status,
           created_at,
           fulfillment_method,
           ${shippingOrderPaymentField}
@@ -473,6 +474,7 @@ export default async function InventoryPage({
     const parentFields = {
       parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
       parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+      parent_review_status: line.shipping_orders?.review_status ?? null,
       parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
       parent_source_invoice_id: line.shipping_orders?.source_invoice_id ?? null,
       parent_source_type: line.shipping_orders?.source_type ?? null,

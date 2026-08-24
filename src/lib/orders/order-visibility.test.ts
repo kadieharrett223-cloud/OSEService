@@ -170,6 +170,18 @@ describe("orders visibility and activation", () => {
     expect(matchesOrderTab(result, "archived")).toBe(true);
   });
 
+  it("keeps an explicitly archived order out of Warehouse even when legacy line statuses are stale", () => {
+    const result = classifyOrder(order({
+      review_status: "ARCHIVED",
+      shipping_order_lines: [line({ warehouse_status: "IN_WAREHOUSE", approved_qty: 1, fulfilled_qty: 0 })],
+    }));
+
+    expect(result.isVisibleOperationalOrder).toBe(false);
+    expect(result.isWarehouseOrder).toBe(false);
+    expect(result.isPartiallyShippedOrder).toBe(false);
+    expect(result.isArchivedOrder).toBe(true);
+  });
+
   it("archives fully fulfilled physical orders even when a note line remains open", () => {
     const result = classifyOrder(order({
       shipping_order_lines: [

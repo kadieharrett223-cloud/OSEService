@@ -112,7 +112,8 @@ export function classifyOrder(
   const isActivated = upper(order.review_status) !== "PENDING_REVIEW";
 
   const hasOperationalLines = operationalLines.length > 0;
-  const isVisibleOperationalOrder = (canonicalSummary.remaining > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines);
+  const isExplicitlyArchived = upper(order.review_status) === "ARCHIVED";
+  const isVisibleOperationalOrder = !isExplicitlyArchived && ((canonicalSummary.remaining > 0 && hasOperationalLines) || (isActivated && hasUnresolvedLines));
 
   const anyWarehouse = operationalLines.some((line) => WAREHOUSE_STATES.includes(upper(line.warehouse_status)));
   const anyShipped = canonicalSummary.fulfilled > 0 || physicalLines.some((line) => upper(line.fulfillment_status) === "PARTIALLY_FULFILLED");
@@ -123,9 +124,9 @@ export function classifyOrder(
     isActivated,
     isVisibleOperationalOrder,
     isNewOrder: isVisibleOperationalOrder && !anyWarehouse && !anyShipped,
-    isWarehouseOrder: hasOperationalLines && anyWarehouse && !anyShipped,
-    isPartiallyShippedOrder: anyShipped && canonicalSummary.remaining > 0,
-    isArchivedOrder: canonicalSummary.isComplete || isCompletedServiceOnlyOrder,
+    isWarehouseOrder: !isExplicitlyArchived && hasOperationalLines && anyWarehouse && !anyShipped,
+    isPartiallyShippedOrder: !isExplicitlyArchived && anyShipped && canonicalSummary.remaining > 0,
+    isArchivedOrder: isExplicitlyArchived || canonicalSummary.isComplete || isCompletedServiceOnlyOrder,
     isCancelled: false,
   };
 }

@@ -19,10 +19,15 @@ describe("shared active logical demand", () => {
     expect(dedupeDemandLines(lines)[0].warehouse_status).toBe("IN_WAREHOUSE");
   });
 
-  it("excludes duplicate, cancelled, and voided parents from active demand", () => {
+  it("excludes duplicate, cancelled, archived, and voided parents from active demand", () => {
     expect(isOpenDemandLine({ id: "duplicate", approved_qty: 1, parent_duplicate_of_order_id: "parent", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "cancelled", approved_qty: 1, parent_cancellation_status: "CANCELLED", fulfillment_status: "PENDING" })).toBe(false);
+    expect(isOpenDemandLine({ id: "archived", approved_qty: 1, parent_review_status: "ARCHIVED", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "voided", approved_qty: 1, parent_qbo_voided: true, fulfillment_status: "PENDING" })).toBe(false);
+  });
+
+  it("excludes shipped lines from active demand even if a legacy row has not updated its quantity", () => {
+    expect(isOpenDemandLine({ id: "shipped", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "SHIPPED" })).toBe(false);
   });
 
   it("removes only the bridged sibling of a completed QBO order", () => {

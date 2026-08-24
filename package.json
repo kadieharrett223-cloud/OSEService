@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify": "npm run typecheck && npm run test",
+    "verify:orders-projection": "vitest run src/lib/orders/orders-projection-preservation.test.ts src/lib/orders/order-visibility.test.ts src/lib/orders/duplicate-parent-health.test.ts",
     "azure:export": "node --env-file=.env.local scripts/export-azure-cosmos.mjs",
     "import:denied-cancelled-history": "node scripts/import-old-erp-denied-cancelled-history.mjs",
     "report:old-erp-history-dry-run": "node scripts/classify-old-erp-history-dry-run.mjs",

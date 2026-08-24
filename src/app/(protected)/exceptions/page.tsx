@@ -78,7 +78,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
       order: { id: conflict.canonicalOrderId, order_number: conflict.invoice, customers: { company_name: conflict.customer, full_name: null }, shipping_order_lines: [] },
       issue: {
         severity: "WARNING",
-        code: "ACTIVE_DUPLICATE_PARENT_CONFLICT",
+        code: "PARENT_EVIDENCE_CONFLICT",
         relatedOrderId: conflict.staleOrderId,
         product: "Sibling parents",
         issue: "Active QBO and OLD_ERP parents conflict",
@@ -101,7 +101,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
     shipment: ["SHIPMENT_EXCEEDS_DEMAND", "FULFILLMENT_TOTAL_MISMATCH"],
     voided: ["VOIDED_ACTIVE", "CANCELLED_OPEN_DEMAND"],
     mapping: ["UNMAPPED_PHYSICAL_LINE"],
-    duplicates: ["ACTIVE_DUPLICATE_PARENT_CONFLICT"],
+    duplicates: ["PARENT_EVIDENCE_CONFLICT"],
   };
   const severityRank: Record<string, number> = { ERROR: 0, WARNING: 1, INFO: 2 };
   const filteredFindings = findings.filter(({ order, issue }) => {

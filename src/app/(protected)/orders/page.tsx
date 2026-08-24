@@ -6,6 +6,7 @@ import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderLifecycleTab, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
+import { parentsForOrdersProjection } from "@/lib/orders/orders-projection-preservation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 import { OrdersTabLinks } from "./orders-tab-links";
@@ -186,7 +187,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         line as unknown as NonNullable<OrderSummary["shipping_order_lines"]>[number],
       ]);
     }
-    const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
+    const allOrders = parentsForOrdersProjection(orders as unknown as OrderSummary[]).map((order) => ({
       ...order,
       shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
     })).sort((left, right) => {

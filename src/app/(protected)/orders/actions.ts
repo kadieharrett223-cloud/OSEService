@@ -9,6 +9,7 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
 import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
+import { isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 
 function revalidateOrdersList() {
@@ -1504,9 +1505,11 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes")?.trim() || null;
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
-  const ownerOrderIds = new Set(selectedIds.map((lineId) => getString(formData, `owner_order_id_${lineId}`) ?? orderId).filter(Boolean));
-  if (ownerOrderIds.size > 1) redirect(`/orders/${orderId ?? ""}?error=Fulfill+items+from+separate+preserved+parents+in+separate+submissions`);
-  const fulfillmentOrderId = [...ownerOrderIds][0] ?? orderId;
+  const fulfillmentOrderId = resolveSingleFulfillmentOwner(
+    selectedIds.map((lineId) => ({ ownerOrderId: getString(formData, `owner_order_id_${lineId}`) })),
+    orderId ?? "",
+  );
+  if (!fulfillmentOrderId && selectedIds.length > 0) redirect(`/orders/${orderId ?? ""}?error=Fulfill+items+from+separate+preserved+parents+in+separate+submissions`);
   if (!fulfillmentOrderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+remaining+line`);
   if (orderId && fulfillmentOrderId && fulfillmentOrderId !== orderId) {
     const { data: parentRows, error: parentError } = await adminClient
@@ -1516,7 +1519,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     const typedParentRows = (parentRows ?? []) as unknown as Array<{ id: string; source_invoice_id: string | null; duplicate_of_order_id?: string | null }>;
     const pageParent = typedParentRows.find((parent) => parent.id === orderId);
     const fulfillmentParent = typedParentRows.find((parent) => parent.id === fulfillmentOrderId);
-    if (parentError || !pageParent?.source_invoice_id || pageParent.source_invoice_id !== fulfillmentParent?.source_invoice_id || fulfillmentParent.duplicate_of_order_id) {
+    if (parentError || !isActiveSameInvoiceSiblingOwner(orderId, fulfillmentOrderId, typedParentRows)) {
       redirect(`/orders/${orderId}?error=Selected+fulfillment+line+does+not+belong+to+an+active+sibling+parent`);
     }
   }

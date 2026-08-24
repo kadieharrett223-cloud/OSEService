@@ -1419,14 +1419,8 @@ export default async function OrderDetailPage({
   const totalEligibleInventoryUnits = canonicalPhysicalSummary.ordered;
   // Fulfillment selection is independent of stock, allocation, and source assignment.
   const selectablePhysicalLines = orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
-  const worksheetPhysicalLineIds = new Set(canonicalPhysicalSummary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId)));
-  const unrepresentedPhysicalLines = [
-    ...selectablePhysicalLines.filter((line) => !worksheetPhysicalLineIds.has(line.id)).map((line) => ({ ...line, ownerOrderId: orderRecord.id })),
-    ...siblingPhysicalLines
-      .filter((line) => isRemainingPhysicalFulfillmentLine(line))
-      .map((line) => ({ ...line, ownerOrderId: line.shipping_order_id })),
-  ];
-  const hasShippableLines = selectablePhysicalLines.length > 0 || unrepresentedPhysicalLines.length > 0;
+  const selectableSiblingPhysicalLines = siblingPhysicalLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
+  const hasShippableLines = selectablePhysicalLines.length > 0 || selectableSiblingPhysicalLines.length > 0;
   const showNoShippableLinesNotice = !hasShippableLines
     && !isServiceOnlyOrder
     && normalizedError.includes("no remaining physical inventory lines available for shipment selection");
@@ -1579,16 +1573,14 @@ export default async function OrderDetailPage({
                 <div>
                   {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }, rowIndex) => {
                     const line = item.shippingLine;
-                    const fallbackShipmentLine = item.productId
-                      ? orderLines.find((candidate) => {
+                    const fallbackShipmentLine = [...orderLines, ...siblingPhysicalLines].find((candidate) => {
                         const candidateSku = normalizeSkuKey(candidate.legacy_item_code);
                         const itemSkus = normalizeInvoiceSkuKeys(item.sku);
                         const skuMatches = Boolean(candidateSku && itemSkus.some((itemSku) => candidateSku === itemSku));
-                        return (candidate.product_id === item.productId || skuMatches)
+                        return ((item.productId && candidate.product_id === item.productId) || skuMatches)
                           && Math.max(Number(candidate.approved_qty ?? 0), Number(candidate.ordered_qty ?? 0)) > Number(candidate.fulfilled_qty ?? 0)
                           && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
-                      }) ?? null
-                      : null;
+                      }) ?? null;
                     const indexedShipmentLine = orderLines[rowIndex] ?? orderRecord.shipping_order_lines?.[rowIndex] ?? null;
                     const indexedOpenShipmentLine = indexedShipmentLine
                       && Math.max(Number(indexedShipmentLine.approved_qty ?? 0), Number(indexedShipmentLine.ordered_qty ?? 0)) > Number(indexedShipmentLine.fulfilled_qty ?? 0)
@@ -1615,7 +1607,7 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
+                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: "shipping_order_id" in shipmentLine ? shipmentLine.shipping_order_id : orderRecord.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
@@ -1730,27 +1722,6 @@ export default async function OrderDetailPage({
                           </div>
                         </div> : null}
                       </details>
-                    );
-                  })}
-                  {unrepresentedPhysicalLines.map((line) => {
-                    const remainingQty = Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0));
-                    const source = String(line.fulfillment_source ?? "WAREHOUSE").toUpperCase();
-                    const fulfillmentSource = source === "DROPSHIP" || source === "OTHER" ? source : "WAREHOUSE";
-                    return (
-                      <div key={line.id} className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 border-b border-dashed border-[#dbe3ee] bg-[#f8fafc] px-2 py-2.5 text-[13px] text-[#1f2937]">
-                        <span>
-                          <ShipmentSelectionCheckbox line={{ id: line.id, ownerOrderId: line.ownerOrderId, sku: line.legacy_item_code ?? line.products?.sku ?? "Mapped item", remainingQty, defaultQty: remainingQty, inStock: 0, isReserved: false, fulfillmentSource }} />
-                          <span className="font-semibold text-[#111827]">{line.legacy_item_code ?? line.products?.sku ?? "Mapped item"}</span>
-                          <span className="mt-1 block text-xs text-[#64748b]">{line.ownerOrderId === orderRecord.id ? "Additional physical order line" : "Physical line preserved on active source sibling"}</span>
-                        </span>
-                        <span className="text-[12px]">{Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0))}</span>
-                        <span className="text-[12px]">{Number(line.fulfilled_qty ?? 0)}</span>
-                        <span className="text-[12px]">{remainingQty}</span>
-                        <span className="text-[11px] font-medium text-[#111827]">{source === "CONTAINER" ? "Container" : source === "DROPSHIP" ? "Dropship" : source === "OTHER" ? "Other" : "Unassigned / Warehouse"}</span>
-                        <span className="text-center text-[11px] text-[#475569]">—</span>
-                        <span className="text-center"><span className="inline-flex rounded-full bg-[#eef2ff] px-1.5 py-0.5 text-[11px] font-semibold text-[#475569]">Ready to select</span></span>
-                        <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
-                      </div>
                     );
                   })}
                 </div>

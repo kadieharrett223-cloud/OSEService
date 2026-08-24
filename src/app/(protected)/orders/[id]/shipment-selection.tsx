@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, useState } from "react";
+import { resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import {
   completeSelectedFulfillmentAction,
   markOrderLinesPickedUpAction,
@@ -115,6 +116,11 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
   const { active, selected, toggle, setQuantity } = useSelection();
   if (!active) return null;
   const selectedLine = selected.find((item) => item.id === line.id);
+  const selectedOwnerOrderId = resolveSingleFulfillmentOwner(selected, line.ownerOrderId ?? "");
+  const belongsToDifferentOwner = Boolean(
+    selectedOwnerOrderId
+    && selectedOwnerOrderId !== (line.ownerOrderId ?? selectedOwnerOrderId),
+  );
   return (
     <span
       className="mr-2 inline-flex items-center gap-1 align-middle"
@@ -125,12 +131,15 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
         type="button"
         aria-pressed={Boolean(selectedLine)}
         aria-label={`Include ${line.sku} in fulfillment`}
+        disabled={belongsToDifferentOwner}
+        title={belongsToDifferentOwner ? "Fulfill preserved sibling-parent lines in a separate submission." : undefined}
         onPointerDown={(event) => {
           event.stopPropagation();
+          if (belongsToDifferentOwner) return;
           toggle(line);
         }}
         onClick={(event) => event.stopPropagation()}
-        className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}
+        className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none disabled:cursor-not-allowed disabled:border-[#cbd5e1] disabled:bg-[#f1f5f9] ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}
       >
         {selectedLine ? "✓" : ""}
       </button>
@@ -151,6 +160,11 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
           Inventory shortage: fulfilling {line.defaultQty} with 0 available
         </span>
       ) : null}
+      {belongsToDifferentOwner ? (
+        <span className="ml-1 text-[11px] font-medium text-[#64748b]">
+          Submit this preserved parent separately.
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -165,6 +179,8 @@ export function ShipmentSelectionComposer({
   const { active, selected, cancel } = useSelection();
   if (!active) return null;
   const hasExternalFulfillment = selected.some((line) => line.fulfillmentSource === "DROPSHIP" || line.fulfillmentSource === "OTHER");
+  const selectionOwnerOrderId = resolveSingleFulfillmentOwner(selected, orderId) ?? orderId;
+  const isPreservedSiblingSelection = selectionOwnerOrderId !== orderId;
   return (
     <div className="mt-4 rounded-xl border border-[#bfdbfe] bg-[#f8fbff] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -209,6 +225,11 @@ export function ShipmentSelectionComposer({
               </li>
             ))}
           </ul>
+          {isPreservedSiblingSelection ? (
+            <p className="rounded-lg border border-[#bfdbfe] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">
+              This fulfillment remains recorded on the active source sibling that owns these lines.
+            </p>
+          ) : null}
           {pickupMode ? (
             <>
               <label className="text-xs font-semibold text-[#64748b]">

@@ -30,6 +30,15 @@ describe("physical fulfillment totals", () => {
     }
   });
 
+  it("excludes an already-fulfilled physical line from sibling or canonical selection", () => {
+    expect(isRemainingPhysicalFulfillmentLine(line({
+      id: "fulfilled-physical-line",
+      approved_qty: 1,
+      fulfilled_qty: 1,
+      fulfillment_status: "FULFILLED",
+    }))).toBe(false);
+  });
+
   it("excludes note, service, freight, tax, and cancelled rows from physical demand", () => {
     const totals = getPhysicalFulfillmentTotals([
       line({ approved_qty: 2, fulfilled_qty: 2, fulfillment_status: "FULFILLED" }),

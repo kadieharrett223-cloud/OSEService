@@ -814,14 +814,10 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   };
 }
 
-async function syncQuickbooksFirstPaymentDates(
+async function loadQuickbooksFirstPaymentDates(
   connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
   accessToken: string,
 ) {
-  const supabase = getSupabaseAdmin();
-  const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
-  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true };
-
   const paymentsByInvoiceId = new Map<string, string>();
   const pageSize = 200;
   for (let page = 0; page < 50; page += 1) {
@@ -854,6 +850,25 @@ async function syncQuickbooksFirstPaymentDates(
 
     if (batch.length < pageSize) break;
   }
+
+  return paymentsByInvoiceId;
+}
+
+export async function getQuickbooksFirstPaymentDates() {
+  const connection = await loadConnectionForSync();
+  const accessToken = await ensureAccessToken(connection);
+  return loadQuickbooksFirstPaymentDates(connection, accessToken);
+}
+
+async function syncQuickbooksFirstPaymentDates(
+  connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
+  accessToken: string,
+) {
+  const supabase = getSupabaseAdmin();
+  const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
+  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true };
+
+  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
 
   const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
   const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));

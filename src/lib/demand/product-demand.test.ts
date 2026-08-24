@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeDemandLines, excludeCompletedQboSiblings, isOpenDemandLine, totalOpenDemand } from "./product-demand";
+import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, totalOpenDemand } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -34,5 +34,16 @@ describe("shared active logical demand", () => {
 
     expect(excludeCompletedQboSiblings(rows, new Set(["qbo-line"])).map((line) => line.id)).toEqual(["qbo", "open"]);
     expect(excludeCompletedQboSiblings(rows, new Set()).map((line) => line.id)).toEqual(["old", "qbo", "open"]);
+  });
+
+  it("removes every INTERNAL row for a completed QBO invoice", () => {
+    const rows = [
+      { id: "old-lift", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-1", approved_qty: 1 },
+      { id: "old-accessory", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-1", approved_qty: 1 },
+      { id: "qbo", parent_source_type: "QBO_INVOICE", parent_source_invoice_id: "invoice-1", approved_qty: 0, fulfilled_qty: 1 },
+      { id: "open", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-2", approved_qty: 1 },
+    ];
+
+    expect(excludeCompletedQboOrderSiblings(rows, new Set(["invoice-1"])).map((line) => line.id)).toEqual(["qbo", "open"]);
   });
 });

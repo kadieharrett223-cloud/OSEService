@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboSiblings, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -334,6 +334,7 @@ export default async function InventoryPage({
         shipping_orders (
           id,
           source_invoice_id,
+          source_type,
           ${duplicateParentField}
           ${cancellationField}
           created_at,
@@ -473,6 +474,8 @@ export default async function InventoryPage({
       parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
       parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
       parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
+      parent_source_invoice_id: line.shipping_orders?.source_invoice_id ?? null,
+      parent_source_type: line.shipping_orders?.source_type ?? null,
     };
     if (line.qbo_invoice_line_id || !line.product_id) return { ...line, ...parentFields };
     const qboParents = activeQboParentsByOrderNumber.get(String(line.shipping_orders?.order_number ?? "")) ?? [];
@@ -498,6 +501,7 @@ export default async function InventoryPage({
   }
   const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
   const completedQboLineIds = new Set<string>();
+  const completedQboInvoiceIds = new Set<string>();
   for (const [orderId, lines] of queueLinesByOrderId) {
     const rawPayload = lines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
     if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) {
@@ -507,6 +511,9 @@ export default async function InventoryPage({
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
     canonicalLineIdsByOrderId.set(orderId, new Set(summary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId))));
     if (summary.isComplete) {
+      if (lines[0]?.shipping_orders?.source_type === "QBO_INVOICE" && lines[0].shipping_orders.source_invoice_id) {
+        completedQboInvoiceIds.add(lines[0].shipping_orders.source_invoice_id);
+      }
       for (const item of summary.items) {
         if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
       }
@@ -523,7 +530,10 @@ export default async function InventoryPage({
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
-  const dedupedQueueLineRows = dedupeDemandLines(excludeCompletedQboSiblings(activeQueueLineRows, completedQboLineIds));
+  const dedupedQueueLineRows = dedupeDemandLines(excludeCompletedQboSiblings(
+    excludeCompletedQboOrderSiblings(activeQueueLineRows, completedQboInvoiceIds),
+    completedQboLineIds,
+  ));
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

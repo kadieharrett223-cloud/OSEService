@@ -24,6 +24,8 @@ export type DemandLineLike = {
   parent_duplicate_of_order_id?: string | null;
   parent_cancellation_status?: string | null;
   parent_qbo_voided?: boolean;
+  parent_source_invoice_id?: string | null;
+  parent_source_type?: string | null;
 };
 
 export function openQtyOf(line: DemandLineLike) {
@@ -41,6 +43,11 @@ export function isOpenDemandLine(line: DemandLineLike) {
 /** Keeps a completed QBO order from being resurrected by its bridged OLD_ERP sibling. */
 export function excludeCompletedQboSiblings<T extends DemandLineLike>(lines: T[], completedQboLineIds: ReadonlySet<string>) {
   return lines.filter((line) => line.qbo_invoice_line_id || !line.logical_demand_key || !completedQboLineIds.has(line.logical_demand_key));
+}
+
+/** Keeps completed QBO invoices from being resurrected by all of their INTERNAL sibling rows. */
+export function excludeCompletedQboOrderSiblings<T extends DemandLineLike>(lines: T[], completedQboInvoiceIds: ReadonlySet<string>) {
+  return lines.filter((line) => line.parent_source_type !== "INTERNAL" || !line.parent_source_invoice_id || !completedQboInvoiceIds.has(line.parent_source_invoice_id));
 }
 
 /**

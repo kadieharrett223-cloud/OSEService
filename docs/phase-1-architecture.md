@@ -48,6 +48,7 @@ The app now includes an additive operations layer while preserving the original 
 - Service-only dashboard metrics were moved into the Service area (`/cases`) as a Service Snapshot section.
 - Inventory is now a sales lookup workspace: SKU/product search, on-floor/sold/available/incoming visibility, next ETA, and an expandable customer queue per SKU.
 - Orders is the shipping operations workflow. Order detail is a single fulfillment worksheet (Item, Qty, Coming From, Availability, Fulfillment, Action) with per-line Manage expansion for assignment, partial shipment, and item notes.
+- Orders list shipment totals are a fresh server-side projection of canonical physical fulfillment lines. The normal and archived tabs use the same ordered, shipped, and remaining totals so completed orders do not show stale open quantities after reconciliation or fulfillment.
 - Orders also includes a bulk backlog upload workspace at `/orders/import` that wraps the existing OLD_ERP backlog importer with preview/apply controls and local report visibility.
 - Bulk backlog upload now checks for duplicate invoice numbers already present in `shipping_orders` before apply and gives staff a choice to proceed against the existing orders or skip selected duplicates.
 - Freight Claims is a dedicated operational view over `Freight Damage` cases so staff can track claim status, priority, assignment, and resolution without leaving the shipping workflow.

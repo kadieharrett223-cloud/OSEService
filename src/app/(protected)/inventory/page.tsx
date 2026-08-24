@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboSiblings, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -497,6 +497,7 @@ export default async function InventoryPage({
     queueLinesByOrderId.set(orderId, [...(queueLinesByOrderId.get(orderId) ?? []), line]);
   }
   const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
+  const completedQboLineIds = new Set<string>();
   for (const [orderId, lines] of queueLinesByOrderId) {
     const rawPayload = lines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
     if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) {
@@ -505,6 +506,11 @@ export default async function InventoryPage({
     }
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
     canonicalLineIdsByOrderId.set(orderId, new Set(summary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId))));
+    if (summary.isComplete) {
+      for (const item of summary.items) {
+        if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
+      }
+    }
   }
   const canonicalQueueLineRows = bridgedQueueLineRows.filter((line) => {
     const orderId = line.shipping_orders?.id;
@@ -517,7 +523,7 @@ export default async function InventoryPage({
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
-  const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
+  const dedupedQueueLineRows = dedupeDemandLines(excludeCompletedQboSiblings(activeQueueLineRows, completedQboLineIds));
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

@@ -38,6 +38,11 @@ export function isOpenDemandLine(line: DemandLineLike) {
   return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
 }
 
+/** Keeps a completed QBO order from being resurrected by its bridged OLD_ERP sibling. */
+export function excludeCompletedQboSiblings<T extends DemandLineLike>(lines: T[], completedQboLineIds: ReadonlySet<string>) {
+  return lines.filter((line) => line.qbo_invoice_line_id || !line.logical_demand_key || !completedQboLineIds.has(line.logical_demand_key));
+}
+
 /**
  * Identity of the logical obligation behind a line: the QuickBooks invoice line, or the OLD_ERP
  * queue record. Two rows only represent the same obligation when they share one of these.

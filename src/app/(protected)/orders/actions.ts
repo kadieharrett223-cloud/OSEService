@@ -956,12 +956,13 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
+    .select("id, shipping_order_id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
     .eq("id", lineId)
     .maybeSingle();
 
   const lineRow = line as {
     id: string;
+    shipping_order_id: string;
     product_id: string;
     ordered_qty: number | null;
     approved_qty: number | null;
@@ -969,7 +970,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     fulfillment_source: string | null;
   } | null;
 
-  if (lineError || !lineRow) {
+  if (lineError || !lineRow || lineRow.shipping_order_id !== orderId) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
   

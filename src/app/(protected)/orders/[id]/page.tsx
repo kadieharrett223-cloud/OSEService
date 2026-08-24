@@ -891,19 +891,9 @@ export default async function OrderDetailPage({
         .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,products(sku,canonical_name)")
         .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
     : { data: [] };
-  const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<{
-    id: string;
-    shipping_order_id: string;
-    product_id: string | null;
-    ordered_qty: number | null;
-    approved_qty: number | null;
-    fulfilled_qty: number | null;
-    fulfillment_status: string | null;
-    fulfillment_source: string | null;
-    warehouse_status: string | null;
-    legacy_item_code: string | null;
-    products?: { sku: string | null; canonical_name: string | null } | null;
-  }>;
+  const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<
+    NonNullable<OrderDetailRow["shipping_order_lines"]>[number] & { shipping_order_id: string }
+  >;
 
   const lineIds = orderLines.map((line) => line.id);
   const { data: fulfillmentRows } = lineIds.length
@@ -1572,7 +1562,7 @@ export default async function OrderDetailPage({
                 </div>
                 <div>
                   {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }, rowIndex) => {
-                    const line = item.shippingLine;
+                    const invoiceLine = item.shippingLine;
                     const fallbackShipmentLine = [...orderLines, ...siblingPhysicalLines].find((candidate) => {
                         const candidateSku = normalizeSkuKey(candidate.legacy_item_code);
                         const itemSkus = normalizeInvoiceSkuKeys(item.sku);
@@ -1587,12 +1577,16 @@ export default async function OrderDetailPage({
                       && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(indexedShipmentLine.fulfillment_status ?? "").toUpperCase())
                       ? indexedShipmentLine
                       : null;
-                    const lineRemainingQty = line ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0)) : 0;
-                    const shipmentLine = (line && lineRemainingQty > 0 ? line : fallbackShipmentLine)
-                      ?? line
+                    const lineRemainingQty = invoiceLine ? Math.max(0, Math.max(Number(invoiceLine.approved_qty ?? 0), Number(invoiceLine.ordered_qty ?? 0)) - Number(invoiceLine.fulfilled_qty ?? 0)) : 0;
+                    const shipmentLine = (invoiceLine && lineRemainingQty > 0 ? invoiceLine : fallbackShipmentLine)
+                      ?? invoiceLine
                       ?? indexedOpenShipmentLine
                       ?? orderRecord.shipping_order_lines?.[rowIndex]
                       ?? null;
+                    const line = shipmentLine;
+                    const lineOwnerOrderId = line && "shipping_order_id" in line && typeof line.shipping_order_id === "string"
+                      ? line.shipping_order_id
+                      : orderRecord.id;
                     const remainingQty = shipmentLine
                       ? Math.max(0, Math.max(Number(shipmentLine.approved_qty ?? 0), Number(shipmentLine.ordered_qty ?? 0)) - Number(shipmentLine.fulfilled_qty ?? 0))
                       : Math.max(0, item.orderedQty);
@@ -1607,7 +1601,7 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: "shipping_order_id" in shipmentLine ? shipmentLine.shipping_order_id : orderRecord.id, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
+                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
@@ -1654,7 +1648,7 @@ export default async function OrderDetailPage({
                               <div><span className="font-medium text-[#64748b]">Assigned:</span> {assignedQty} of {remainingQty}</div>
                             </div>
                             <form action={remapOrderLineProductAction} className="mt-4 grid gap-2 rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-3">
-                              <input type="hidden" name="orderId" value={orderRecord.id} />
+                              <input type="hidden" name="orderId" value={lineOwnerOrderId} />
                               <input type="hidden" name="lineId" value={line.id} />
                               <input type="hidden" name="mappedSku" value={item.sku ?? line.legacy_item_code ?? ""} />
                               <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Manual Product Mapping Override</label>
@@ -1674,7 +1668,7 @@ export default async function OrderDetailPage({
                                 <p className="mt-1"><span className="font-semibold">Estimated ETA:</span> Available now</p>
                                 <p className="mt-1 text-xs text-[#64748b]">Warehouse coverage is derived from current stock and queue position.</p>
                                 <form action={updateOrderLineAssignmentAction} className="mt-2">
-                                  <input type="hidden" name="orderId" value={orderRecord.id} />
+                                  <input type="hidden" name="orderId" value={lineOwnerOrderId} />
                                   <input type="hidden" name="lineId" value={line.id} />
                                   <input type="hidden" name="assignment_source" value="WAREHOUSE" />
                                   <input type="hidden" name="qty_assigned" value={String(Math.max(1, Math.min(remainingQty || 1, supply.coverage?.warehouseQty || 1)))} />
@@ -1684,22 +1678,22 @@ export default async function OrderDetailPage({
                                 </form>
                               </div>
                             ) : null}
-                            <SourceAssignmentForm orderId={orderRecord.id} lineId={line.id} remainingQty={remainingQty} qtyAssignedDefault={qtyAssignedDefault} defaultSource={assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER"} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} containers={(line.product_id ? containerSupplyByProduct.get(line.product_id) ?? [] : []).map((container) => ({ id: container.container_id, container_number: container.container_number, lifecycle_status: "INBOUND", eta_confirmed_date: container.eta_confirmed_date, eta_estimated_date: container.eta_estimated_date, available_qty: container.available_qty }))} />
+                            <SourceAssignmentForm orderId={lineOwnerOrderId} lineId={line.id} remainingQty={remainingQty} qtyAssignedDefault={qtyAssignedDefault} defaultSource={assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER"} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} containers={(line.product_id ? containerSupplyByProduct.get(line.product_id) ?? [] : []).map((container) => ({ id: container.container_id, container_number: container.container_number, lifecycle_status: "INBOUND", eta_confirmed_date: container.eta_confirmed_date, eta_estimated_date: container.eta_estimated_date, available_qty: container.available_qty }))} />
                             {["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) && Number(line.fulfilled_qty ?? 0) <= 0 ? (
                               <form action={moveOrderLineBackToOrdersAction} className="mt-3">
-                                <input type="hidden" name="orderId" value={orderRecord.id} />
+                                <input type="hidden" name="orderId" value={lineOwnerOrderId} />
                                 <input type="hidden" name="lineId" value={line.id} />
                                 <button className="btn-secondary w-full" type="submit">Move back to Orders</button>
                               </form>
                             ) : null}
                           </div>
 
-                          <LineFulfillmentPanel orderId={orderRecord.id} lineId={line.id} sku={item.sku ?? line.products?.sku ?? "Item"} remainingQty={remainingQty} queuePosition={line.queue_position_start} fulfillmentMethod={orderRecord.fulfillment_method === "WILL_CALL" ? "WILL_CALL" : "SHIP"} fulfillmentSource={assignmentSourceDefault} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} attachments={attachments} history={fulfillmentsByLine[line.id] ?? []} />
+                          <LineFulfillmentPanel orderId={lineOwnerOrderId} lineId={line.id} sku={item.sku ?? line.products?.sku ?? "Item"} remainingQty={remainingQty} queuePosition={line.queue_position_start} fulfillmentMethod={orderRecord.fulfillment_method === "WILL_CALL" ? "WILL_CALL" : "SHIP"} fulfillmentSource={assignmentSourceDefault} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} attachments={attachments} history={fulfillmentsByLine[line.id] ?? []} />
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
                             <h3 className="text-sm font-semibold text-[#111827]">Item Note</h3>
                             <form action={addOrderNoteAction} className="mt-4 grid gap-2">
-                              <input type="hidden" name="orderId" value={orderRecord.id} />
+                              <input type="hidden" name="orderId" value={lineOwnerOrderId} />
                               <input type="hidden" name="lineId" value={line.id} />
                               <input type="hidden" name="sku" value={item.sku ?? ""} />
                               <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />

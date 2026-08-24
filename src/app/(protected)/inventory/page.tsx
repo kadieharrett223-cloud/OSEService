@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, hasCurrentOperationalDemandEvidence, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -73,6 +73,7 @@ type QueueLine = {
     id: string;
     source_invoice_id?: string | null;
     source_type?: string | null;
+    review_status?: string | null;
     order_number?: string | null;
     duplicate_of_order_id?: string | null;
     cancellation_status?: string | null;
@@ -244,6 +245,19 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
   return map;
 }
 
+async function fetchAllRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const pageSize = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) return rows;
+  }
+}
+
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];
   if (allocations.length === 0) return "Unassigned";
@@ -285,28 +299,9 @@ export default async function InventoryPage({
   const { error: cancellationColumnError } = await supabase.from("shipping_orders").select("cancellation_status").limit(1);
   const cancellationColumnAvailable = !cancellationColumnError;
   const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
-
-  const [
-    productsResult,
-    { data: aliases },
-    { data: transactions },
-    { data: containerLines },
-    { data: queueLines },
-    packageDimensionsBySku,
-  ] = await Promise.all([
-    supabase
-      .from("products")
-      .select("id, sku, canonical_name, inventory_group, inventory_sort_order")
-      .neq("status", "Inactive")
-      .order("sku", { ascending: true }),
-    supabase.from("product_aliases").select("product_id, alias"),
-    supabase.from("inventory_transactions").select("product_id, bucket, delta"),
-    supabase
-      .from("container_lines")
-      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date)"),
-    supabase
-      .from("shipping_order_lines")
-      .select(`
+  const queueLinesPromise = fetchAllRows((from, to) => supabase
+    .from("shipping_order_lines")
+    .select(`
         id,
         product_id,
         approved_qty,
@@ -325,7 +320,9 @@ export default async function InventoryPage({
         shipping_orders (
           id,
           source_invoice_id,
+          review_status,
           ${duplicateParentField}
+          ${cancellationField}
           created_at,
           fulfillment_method,
           ${shippingOrderPaymentField}
@@ -345,9 +342,29 @@ export default async function InventoryPage({
           containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
         )
       `)
-      .in("approval_status", ["APPROVED", "PARTIAL", "FULFILLED"])
-      .neq("fulfillment_status", "CANCELLED")
-      .order("queue_position_start", { ascending: true, nullsFirst: false }),
+    .neq("fulfillment_status", "CANCELLED")
+    .order("queue_position_start", { ascending: true, nullsFirst: false })
+    .range(from, to));
+
+  const [
+    productsResult,
+    { data: aliases },
+    { data: transactions },
+    { data: containerLines },
+    queueLines,
+    packageDimensionsBySku,
+  ] = await Promise.all([
+    supabase
+      .from("products")
+      .select("id, sku, canonical_name, inventory_group, inventory_sort_order")
+      .neq("status", "Inactive")
+      .order("sku", { ascending: true }),
+    supabase.from("product_aliases").select("product_id, alias"),
+    supabase.from("inventory_transactions").select("product_id, bucket, delta"),
+    supabase
+      .from("container_lines")
+      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date)"),
+    queueLinesPromise,
     getCachedPackageDimensionsBySku(),
   ]);
 
@@ -439,33 +456,54 @@ export default async function InventoryPage({
     const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
     return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };
   });
-  const queueLinesByOrderId = new Map<string, typeof bridgedQueueLineRows>();
+  const queueLinesByLogicalInvoice = new Map<string, typeof bridgedQueueLineRows>();
   for (const line of bridgedQueueLineRows) {
-    const orderId = line.shipping_orders?.id;
-    if (!orderId) continue;
-    queueLinesByOrderId.set(orderId, [...(queueLinesByOrderId.get(orderId) ?? []), line]);
+    const logicalInvoiceId = line.shipping_orders?.source_invoice_id ?? line.shipping_orders?.id;
+    if (!logicalInvoiceId) continue;
+    queueLinesByLogicalInvoice.set(logicalInvoiceId, [...(queueLinesByLogicalInvoice.get(logicalInvoiceId) ?? []), line]);
   }
-  const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
-  for (const [orderId, lines] of queueLinesByOrderId) {
+  const canonicalLineIdsByLogicalInvoice = new Map<string, Set<string> | null>();
+  const canonicalDemandByLineId = new Map<string, { orderedQty: number; fulfilledQty: number; remainingQty: number }>();
+  for (const [logicalInvoiceId, lines] of queueLinesByLogicalInvoice) {
     const rawPayload = lines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
     if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) {
-      canonicalLineIdsByOrderId.set(orderId, null);
+      for (const line of lines) {
+        const orderedQty = Math.max(0, Number(line.approved_qty ?? 0));
+        const fulfilledQty = Math.min(orderedQty, Math.max(0, Number(line.fulfilled_qty ?? 0)));
+        canonicalDemandByLineId.set(line.id, { orderedQty, fulfilledQty, remainingQty: Math.max(0, orderedQty - fulfilledQty) });
+      }
+      canonicalLineIdsByLogicalInvoice.set(logicalInvoiceId, null);
       continue;
     }
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
-    canonicalLineIdsByOrderId.set(orderId, new Set(summary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId))));
+    canonicalLineIdsByLogicalInvoice.set(logicalInvoiceId, new Set(summary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId))));
+    for (const item of summary.items) {
+      if (!item.line?.id) continue;
+      canonicalDemandByLineId.set(item.line.id, { orderedQty: item.quantity, fulfilledQty: item.fulfilled, remainingQty: item.remaining });
+    }
   }
   const canonicalQueueLineRows = bridgedQueueLineRows.filter((line) => {
-    const orderId = line.shipping_orders?.id;
-    if (!orderId) return true;
-    const canonicalLineIds = canonicalLineIdsByOrderId.get(orderId);
+    const logicalInvoiceId = line.shipping_orders?.source_invoice_id ?? line.shipping_orders?.id;
+    if (!logicalInvoiceId) return true;
+    const canonicalLineIds = canonicalLineIdsByLogicalInvoice.get(logicalInvoiceId);
     return canonicalLineIds === null || canonicalLineIds === undefined || canonicalLineIds.has(line.id);
   });
-  const activeQueueLineRows = canonicalQueueLineRows.filter((line) =>
+  const hasEligibleCurrentParent = (line: QueueLine) =>
     !line.shipping_orders?.duplicate_of_order_id
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
-    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
-  );
+    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED";
+  const currentOperationalLogicalInvoiceIds = new Set<string>();
+  for (const [logicalInvoiceId, lines] of queueLinesByLogicalInvoice) {
+    const eligibleLines = lines.filter(hasEligibleCurrentParent);
+    if (hasCurrentOperationalDemandEvidence({
+      reviewStatuses: eligibleLines.map((line) => line.shipping_orders?.review_status),
+      lines: eligibleLines,
+    })) currentOperationalLogicalInvoiceIds.add(logicalInvoiceId);
+  }
+  const activeQueueLineRows = canonicalQueueLineRows.filter((line) => {
+    const logicalInvoiceId = line.shipping_orders?.source_invoice_id ?? line.shipping_orders?.id;
+    return hasEligibleCurrentParent(line) && Boolean(logicalInvoiceId && currentOperationalLogicalInvoiceIds.has(logicalInvoiceId));
+  });
   const dedupedQueueLineRows = dedupeDemandLines(activeQueueLineRows);
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
@@ -552,19 +590,20 @@ export default async function InventoryPage({
   const queueByProduct = new Map<string, InventoryViewRow["customerQueue"]>();
 
   for (const line of dedupedQueueLineRows) {
-    if (!line.product_id || !isOpenQueueLine(line)) continue;
+    const canonicalDemand = canonicalDemandByLineId.get(line.id);
+    const canonicalRemainingQty = canonicalDemand?.remainingQty ?? 0;
+    if (!line.product_id || canonicalRemainingQty <= 0) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
 
-    const operationalOpenQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const operationalOpenQty = canonicalRemainingQty;
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id ?? null;
     const invoiceOrderedQty = sourceInvoiceId && line.product_id
       ? invoiceQtyByInvoiceProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? null
       : null;
-    const shippedQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
-    const approvedQty = invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
-    const normalizedShippedQty = Math.min(approvedQty, shippedQty);
-    const openQty = Math.max(0, approvedQty - normalizedShippedQty);
-    const qty = approvedQty;
+    const approvedQty = canonicalDemand?.orderedQty ?? invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
+    const normalizedShippedQty = canonicalDemand?.fulfilledQty ?? Math.min(approvedQty, Math.max(0, Number(line.fulfilled_qty ?? 0)));
+    const openQty = canonicalRemainingQty;
+    const qty = canonicalRemainingQty;
 
     const invoice = line.shipping_orders?.qbo_invoices?.invoice_number ?? "—";
     const customer = line.shipping_orders?.qbo_invoices?.customers?.company_name

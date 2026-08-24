@@ -108,3 +108,11 @@ before any caching or pagination change is considered.
 - Containers imported without a port date show `Pending` for ETA, matching the empty source value.
 - 18 canonical products still have conflicting legacy SKU identities (574 units) excluded from the
   opening balance; these need a business decision before they can be merged.
+
+### Operational Demand Gate
+
+The Inventory projection counts canonical remaining demand only for logical orders with operational
+activation: a parent that left `PENDING_REVIEW`, or a reconciliation-approved open line. This keeps
+dormant historical imports as source evidence while excluding them from Customer List,
+Sold/Committed, and available-stock calculations. Fulfilled canonical QBO evidence always takes
+precedence over an open OLD_ERP sibling.

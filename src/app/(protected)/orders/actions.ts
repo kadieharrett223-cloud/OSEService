@@ -1504,7 +1504,23 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const notes = getString(formData, "shipment_notes")?.trim() || null;
   const selectedIds = formData.getAll("selected_line_id").map(String).filter(Boolean);
   const adminClient = getSupabaseAdmin();
-  if (orderId) {
+  const ownerOrderIds = new Set(selectedIds.map((lineId) => getString(formData, `owner_order_id_${lineId}`) ?? orderId).filter(Boolean));
+  if (ownerOrderIds.size > 1) redirect(`/orders/${orderId ?? ""}?error=Fulfill+items+from+separate+preserved+parents+in+separate+submissions`);
+  const fulfillmentOrderId = [...ownerOrderIds][0] ?? orderId;
+  if (!fulfillmentOrderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+remaining+line`);
+  if (orderId && fulfillmentOrderId && fulfillmentOrderId !== orderId) {
+    const { data: parentRows, error: parentError } = await adminClient
+      .from("shipping_orders")
+      .select("id,source_invoice_id,duplicate_of_order_id")
+      .in("id", [orderId, fulfillmentOrderId]);
+    const typedParentRows = (parentRows ?? []) as unknown as Array<{ id: string; source_invoice_id: string | null; duplicate_of_order_id?: string | null }>;
+    const pageParent = typedParentRows.find((parent) => parent.id === orderId);
+    const fulfillmentParent = typedParentRows.find((parent) => parent.id === fulfillmentOrderId);
+    if (parentError || !pageParent?.source_invoice_id || pageParent.source_invoice_id !== fulfillmentParent?.source_invoice_id || fulfillmentParent.duplicate_of_order_id) {
+      redirect(`/orders/${orderId}?error=Selected+fulfillment+line+does+not+belong+to+an+active+sibling+parent`);
+    }
+  }
+  if (fulfillmentOrderId === orderId && orderId) {
     const canonicalOrderId = await resolveCanonicalSiblingOrderId(adminClient, orderId);
     if (canonicalOrderId) {
       redirect(`/orders/${canonicalOrderId}?error=Use+the+canonical+QuickBooks+order+for+fulfillment`);
@@ -1521,7 +1537,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const { data: rows, error: lineError } = await adminClient
     .from("shipping_order_lines")
     .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
-    .eq("shipping_order_id", orderId)
+    .eq("shipping_order_id", fulfillmentOrderId)
     .in("id", selectedIds);
   if (lineError || rows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
 
@@ -1555,7 +1571,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   }
 
   const { data: createdShipmentId, error } = await adminClient.rpc("complete_order_shipment", {
-    p_order_id: orderId,
+    p_order_id: fulfillmentOrderId,
     p_shipped_at: fulfilledAtIso,
     p_carrier: carrier || null,
     p_tracking_number: trackingNumber || null,
@@ -1570,13 +1586,14 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     .from("order_shipments")
     .update({ notes } as never)
     .eq("id", shipmentId)
-    .eq("shipping_order_id", orderId);
+    .eq("shipping_order_id", fulfillmentOrderId);
   if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
 
-  await writeOrderActivity(adminClient, orderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: selectedIds.join(","), warehouse_count: warehouseLines.length, non_warehouse_count: nonWarehouseLines.length, fulfilled_at: fulfilledAtIso });
+  await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: selectedIds.join(","), warehouse_count: warehouseLines.length, non_warehouse_count: nonWarehouseLines.length, fulfilled_at: fulfilledAtIso });
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
+  if (fulfillmentOrderId !== orderId) revalidatePath(`/orders/${fulfillmentOrderId}`);
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Fulfillment+completed`);
 }

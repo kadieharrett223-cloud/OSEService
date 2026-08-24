@@ -790,13 +790,18 @@ export default async function OrderDetailPage({
     return <div className="p-6">Order not found.</div>;
   }
 
+  let siblingOrderIds = [orderRecord.id];
   if (orderRecord.source_invoice_id) {
     const { data: siblingOrders } = await supabase
       .from("shipping_orders")
-      .select("id, source_type, source_system, created_at, source_invoice_id")
+      .select("id, source_type, source_system, created_at, source_invoice_id, duplicate_of_order_id")
       .eq("source_invoice_id", orderRecord.source_invoice_id)
       .order("created_at", { ascending: true });
-    const canonicalOrder = resolveCanonicalOrderParent(siblingOrders ?? []);
+    const activeSiblingParents = (siblingOrders ?? []) as unknown as Array<{ id: string; source_type?: string | null; source_system?: string | null; created_at?: string | null; source_invoice_id?: string | null; duplicate_of_order_id?: string | null }>;
+    siblingOrderIds = activeSiblingParents
+      .filter((sibling) => !sibling.duplicate_of_order_id)
+      .map((sibling) => sibling.id);
+    const canonicalOrder = resolveCanonicalOrderParent(activeSiblingParents);
     if (canonicalOrder?.id && canonicalOrder.id !== orderRecord.id) {
       redirect(`/orders/${canonicalOrder.id}?message=Opened+canonical+QuickBooks+order+for+this+invoice`);
     }
@@ -879,6 +884,26 @@ export default async function OrderDetailPage({
     if (leftQueue !== rightQueue) return leftQueue - rightQueue;
     return (left.products?.sku ?? "").localeCompare(right.products?.sku ?? "");
   });
+
+  const { data: siblingLineRows } = siblingOrderIds.length > 1
+    ? await supabase
+        .from("shipping_order_lines")
+        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,products(sku,canonical_name)")
+        .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
+    : { data: [] };
+  const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<{
+    id: string;
+    shipping_order_id: string;
+    product_id: string | null;
+    ordered_qty: number | null;
+    approved_qty: number | null;
+    fulfilled_qty: number | null;
+    fulfillment_status: string | null;
+    fulfillment_source: string | null;
+    warehouse_status: string | null;
+    legacy_item_code: string | null;
+    products?: { sku: string | null; canonical_name: string | null } | null;
+  }>;
 
   const lineIds = orderLines.map((line) => line.id);
   const { data: fulfillmentRows } = lineIds.length
@@ -1395,8 +1420,13 @@ export default async function OrderDetailPage({
   // Fulfillment selection is independent of stock, allocation, and source assignment.
   const selectablePhysicalLines = orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
   const worksheetPhysicalLineIds = new Set(canonicalPhysicalSummary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId)));
-  const unrepresentedPhysicalLines = selectablePhysicalLines.filter((line) => !worksheetPhysicalLineIds.has(line.id));
-  const hasShippableLines = selectablePhysicalLines.length > 0;
+  const unrepresentedPhysicalLines = [
+    ...selectablePhysicalLines.filter((line) => !worksheetPhysicalLineIds.has(line.id)).map((line) => ({ ...line, ownerOrderId: orderRecord.id })),
+    ...siblingPhysicalLines
+      .filter((line) => isRemainingPhysicalFulfillmentLine(line))
+      .map((line) => ({ ...line, ownerOrderId: line.shipping_order_id })),
+  ];
+  const hasShippableLines = selectablePhysicalLines.length > 0 || unrepresentedPhysicalLines.length > 0;
   const showNoShippableLinesNotice = !hasShippableLines
     && !isServiceOnlyOrder
     && normalizedError.includes("no remaining physical inventory lines available for shipment selection");
@@ -1709,9 +1739,9 @@ export default async function OrderDetailPage({
                     return (
                       <div key={line.id} className="grid grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 border-b border-dashed border-[#dbe3ee] bg-[#f8fafc] px-2 py-2.5 text-[13px] text-[#1f2937]">
                         <span>
-                          <ShipmentSelectionCheckbox line={{ id: line.id, sku: line.legacy_item_code ?? line.products?.sku ?? "Mapped item", remainingQty, defaultQty: remainingQty, inStock: 0, isReserved: false, fulfillmentSource }} />
+                          <ShipmentSelectionCheckbox line={{ id: line.id, ownerOrderId: line.ownerOrderId, sku: line.legacy_item_code ?? line.products?.sku ?? "Mapped item", remainingQty, defaultQty: remainingQty, inStock: 0, isReserved: false, fulfillmentSource }} />
                           <span className="font-semibold text-[#111827]">{line.legacy_item_code ?? line.products?.sku ?? "Mapped item"}</span>
-                          <span className="mt-1 block text-xs text-[#64748b]">Additional physical order line</span>
+                          <span className="mt-1 block text-xs text-[#64748b]">{line.ownerOrderId === orderRecord.id ? "Additional physical order line" : "Physical line preserved on active source sibling"}</span>
                         </span>
                         <span className="text-[12px]">{Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0))}</span>
                         <span className="text-[12px]">{Number(line.fulfilled_qty ?? 0)}</span>

@@ -8,6 +8,7 @@ import {
 
 type SelectionLine = {
   id: string;
+  ownerOrderId?: string;
   sku: string;
   remainingQty: number;
   defaultQty: number;
@@ -305,6 +306,13 @@ export function ShipmentSelectionComposer({
                   type="hidden"
                   name={`fulfillment_source_${line.id}`}
                   value={line.fulfillmentSource}
+                />
+              ) : null}
+              {!pickupMode ? (
+                <input
+                  type="hidden"
+                  name={`owner_order_id_${line.id}`}
+                  value={line.ownerOrderId ?? orderId}
                 />
               ) : null}
               <input

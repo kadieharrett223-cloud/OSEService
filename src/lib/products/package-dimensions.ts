@@ -1,7 +1,7 @@
 export type PackageDimensions = {
-  lengthInches: number;
-  widthInches: number;
-  heightInches: number;
+  lengthInches: number | null;
+  widthInches: number | null;
+  heightInches: number | null;
   weightPounds: number | null;
 };
 
@@ -25,16 +25,18 @@ export function getPackageDimensions(payload: PackageSourcePayload | null | unde
   const lengthInches = positiveNumber(payload?.lengthInches);
   const widthInches = positiveNumber(payload?.widthInches);
   const heightInches = positiveNumber(payload?.heightInches);
-  if (lengthInches === null || widthInches === null || heightInches === null) return null;
+  const weightPounds = positiveNumber(payload?.weightLbs);
+  if (lengthInches === null && widthInches === null && heightInches === null && weightPounds === null) return null;
   return {
     lengthInches,
     widthInches,
     heightInches,
-    weightPounds: positiveNumber(payload?.weightLbs),
+    weightPounds,
   };
 }
 
 export function formatPackageDimensions(dimensions: PackageDimensions) {
+  if (dimensions.lengthInches === null || dimensions.widthInches === null || dimensions.heightInches === null) return null;
   return `${formatNumber(dimensions.lengthInches)} × ${formatNumber(dimensions.widthInches)} × ${formatNumber(dimensions.heightInches)} in`;
 }
 

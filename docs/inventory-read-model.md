@@ -80,17 +80,15 @@ Cosmos export snapshot was taken. `HL-2PBP-8` does not exist in either system; i
 
 ## Package dimensions
 
-The Inventory list has a row-click package-details expander for preserved packaged freight
-measurements. It does not write product data or infer package measurements from lift descriptions.
-The archived source currently represents one package per product; records without complete length,
-width, and height do not expose the control. Multi-carton shipment support requires authoritative
-source data before it can be displayed.
+The Inventory list renders preserved packaged freight measurements as subtle text beneath the product
+name. It does not write product data or infer package measurements from lift descriptions. Complete
+length, width, and height render as dimensions; a valid weight can render by itself when dimensions
+are incomplete. Multi-carton shipment support requires authoritative source data before it can be
+displayed.
 
 The server normalizes `lengthInches`, `widthInches`, `heightInches`, and `weightLbs` into a small
-SKU-to-package map cached for five minutes. Inventory rows receive only their own package object.
-Expanding a row is client-side state: it does not change the URL, navigate, refresh the route, refetch
-inventory, or re-read OLD_ERP source records. Customer List, Reorder, and other interactive controls
-retain their normal actions and do not toggle the package section.
+SKU-to-package map cached for five minutes. Inventory rows receive only their own package object;
+the table has no package button, URL state, navigation, client state, or refetch for this text.
 
 ### Performance profile
 

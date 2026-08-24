@@ -9,8 +9,11 @@ describe("package dimensions", () => {
     expect(formatPackageWeight(dimensions!)).toBe("1,400 lb");
   });
 
-  it("does not treat partial or non-positive measurements as a package", () => {
-    expect(getPackageDimensions({ lengthInches: 112, widthInches: 0, heightInches: 38, weightLbs: 1595 })).toBeNull();
+  it("keeps a valid weight when package dimensions are incomplete", () => {
+    const weightOnly = getPackageDimensions({ lengthInches: 112, widthInches: 0, heightInches: 38, weightLbs: 1595 });
+    expect(weightOnly).toEqual({ lengthInches: 112, widthInches: null, heightInches: 38, weightPounds: 1595 });
+    expect(formatPackageDimensions(weightOnly!)).toBeNull();
+    expect(formatPackageWeight(weightOnly!)).toBe("1,595 lb");
     expect(getPackageDimensions({ lengthInches: 112, widthInches: 18, heightInches: 38, weightLbs: 0 })?.weightPounds).toBeNull();
   });
 });

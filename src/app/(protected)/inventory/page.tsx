@@ -6,7 +6,6 @@ import { AdminModeToggle } from "@/app/(protected)/inventory/admin-mode-toggle";
 import { AdminRowEditor } from "@/app/(protected)/inventory/admin-row-editor";
 import { CustomerDemandDropdown } from "@/app/(protected)/inventory/customer-demand-dropdown";
 import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-button";
-import { InventoryDimensionsRow } from "@/app/(protected)/inventory/inventory-dimensions-row";
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
@@ -16,7 +15,7 @@ import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type Pro
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku, packageDimensionsLookupKey } from "@/lib/products/package-dimensions-data";
-import type { PackageDimensions } from "@/lib/products/package-dimensions";
+import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -179,6 +178,11 @@ function formatStatus(value: string | null | undefined) {
 
 function formatPriority(value: string | null | undefined) {
   return formatStatus(value ?? "NORMAL");
+}
+
+function formatPackageSummary(dimensions: PackageDimensions | null) {
+  if (!dimensions) return null;
+  return [formatPackageDimensions(dimensions), formatPackageWeight(dimensions)].filter(Boolean).join(" · ") || null;
 }
 
 function normalizeSkuKey(value: string | null | undefined) {
@@ -926,7 +930,6 @@ export default async function InventoryPage({
               <col className="w-[176px]" />
               <col className="w-[128px]" />
               <col className="w-[156px]" />
-              <col className="w-[72px]" />
             </colgroup>
             <thead>
               <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
@@ -938,35 +941,35 @@ export default async function InventoryPage({
                 <th className="px-2 py-2.5">Available/Incoming</th>
                 <th className="px-2 py-2.5">Next Arrival</th>
                 <th className="px-2 py-2.5">Customer List</th>
-                <th className="px-2 py-2.5 text-right">Package</th>
               </tr>
             </thead>
             <tbody>
               {displayRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
+                  <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
                 sections.map((section) => (
                   <Fragment key={section.name}>
                     <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
-                      <th colSpan={9} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
+                      <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
                         {section.name}
                         <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>
                       </th>
                     </tr>
                     {section.rows.map((row) => (
-                      <InventoryDimensionsRow key={row.productId} dimensions={row.packageDimensions}>
+                      <tr key={row.productId} className="border-b border-[#f1f5f9] align-top">
                     <td className="px-2 py-3">
                       <div className="line-clamp-2 max-w-[260px] break-words font-semibold leading-5 text-[#111827]" title={row.productName}>{row.productName}</div>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#64748b]">
-                        {row.manufacturer ? (
-                          <span className="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[#475569]">
-                            {row.manufacturer}
-                          </span>
-                        ) : null}
-                        <span>SKU {row.sku}</span>
-                      </div>
+                      {(() => {
+                        const packageText = formatPackageSummary(row.packageDimensions);
+                        return packageText ? <div className="mt-1 text-xs font-medium text-[#64748b]">{packageText}</div> : (
+                          <div className="mt-1 flex items-center gap-1.5 text-xs font-medium text-[#64748b]">
+                            {row.manufacturer ? <span className="rounded border border-[#e2e8f0] bg-[#f8fafc] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[#475569]">{row.manufacturer}</span> : null}
+                            <span>SKU {row.sku}</span>
+                          </div>
+                        );
+                      })()}
                       {adminMode ? (
                         <AdminRowEditor
                           productId={row.productId}
@@ -1012,7 +1015,7 @@ export default async function InventoryPage({
                         adminMode={adminMode}
                       />
                     </td>
-                      </InventoryDimensionsRow>
+                      </tr>
                     ))}
                   </Fragment>
                 ))

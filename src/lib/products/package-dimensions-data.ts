@@ -1,6 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { getPackageDimensions, type PackageDimensions } from "./package-dimensions";
+import { formatPackageDimensions, getPackageDimensions, type PackageDimensions } from "./package-dimensions";
 
 type ProductSourceRecord = {
   raw_payload?: {
@@ -41,7 +41,7 @@ export const getCachedPackageDimensionsBySku = unstable_cache(async () => {
       const key = packageDimensionsLookupKey(sourceSku);
       if (!key) continue;
       const existing = lookup[key];
-      if (!existing || (existing.weightPounds === null && dimensions.weightPounds !== null)) lookup[key] = dimensions;
+      if (!existing || (!formatPackageDimensions(existing) && formatPackageDimensions(dimensions)) || (existing.weightPounds === null && dimensions.weightPounds !== null)) lookup[key] = dimensions;
     }
   }
   return lookup;

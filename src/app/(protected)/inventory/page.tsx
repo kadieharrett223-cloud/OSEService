@@ -82,7 +82,7 @@ type QueueLine = {
     fulfillment_method?: "SHIP" | "WILL_CALL" | null;
     qbo_invoices?: {
       invoice_number: string | null;
-      raw_payload?: { PrivateNote?: string | null } | null;
+      raw_payload?: { PrivateNote?: string | null; Line?: unknown[] } | null;
       customers?: {
         company_name: string | null;
         full_name: string | null;
@@ -426,7 +426,9 @@ export default async function InventoryPage({
       ? fetchRowsByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", numbers).eq("source_type", "QBO_INVOICE"))
       : Promise.resolve([]),
   ]);
-  const qboRawPayloadByInvoiceId = new Map(qboInvoiceRows.map((invoice) => [invoice.id, invoice.raw_payload]));
+  const qboRawPayloadByInvoiceId = new Map<string, { PrivateNote?: string | null; Line?: unknown[] } | null>(
+    qboInvoiceRows.map((invoice) => [invoice.id, invoice.raw_payload as unknown as { PrivateNote?: string | null; Line?: unknown[] } | null]),
+  );
   const queueLineRowsWithRawPayload = queueLineRows.map((line) => {
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
     if (!sourceInvoiceId || !line.shipping_orders?.qbo_invoices) return line;

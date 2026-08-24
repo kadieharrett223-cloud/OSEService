@@ -122,6 +122,7 @@ async function fetchRowsByIds<T>(
   return rows;
 }
 
+// Fulfillment corrections can happen outside Server Actions, so this operational snapshot must stay live.
 async function getOrdersDataset() {
     const supabase = getSupabaseAdmin();
     const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);

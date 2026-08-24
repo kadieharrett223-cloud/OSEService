@@ -153,6 +153,23 @@ describe("orders visibility and activation", () => {
     expect(fullyShipped.isArchivedOrder).toBe(true);
   });
 
+  it("keeps a completed three-unit order out of normal Orders", () => {
+    const result = classifyOrder(order({
+      order_number: "126079",
+      review_status: "FULFILLED",
+      shipping_order_lines: [
+        line({ approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    }));
+
+    expect(result.isVisibleOperationalOrder).toBe(false);
+    expect(result.isArchivedOrder).toBe(true);
+    expect(matchesOrderTab(result, "orders")).toBe(false);
+    expect(matchesOrderTab(result, "archived")).toBe(true);
+  });
+
   it("archives fully fulfilled physical orders even when a note line remains open", () => {
     const result = classifyOrder(order({
       shipping_order_lines: [

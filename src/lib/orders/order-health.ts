@@ -6,6 +6,7 @@ export type OrderHealthIssue = {
   severity: HealthSeverity;
   code: string;
   lineId?: string;
+  relatedOrderId?: string;
   warehouseStatus?: string | null;
   product: string | null;
   issue: string;

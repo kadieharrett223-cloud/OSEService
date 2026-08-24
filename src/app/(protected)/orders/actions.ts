@@ -973,8 +973,6 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   if (lineError || !lineRow || lineRow.shipping_order_id !== orderId) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
-  
-    await recalculateProductQueues([lineRow.product_id]);
 
   const remainingQty = Math.max(0, Number(lineRow.approved_qty ?? 0) - Number(lineRow.fulfilled_qty ?? 0));
   const assignedQty = (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource))

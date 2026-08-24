@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
+import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderLifecycleTab, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 import { OrdersTabLinks } from "./orders-tab-links";
@@ -122,8 +126,7 @@ async function fetchRowsByIds<T>(
   return rows;
 }
 
-// Fulfillment corrections can happen outside Server Actions, so this operational snapshot must stay live.
-async function getOrdersDataset() {
+const getCachedOrdersDataset = unstable_cache(async () => {
     const supabase = getSupabaseAdmin();
     const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
     const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
@@ -233,8 +236,8 @@ async function getOrdersDataset() {
       cancelled: projectedOrders.filter((order) => order.tabs.includes("cancelled")).length,
     };
 
-    return { projectedOrders, tabCounts };
-}
+  return { projectedOrders, tabCounts };
+}, ["orders-page-dataset"], { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] });
 
 export default async function OrdersPage({
   searchParams,
@@ -252,14 +255,20 @@ export default async function OrdersPage({
   let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
   let ordersLoadError: Error | null = null;
   try {
-    const dataset = await getOrdersDataset();
+    const dataset = await getCachedOrdersDataset();
     projectedOrders = dataset.projectedOrders;
     tabCounts = dataset.tabCounts;
   } catch (error) {
     ordersLoadError = error instanceof Error ? error : new Error("Unable to load Orders data");
   }
 
-  const filteredOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || order.searchable.includes(searchText)));
+  const globalSearchResults = searchOrders(projectedOrders, searchText);
+  const exactSearchTab = getExactInvoiceSearchTab(projectedOrders, searchText);
+  if (exactSearchTab && exactSearchTab !== activeTab) {
+    redirect(`/orders?${new URLSearchParams({ tab: exactSearchTab, q: searchText }).toString()}`);
+  }
+
+  const filteredOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchResults.includes(order)));
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -341,6 +350,23 @@ export default async function OrdersPage({
         {ordersLoadError ? (
           <div className="mb-4 rounded-lg border border-[#f1bdc0] bg-[#fff4f5] p-3 text-sm text-[#8f030d]">
             Unable to load orders right now.
+          </div>
+        ) : null}
+
+        {globalSearchResults.length > 1 ? (
+          <div className="mb-4 overflow-hidden rounded-lg border border-[#dbe3ee]">
+            <div className="border-b border-[#dbe3ee] bg-[#f8fafc] px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-[#475569]">Search Results Across All Statuses</div>
+            <div className="divide-y divide-[#eef2f7]">
+              {globalSearchResults.map((order) => {
+                const lifecycleTab = getOrderLifecycleTab(order);
+                return (
+                  <Link key={order.id} href={`/orders?${new URLSearchParams({ tab: lifecycleTab, q: searchText }).toString()}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 hover:bg-[#f8fafc]">
+                    <span className="font-semibold text-[#1d4ed8]">{order.invoiceNumber} <span className="font-normal text-[#64748b]">· {order.customerName}</span></span>
+                    <span className="rounded-full bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">{getOrderLifecycleLabel(order)}</span>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
         ) : null}
 

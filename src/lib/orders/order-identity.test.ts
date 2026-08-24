@@ -35,4 +35,13 @@ describe("logical order identity", () => {
       { id: "canonical-order", source_type: "QBO_INVOICE", source_system: null, source_invoice_id: "qbo-123", created_at: "2026-08-13T00:00:00Z", duplicate_of_order_id: null },
     ]);
   });
+
+  it("keeps the fulfilled QBO parent for 12520 instead of its open OLD_ERP sibling", () => {
+    const parents = [
+      { id: "old-12520", source_type: "INTERNAL", source_system: "OLD_ERP", source_invoice_id: "invoice-12520", created_at: "2026-08-12T22:43:06Z" },
+      { id: "qbo-12520", source_type: "QBO_INVOICE", source_system: null, source_invoice_id: "invoice-12520", created_at: "2026-08-13T22:54:50Z" },
+    ];
+
+    expect(dedupeOrderParentsByInvoice(parents).map((parent) => parent.id)).toEqual(["qbo-12520"]);
+  });
 });

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { dedupeOrderParentsByInvoice } from "@/lib/orders/order-identity";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderLifecycleTab, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -31,6 +32,7 @@ type OrderSummary = {
   id: string;
   order_number: string | null;
   source_type: string | null;
+  source_invoice_id: string | null;
   duplicate_of_order_id?: string | null;
   cancellation_status?: string | null;
   notes: string | null;
@@ -98,6 +100,7 @@ function buildOrdersSelect(includeDuplicateField: boolean) {
     "id",
     "order_number",
     "source_type",
+    "source_invoice_id",
     "legacy_customer_name",
     "review_status",
     "cancellation_status",
@@ -184,10 +187,10 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         line as unknown as NonNullable<OrderSummary["shipping_order_lines"]>[number],
       ]);
     }
-    const allOrders = (orders as unknown as OrderSummary[]).map((order) => ({
+    const allOrders = dedupeOrderParentsByInvoice((orders as unknown as OrderSummary[]).map((order) => ({
       ...order,
       shipping_order_lines: directLinesByOrder.get(order.id) ?? order.shipping_order_lines ?? [],
-    })).sort((left, right) => {
+    }))).sort((left, right) => {
       const leftCreated = Date.parse(left.created_at) || 0;
       const rightCreated = Date.parse(right.created_at) || 0;
       if (leftCreated !== rightCreated) return rightCreated - leftCreated;

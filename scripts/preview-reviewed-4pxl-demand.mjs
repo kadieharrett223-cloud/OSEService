@@ -120,7 +120,7 @@ function sameCustomer(left, right) {
   return Boolean(leftKey && rightKey && leftKey === rightKey);
 }
 
-const [products, aliases, orders, lines, invoices, qboLines, fulfillments] = await Promise.all([
+const [products, aliases, orders, lines, invoices, qboLines, fulfillments, reviewedResolutions] = await Promise.all([
   loadAll("products", "id,sku,canonical_name"),
   loadAll("product_aliases", "product_id,alias"),
   loadAll("shipping_orders", "id,order_number,source_invoice_id,source_type,duplicate_of_order_id,cancellation_status,review_status,legacy_customer_name,customers(company_name,full_name)"),
@@ -128,6 +128,7 @@ const [products, aliases, orders, lines, invoices, qboLines, fulfillments] = awa
   loadAll("qbo_invoices", "id,invoice_number,raw_payload,customers(company_name,full_name)"),
   loadAll("qbo_invoice_lines", "id,qbo_invoice_id,qbo_sku,product_id,ordered_qty"),
   loadAll("fulfillments", "shipping_order_line_id,fulfilled_qty"),
+  loadAll("reviewed_obligation_resolutions", "source_record_id,qbo_invoice_line_id,resolution_type,status"),
 ]);
 
 const productById = new Map(products.map((product) => [product.id, product]));
@@ -239,7 +240,8 @@ const activeCanonicalLines = bridgedLines.filter((line) => {
 });
 const targetProductIds = new Set(products.filter((product) => upper(product.sku) === SKU).map((product) => product.id));
 for (const alias of aliases) if (upper(alias.alias) === SKU) targetProductIds.add(alias.product_id);
-const finalLines = getCanonicalOpenDemandLines(activeCanonicalLines, completedQboLineIds, completedQboInvoiceIds, REVIEWED_FIXTURES)
+const activeReviewedResolutions = reviewedResolutions.filter((resolution) => upper(resolution.status ?? "ACTIVE") === "ACTIVE");
+const finalLines = getCanonicalOpenDemandLines(activeCanonicalLines, completedQboLineIds, completedQboInvoiceIds, activeReviewedResolutions)
   .filter((line) => targetProductIds.has(line.product_id));
 const rows = finalLines.map((line) => ({
   invoice: line.order?.order_number ?? null,
@@ -254,8 +256,8 @@ const sold = rows.reduce((sum, row) => sum + row.quantity, 0);
 
 console.log(JSON.stringify({
   readOnly: true,
-  fixtureOnly: true,
-  reviewedFixtures: REVIEWED_FIXTURES,
+  fixtureOnly: false,
+  reviewedResolutionCount: activeReviewedResolutions.length,
   currentCustomerList: rows,
   totals: {
     sold,

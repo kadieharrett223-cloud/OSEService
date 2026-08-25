@@ -109,13 +109,14 @@ function qboSkuCandidates(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return [] as string[];
   const candidates = [raw.toUpperCase()];
+  let liveSku = candidates[0];
   if (/\(deleted/i.test(raw)) {
-    let liveSku = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim().toUpperCase();
+    liveSku = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim().toUpperCase();
     if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
-    while (/[-\s]1$/.test(liveSku)) {
-      liveSku = liveSku.replace(/[-\s]1$/, "").trim();
-      if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
-    }
+  }
+  while (/[-\s]1$/.test(liveSku)) {
+    liveSku = liveSku.replace(/[-\s]1$/, "").trim();
+    if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
   }
   return candidates;
 }
@@ -163,7 +164,7 @@ export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, i
     .map(normalizeSkuKey)
     .filter(Boolean)
     .concat(canonicalTokens);
-  return invoiceKeys.some((invoiceKey) => lineKeys.some((lineKey) => lineKey === invoiceKey || lineKey.includes(invoiceKey) || invoiceKey.includes(lineKey)));
+  return invoiceKeys.some((invoiceKey) => lineKeys.includes(invoiceKey));
 }
 
 export function prioritizePhysicalFulfillmentLine(left: PhysicalFulfillmentLine, right: PhysicalFulfillmentLine) {

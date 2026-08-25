@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "./physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, matchesPhysicalLineToInvoiceSku, type PhysicalFulfillmentLine } from "./physical-fulfillment";
 import { isRemainingPhysicalFulfillmentLine } from "./physical-fulfillment";
 
 function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfillmentLine {
@@ -152,6 +152,27 @@ describe("physical fulfillment totals", () => {
 
     expect(summary).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 0, remaining: 1, isPartiallyFulfilled: false, isComplete: false });
     expectInvariant(summary);
+  });
+
+  it("matches a deleted SKU alias to its exact live physical SKU", () => {
+    expect(matchesPhysicalLineToInvoiceSku(
+      line({ legacy_item_code: "4PXL-10" }),
+      "4PXL-10-1 (deleted)",
+    )).toBe(true);
+  });
+
+  it("keeps 122332's fulfilled 4PXL-10B line separate from the open OLD_ERP 4PXL-10 line", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PXL-10B", 1]]),
+      lines: [
+        line({ id: "122332-old-erp-4pxl-10", legacy_item_code: "4PXL-10", approved_qty: 1, fulfilled_qty: 0 }),
+        line({ id: "122332-qbo-4pxl-10b", legacy_item_code: "4PXL-10B", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(summary.items[0]?.line?.id).toBe("122332-qbo-4pxl-10b");
+    expect(summary.items[0]?.line?.legacy_item_code).toBe("4PXL-10B");
   });
 
   it("prefers the fulfilled mapped duplicate over a stale unmapped duplicate with the same legacy SKU", () => {

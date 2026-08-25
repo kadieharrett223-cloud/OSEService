@@ -36,7 +36,7 @@ export function openQtyOf(line: DemandLineLike) {
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
-  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || String(line.parent_review_status ?? "").toUpperCase() === "ARCHIVED" || line.parent_qbo_voided) return false;
+  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || ["ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(line.parent_review_status ?? "").toUpperCase()) || line.parent_qbo_voided) return false;
   if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
   return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
 }

@@ -419,7 +419,7 @@ export default async function InventoryPage({
   for (const alias of productAliasRows) {
     if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
   }
-  const [qboInvoiceRows, qboLineRows, qboParentRows] = await Promise.all([
+  const [qboInvoiceRows, qboLineRows, qboParentRows, sourceOrderRows] = await Promise.all([
     sourceInvoiceIds.length
       ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids))
       : Promise.resolve([]),
@@ -428,6 +428,9 @@ export default async function InventoryPage({
       : Promise.resolve([]),
     orderNumbers.length
       ? fetchRowsByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", numbers).eq("source_type", "QBO_INVOICE"))
+      : Promise.resolve([]),
+    sourceInvoiceIds.length
+      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select(`source_invoice_id,review_status,${duplicateParentField}${cancellationField}`).in("source_invoice_id", ids))
       : Promise.resolve([]),
   ]);
   const qboRawPayloadByInvoiceId = new Map<string, { PrivateNote?: string | null; Line?: unknown[] } | null>(
@@ -505,6 +508,13 @@ export default async function InventoryPage({
   const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
   const completedQboLineIds = new Set<string>();
   const completedQboInvoiceIds = new Set<string>();
+  for (const parent of sourceOrderRows as Array<{ source_invoice_id?: string | null; review_status?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null }>) {
+    const reviewStatus = String(parent.review_status ?? "").trim().toUpperCase();
+    const isClosedLogicalParent = Boolean(parent.duplicate_of_order_id)
+      || String(parent.cancellation_status ?? "").trim().toUpperCase() === "CANCELLED"
+      || ["ARCHIVED", "FULFILLED", "SHIPPED"].includes(reviewStatus);
+    if (isClosedLogicalParent && parent.source_invoice_id) completedQboInvoiceIds.add(parent.source_invoice_id);
+  }
   const queueLinesBySourceInvoiceId = new Map<string, typeof bridgedQueueLineRows>();
   for (const line of bridgedQueueLineRows) {
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id;

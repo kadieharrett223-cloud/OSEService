@@ -19,10 +19,12 @@ describe("shared active logical demand", () => {
     expect(dedupeDemandLines(lines)[0].warehouse_status).toBe("IN_WAREHOUSE");
   });
 
-  it("excludes duplicate, cancelled, archived, and voided parents from active demand", () => {
+  it("excludes duplicate, cancelled, archived, fulfilled, shipped, and voided parents from active demand", () => {
     expect(isOpenDemandLine({ id: "duplicate", approved_qty: 1, parent_duplicate_of_order_id: "parent", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "cancelled", approved_qty: 1, parent_cancellation_status: "CANCELLED", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "archived", approved_qty: 1, parent_review_status: "ARCHIVED", fulfillment_status: "PENDING" })).toBe(false);
+    expect(isOpenDemandLine({ id: "fulfilled-parent", approved_qty: 1, parent_review_status: "FULFILLED", fulfillment_status: "PENDING" })).toBe(false);
+    expect(isOpenDemandLine({ id: "shipped-parent", approved_qty: 1, parent_review_status: "SHIPPED", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "voided", approved_qty: 1, parent_qbo_voided: true, fulfillment_status: "PENDING" })).toBe(false);
   });
 

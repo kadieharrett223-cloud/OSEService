@@ -430,7 +430,12 @@ export default async function InventoryPage({
       ? fetchRowsByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", numbers).eq("source_type", "QBO_INVOICE"))
       : Promise.resolve([]),
     sourceInvoiceIds.length
-      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select(`source_invoice_id,review_status,${duplicateParentField}${cancellationField}`).in("source_invoice_id", ids))
+      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select([
+        "source_invoice_id",
+        "review_status",
+        ...(duplicateParentColumnAvailable ? ["duplicate_of_order_id"] : []),
+        ...(cancellationColumnAvailable ? ["cancellation_status"] : []),
+      ].join(",")).in("source_invoice_id", ids))
       : Promise.resolve([]),
   ]);
   const qboRawPayloadByInvoiceId = new Map<string, { PrivateNote?: string | null; Line?: unknown[] } | null>(

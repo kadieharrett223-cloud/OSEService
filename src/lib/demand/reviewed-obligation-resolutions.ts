@@ -1,6 +1,6 @@
 import type { DemandLineLike } from "./product-demand";
 
-export const REVIEWED_OBLIGATION_RESOLUTION_TYPES = ["SKU_CORRECTION", "REPLACED", "DUPLICATE"] as const;
+export const REVIEWED_OBLIGATION_RESOLUTION_TYPES = ["SKU_CORRECTION", "REPLACED", "DUPLICATE", "HISTORICAL_FULFILLMENT"] as const;
 
 export type ReviewedObligationResolutionType = typeof REVIEWED_OBLIGATION_RESOLUTION_TYPES[number];
 

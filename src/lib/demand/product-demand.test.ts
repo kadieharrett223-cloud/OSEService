@@ -142,4 +142,19 @@ describe("shared active logical demand", () => {
 
     expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["reimported-source"]);
   });
+
+  it("keeps an exact historical Cosmos fulfillment terminal after its source row is re-imported", () => {
+    const lines = [
+      { id: "reimported-source", source_record_id: "cosmos-fulfilled-source", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING" },
+      { id: "unrelated-open", source_record_id: "unrelated", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING" },
+    ];
+
+    const resolutions = [{
+      source_record_id: "cosmos-fulfilled-source",
+      resolution_type: "HISTORICAL_FULFILLMENT" as const,
+    }];
+
+    expect(getCanonicalOpenDemandLines(lines, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["unrelated-open"]);
+    expect(26).toBe(26);
+  });
 });

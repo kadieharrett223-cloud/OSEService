@@ -529,8 +529,7 @@ export default async function InventoryPage({
     }
   }
   for (const [sourceInvoiceId, lines] of queueLinesBySourceInvoiceId) {
-    const qboLines = lines.filter((line) => line.shipping_orders?.source_type === "QBO_INVOICE");
-    const rawPayload = qboLines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
+    const rawPayload = qboRawPayloadByInvoiceId.get(sourceInvoiceId);
     if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) continue;
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
     if (!summary.isComplete) continue;

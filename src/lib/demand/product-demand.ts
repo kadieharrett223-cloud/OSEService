@@ -33,6 +33,14 @@ export function openQtyOf(line: DemandLineLike) {
   return Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
 }
 
+/** Uses recorded fulfillment evidence without mutating the historical queue line. */
+export function withProvenFulfilledQty<T extends DemandLineLike>(line: T, provenFulfilledQty: number): T {
+  return {
+    ...line,
+    fulfilled_qty: Math.max(0, Number(line.fulfilled_qty ?? 0), Number(provenFulfilledQty ?? 0)),
+  };
+}
+
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;

@@ -9,7 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, withProvenFulfilledQty } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -409,7 +409,19 @@ export default async function InventoryPage({
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
-  const queueLineRows = (queueLines ?? []) as unknown as QueueLine[];
+  const rawQueueLineRows = (queueLines ?? []) as unknown as QueueLine[];
+  const queueLineIds = rawQueueLineRows.map((line) => line.id);
+  const fulfillmentRows = queueLineIds.length
+    ? await fetchRowsByIds(queueLineIds, (ids) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").in("shipping_order_line_id", ids))
+    : [];
+  const provenFulfilledQtyByLineId = new Map<string, number>();
+  for (const fulfillment of fulfillmentRows as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null }>) {
+    provenFulfilledQtyByLineId.set(
+      fulfillment.shipping_order_line_id,
+      (provenFulfilledQtyByLineId.get(fulfillment.shipping_order_line_id) ?? 0) + Math.max(0, Number(fulfillment.fulfilled_qty ?? 0)),
+    );
+  }
+  const queueLineRows = rawQueueLineRows.map((line) => withProvenFulfilledQty(line, provenFulfilledQtyByLineId.get(line.id) ?? 0));
   const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
   const orderNumbers = [...new Set(queueLineRows.map((line) => line.shipping_orders?.order_number).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, totalOpenDemand } from "./product-demand";
+import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, openQtyOf, totalOpenDemand, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -30,6 +30,15 @@ describe("shared active logical demand", () => {
 
   it("excludes shipped lines from active demand even if a legacy row has not updated its quantity", () => {
     expect(isOpenDemandLine({ id: "shipped", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "SHIPPED" })).toBe(false);
+  });
+
+  it("uses recorded fulfillment quantity to remove only shipped demand from a stale queue line", () => {
+    const staleLine = { id: "line", approved_qty: 3, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" };
+
+    expect(openQtyOf(withProvenFulfilledQty(staleLine, 3))).toBe(0);
+    expect(isOpenDemandLine(withProvenFulfilledQty(staleLine, 3))).toBe(false);
+    expect(openQtyOf(withProvenFulfilledQty(staleLine, 1))).toBe(2);
+    expect(isOpenDemandLine(withProvenFulfilledQty(staleLine, 1))).toBe(true);
   });
 
   it("removes only the bridged sibling of a completed QBO order", () => {

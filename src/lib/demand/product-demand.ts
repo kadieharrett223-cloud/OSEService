@@ -41,6 +41,19 @@ export function withProvenFulfilledQty<T extends DemandLineLike>(line: T, proven
   };
 }
 
+/** Shares proven shipment quantity across duplicate representations of one physical obligation. */
+export function withLogicalFulfilledQty<T extends DemandLineLike>(lines: T[]): T[] {
+  const fulfilledQtyByIdentity = new Map<string, number>();
+  for (const line of lines) {
+    const identity = demandLineIdentity(line);
+    fulfilledQtyByIdentity.set(identity, Math.max(
+      fulfilledQtyByIdentity.get(identity) ?? 0,
+      Math.max(0, Number(line.fulfilled_qty ?? 0)),
+    ));
+  }
+  return lines.map((line) => withProvenFulfilledQty(line, fulfilledQtyByIdentity.get(demandLineIdentity(line)) ?? 0));
+}
+
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;

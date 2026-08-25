@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, openQtyOf, totalOpenDemand, withProvenFulfilledQty } from "./product-demand";
+import { getWarehouseDemandDisplay } from "./display-status";
+import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -39,6 +40,43 @@ describe("shared active logical demand", () => {
     expect(isOpenDemandLine(withProvenFulfilledQty(staleLine, 3))).toBe(false);
     expect(openQtyOf(withProvenFulfilledQty(staleLine, 1))).toBe(2);
     expect(isOpenDemandLine(withProvenFulfilledQty(staleLine, 1))).toBe(true);
+  });
+
+  it("shares fulfillment evidence across linked siblings while preserving a partial remainder", () => {
+    const rows = [
+      { id: "old", logical_demand_key: "qbo-line-1", approved_qty: 3, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" },
+      { id: "qbo", qbo_invoice_line_id: "qbo-line-1", approved_qty: 3, fulfilled_qty: 1, fulfillment_status: "FULFILLED" },
+    ];
+
+    const projected = withLogicalFulfilledQty(rows);
+    expect(openQtyOf(projected[0])).toBe(2);
+    expect(isOpenDemandLine(projected[0])).toBe(true);
+    expect(openQtyOf(withLogicalFulfilledQty([{ ...rows[0], approved_qty: 1 }, { ...rows[1], approved_qty: 1, fulfilled_qty: 1 }])[0])).toBe(0);
+  });
+
+  it("removes Joshua 122353 from every active-demand surface when its QBO sibling shipped", () => {
+    const projected = withLogicalFulfilledQty([
+      { id: "59b6d8d1-2134-406f-8444-63e99f5856c7", logical_demand_key: "e03613c6-f085-471a-945c-de86f59ff99e", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" },
+      { id: "8b184974-aa80-4a94-aec3-1dd73ca868d0", qbo_invoice_line_id: "e03613c6-f085-471a-945c-de86f59ff99e", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED", warehouse_status: "FULFILLED" },
+    ]);
+
+    expect(openQtyOf(projected[0])).toBe(0);
+    expect(isOpenDemandLine(projected[0])).toBe(false);
+    expect(getWarehouseDemandDisplay({ openQty: openQtyOf(projected[0]), warehouseStatus: projected[0].warehouse_status })).toMatchObject({ warehouseQty: 0, inWarehouse: false });
+  });
+
+  it("keeps normal and partially shipped demand active but excludes fully shipped Warehouse and Dropship lines", () => {
+    const normal = { id: "normal", approved_qty: 1, fulfilled_qty: 0, fulfillment_status: "PENDING", warehouse_status: "APPROVED" };
+    const partial = { id: "partial", approved_qty: 3, fulfilled_qty: 1, fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" };
+    const warehouseShipped = { id: "warehouse", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED", warehouse_status: "IN_WAREHOUSE", fulfillment_source: "WAREHOUSE" };
+    const dropshipShipped = { id: "dropship", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED", warehouse_status: "IN_WAREHOUSE", fulfillment_source: "DROPSHIP" };
+
+    expect(openQtyOf(normal)).toBe(1);
+    expect(isOpenDemandLine(normal)).toBe(true);
+    expect(openQtyOf(partial)).toBe(2);
+    expect(isOpenDemandLine(partial)).toBe(true);
+    expect(isOpenDemandLine(warehouseShipped)).toBe(false);
+    expect(isOpenDemandLine(dropshipShipped)).toBe(false);
   });
 
   it("removes only the bridged sibling of a completed QBO order", () => {

@@ -50,13 +50,6 @@ describe("orders visibility and activation", () => {
     expect(result.isNewOrder).toBe(true);
   });
 
-  it("evaluates invoice 126037 by its mapped physical lines instead of suppressing it", () => {
-    const result = classifyOrder(order({ order_number: "126037" }));
-
-    expect(result.isVisibleOperationalOrder).toBe(true);
-    expect(result.isNewOrder).toBe(true);
-  });
-
   it("keeps a reconciled OLD_ERP order visible when it has approved remaining demand", () => {
     const result = classifyOrder(order({
       order_number: "11746",

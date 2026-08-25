@@ -11,6 +11,9 @@ import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentLines, isNonInv
 const CLOSED_LINE_STATES = ["FULFILLED", "CANCELLED", "REMOVED", "DENIED"];
 const WAREHOUSE_STATES = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"];
 
+/** Excluded from operational demand pending a data decision. */
+const EXCLUDED_ORDER_NUMBERS = ["126037"];
+
 export type ClassificationLine = {
   product_id?: string | null;
   approval_status?: string | null;
@@ -53,6 +56,7 @@ export function classifyOrder(
 ): OrderClassification {
   const manualMappingSkus = options.manualMappingSkus ?? new Set<string>();
   const allLines = order.shipping_order_lines ?? [];
+  const isExcluded = EXCLUDED_ORDER_NUMBERS.includes(String(order.order_number ?? ""));
   const isVoided = upper(order.qbo_invoices?.raw_payload?.PrivateNote) === "VOIDED";
   const isCancelled = upper(order.cancellation_status) === "CANCELLED";
   const isHistoricalDuplicate = Boolean(order.duplicate_of_order_id);
@@ -91,10 +95,10 @@ export function classifyOrder(
     };
   }
 
-  const canonicalSummary = isVoided
+  const canonicalSummary = isExcluded || isVoided
     ? { ordered: 0, fulfilled: 0, remaining: 0, lineCount: 0, items: [], isPartiallyFulfilled: false, isComplete: false }
     : getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: allLines, manualMappingSkus });
-  const physicalLines = isVoided ? [] : getPhysicalFulfillmentLines(allLines, { manualMappingSkus });
+  const physicalLines = isExcluded || isVoided ? [] : getPhysicalFulfillmentLines(allLines, { manualMappingSkus });
 
   const operationalLines = physicalLines.filter((line) => {
     const remaining = Math.max(0, physicalLineOrderedQty(line) - Number(line.fulfilled_qty ?? 0));

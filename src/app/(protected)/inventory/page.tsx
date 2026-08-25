@@ -77,6 +77,7 @@ type QueueLine = {
     order_number?: string | null;
     duplicate_of_order_id?: string | null;
     cancellation_status?: string | null;
+    review_status?: string | null;
     created_at?: string | null;
     first_payment_at?: string | null;
     legacy_customer_name: string | null;

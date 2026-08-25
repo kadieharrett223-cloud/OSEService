@@ -41,7 +41,7 @@ describe("shared active logical demand", () => {
     expect(excludeCompletedQboSiblings(rows, new Set()).map((line) => line.id)).toEqual(["old", "qbo", "open"]);
   });
 
-  it("removes every non-QBO row for a completed QBO invoice", () => {
+  it("removes every row for a completed QBO invoice, including stale QBO warehouse rows", () => {
     const rows = [
       { id: "old-lift", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-1", approved_qty: 1 },
       { id: "old-accessory", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-1", approved_qty: 1 },
@@ -50,6 +50,6 @@ describe("shared active logical demand", () => {
       { id: "open", parent_source_type: "INTERNAL", parent_source_invoice_id: "invoice-2", approved_qty: 1 },
     ];
 
-    expect(excludeCompletedQboOrderSiblings(rows, new Set(["invoice-1"])).map((line) => line.id)).toEqual(["qbo", "open"]);
+    expect(excludeCompletedQboOrderSiblings(rows, new Set(["invoice-1"])).map((line) => line.id)).toEqual(["open"]);
   });
 });

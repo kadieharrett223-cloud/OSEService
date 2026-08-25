@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "@/lib/demand/product-demand";
+import type { ReviewedObligationResolution } from "@/lib/demand/reviewed-obligation-resolutions";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -53,6 +54,8 @@ type ProductAliasRow = {
   product_id: string | null;
   alias: string | null;
 };
+
+type ReviewedObligationResolutionRow = ReviewedObligationResolution;
 
 type QueueLine = {
   id: string;
@@ -364,6 +367,12 @@ export default async function InventoryPage({
     .order("queue_position_start", { ascending: true, nullsFirst: false })
     .range(from, to));
 
+  const reviewedResolutionsPromise = fetchAllRows((from, to) => supabase
+    .from("reviewed_obligation_resolutions")
+    .select("source_record_id,qbo_invoice_line_id,resolution_type,status")
+    .eq("status", "ACTIVE")
+    .range(from, to));
+
   const [
     productsResult,
     { data: aliases },
@@ -372,6 +381,7 @@ export default async function InventoryPage({
     queueLines,
     fulfillmentRows,
     packageDimensionsBySku,
+    reviewedResolutions,
   ] = await Promise.all([
     supabase
       .from("products")
@@ -389,6 +399,7 @@ export default async function InventoryPage({
       .select("shipping_order_line_id,fulfilled_qty")
       .range(from, to)),
     getCachedPackageDimensionsBySku(),
+    reviewedResolutionsPromise,
   ]);
 
   // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
@@ -616,6 +627,7 @@ export default async function InventoryPage({
     activeQueueLineRows,
     completedQboLineIds,
     completedQboInvoiceIds,
+    reviewedResolutions as ReviewedObligationResolutionRow[],
   );
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase

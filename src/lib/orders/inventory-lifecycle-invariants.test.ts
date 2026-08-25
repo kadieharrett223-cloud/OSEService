@@ -103,15 +103,13 @@ describe("4PXL-10 inventory lifecycle invariants", () => {
     expect(availableNow(25, 10)).toBe(15);
   });
 
-  it("keeps the 122332 OLD_ERP 4PXL-10 obligation open when only a distinct 4PXL-10B sibling is fulfilled", () => {
+  it("closes 122332's 4PXL-10 obligation only when explicit replacement evidence marks it superseded", () => {
     const open = getCanonicalOpenDemandLines([
-      demandLine({ id: "122332-old-erp-4pxl-10", source_record_id: "122332-old-erp" }),
+      demandLine({ id: "122332-old-erp-4pxl-10", source_record_id: "122332-old-erp", fulfillment_status: "REPLACED" }),
       demandLine({ id: "122332-qbo-4pxl-10b", qbo_invoice_line_id: "122332-qbo-4pxl-10b", fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
     ], new Set(["122332-qbo-4pxl-10b"]), new Set());
 
-    expect(open).toHaveLength(1);
-    expect(open[0]?.id).toBe("122332-old-erp-4pxl-10");
-    expect(openQtyOf(open[0]!)).toBe(1);
+    expect(open).toHaveLength(0);
   });
 
   it("does not match 4PXL-10 physical lines to a distinct 4PXL-10B QBO item", () => {
@@ -119,6 +117,24 @@ describe("4PXL-10 inventory lifecycle invariants", () => {
       { id: "122332-old-erp-4pxl-10", legacy_item_code: "4PXL-10" },
       "4PXL-10B",
     )).toBe(false);
+  });
+
+  it.each(["122345", "122350", "122353", "125986", "127012"])("does not resurrect the shipped %s 4PXL-10 sibling", (invoice) => {
+    const logicalQboLineId = `${invoice}-qbo-4pxl-10`;
+    const open = getCanonicalOpenDemandLines([
+      demandLine({ id: `${invoice}-old`, logical_demand_key: logicalQboLineId }),
+      demandLine({ id: `${invoice}-qbo`, qbo_invoice_line_id: logicalQboLineId, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+    ], new Set([logicalQboLineId]), new Set());
+
+    expect(open).toHaveLength(0);
+  });
+
+  it.each(["12288", "12300"])("keeps fulfilled %s control at zero Sold", (invoice) => {
+    const open = getCanonicalOpenDemandLines([
+      demandLine({ id: `${invoice}-4pxl-10`, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+    ], new Set(), new Set());
+
+    expect(open).toHaveLength(0);
   });
 
   it("keeps only the unshipped remainder sold after a partial warehouse fulfillment", () => {

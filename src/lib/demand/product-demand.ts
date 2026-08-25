@@ -8,6 +8,8 @@
  * quantities must be SUMMED. Collapsing by invoice with MAX(qty) silently drops real demand.
  */
 
+import { excludeReviewedObligationResolutions, type ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
+
 export const CLOSED_DEMAND_STATES = ["FULFILLED", "SHIPPED", "ARCHIVED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"];
 
 export type DemandLineLike = {
@@ -77,9 +79,12 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   lines: T[],
   completedQboLineIds: ReadonlySet<string>,
   completedQboInvoiceIds: ReadonlySet<string>,
+  reviewedResolutions: readonly ReviewedObligationResolution[] = [],
 ) {
   return dedupeDemandLines(excludeCompletedQboSiblings(
-    excludeCompletedQboOrderSiblings(withLogicalFulfilledQty(lines), completedQboInvoiceIds),
+    excludeCompletedQboOrderSiblings(withLogicalFulfilledQty(
+      excludeReviewedObligationResolutions(lines, reviewedResolutions),
+    ), completedQboInvoiceIds),
     completedQboLineIds,
   )).filter(isOpenDemandLine);
 }

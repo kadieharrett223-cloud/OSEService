@@ -112,4 +112,34 @@ describe("shared active logical demand", () => {
 
     expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-fulfilled"]), new Set()).map((line) => line.id)).toEqual(["paid-qbo-only"]);
   });
+
+  it("keeps reviewed SKU corrections, replacements, and duplicate imports terminal across source siblings", () => {
+    const rows = [
+      { id: "11601-old", source_record_id: "da25408f-149b-4387-92e9-1591e56c5afb", logical_demand_key: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },
+      { id: "11601-qbo", qbo_invoice_line_id: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },
+      { id: "12580-old", source_record_id: "563ea9db-9749-4131-b8c1-e3f1f8de2014", logical_demand_key: "643540d5-6cb4-47e0-885d-f83335eafe2a", approved_qty: 1, fulfillment_status: "PENDING" },
+      { id: "12580-qbo", qbo_invoice_line_id: "643540d5-6cb4-47e0-885d-f83335eafe2a", approved_qty: 1, fulfillment_status: "PENDING" },
+      { id: "122332-old", source_record_id: "1752481a-2b8f-4ad2-ae93-efb6c84f24d1", approved_qty: 1, fulfillment_status: "PENDING" },
+      { id: "unrelated-open", source_record_id: "unrelated", approved_qty: 1, fulfillment_status: "PENDING" },
+    ];
+    const resolutions = [
+      { source_record_id: "da25408f-149b-4387-92e9-1591e56c5afb", qbo_invoice_line_id: "6f592815-0062-46cd-b308-431ca6392ebc", resolution_type: "SKU_CORRECTION" as const },
+      { source_record_id: "563ea9db-9749-4131-b8c1-e3f1f8de2014", qbo_invoice_line_id: "643540d5-6cb4-47e0-885d-f83335eafe2a", resolution_type: "DUPLICATE" as const },
+      { source_record_id: "1752481a-2b8f-4ad2-ae93-efb6c84f24d1", resolution_type: "REPLACED" as const },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["unrelated-open"]);
+  });
+
+  it("does not suppress an obligation when its reviewed resolution is revoked", () => {
+    const rows = [
+      { id: "reimported-source", source_record_id: "reviewed-source", approved_qty: 1, fulfillment_status: "PENDING" },
+    ];
+
+    const resolutions = [
+      { source_record_id: "reviewed-source", resolution_type: "DUPLICATE" as const, status: "REVOKED" as const },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["reimported-source"]);
+  });
 });

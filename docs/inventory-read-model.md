@@ -21,7 +21,7 @@ duplicate identities (`4PHR-9X` and `000012`) collapse into one row.
 | --- | --- | --- |
 | Product identity | `products` + `product_aliases` | Catalog only; defines which rows appear |
 | On floor | `inventory_transactions` where `bucket = 'ON_FLOOR'` | Physical warehouse stock. **Never derived from demand.** |
-| Open demand + customer list | `shipping_order_lines` (`approval_status` in APPROVED/PARTIAL/FULFILLED, `fulfillment_status <> CANCELLED`) | `SUM(approved_qty - fulfilled_qty)`; one list row per order line, never per unit |
+| Open demand + customer list | Canonical physical QBO item plus its sibling `shipping_order_lines` | `SUM(max(0, canonical ordered - canonical legitimate fulfilled))`; one list row per order line, never per unit |
 | Incoming + ETA | `container_lines` joined to `containers` with lifecycle ORDERED/PRODUCTION/INBOUND | `SUM(on_order_qty - received_qty)`; ETA read directly from the container record |
 | Packaged freight dimensions | `old_erp_source_records.raw_payload` where `source_container = 'Products'` | Read-only `lengthInches`, `widthInches`, `heightInches`, and `weightLbs`, matched by canonical SKU; assembled product-description measurements are never used |
 
@@ -47,6 +47,36 @@ still consumes floor stock. All values are clamped, so physical inventory is nev
 `next ETA` is the earliest active container with remaining units, taken straight from the container
 record (no recomputation).
 
+### Customer-list invariant
+
+Customer List membership, Sold/Committed, queue demand, and availability coverage begin with the
+canonical physical remaining quantity for the logical invoice and require current operational
+activation. A logical order is activated when its parent left `PENDING_REVIEW`, or reconciliation
+left an approved open line. This keeps dormant historical imports as evidence without counting them
+as current customer demand. Active QBO and OLD_ERP sibling parents are resolved together by
+`source_invoice_id`, so a completed QBO physical line suppresses a stale OLD_ERP sibling that still
+says `IN_WAREHOUSE` or carries queue metadata. Warehouse status, queue positions, and allocations
+are display or operational metadata only; none may resurrect a line whose canonical remaining
+demand is zero.
+
+The read-only production audit is:
+
+```powershell
+node --env-file=.env.local scripts/audit-inventory-customer-demand.mjs
+```
+
+It writes `tmp/import-reports/inventory-customer-demand-audit.json`, classifying stale completed
+demand, missing open demand, queue-count mismatches, stale warehouse state, and parent-evidence
+conflicts. It proposes no writes. Invoice `122353` (Joshua Schaaf) is the regression case: its
+`4PXL-10` canonical remaining quantity is zero, so it must have no Customer List row, queue
+position, or Sold/Committed contribution.
+
+`scripts/audit-current-operational-inventory-demand.mjs` performs the matching all-SKU read-only
+comparison. It reports any mapped SKU where projected committed demand differs from current
+operational canonical demand, and separately lists active canonical items that cannot render
+because they have no physical ERP product mapping. It never writes inventory, order, queue,
+fulfillment, container, or QBO data.
+
 ## Verification
 
 `scripts/debug-inventory-read-model.mjs` is a read-only harness that prints the source rows feeding
@@ -56,6 +86,41 @@ both the OLD_ERP Cosmos exports in `tmp/exports/` and Supabase, then compares th
 ```powershell
 node scripts/debug-inventory-read-model.mjs 4032S 4PHR-9X 2PBP-8
 ```
+
+### Physical reconciliation
+
+`scripts/audit-sku-physical-reconciliation.mjs` is a read-only physical ledger. It starts from a
+trusted final OLD ERP opening recount, adds received-container and legitimate adjustment events, and
+subtracts only warehouse-eligible fulfilled units. Explicit `DROPSHIP` and `OTHER` fulfillment is
+shown as zero physical effect; blank source is warehouse-eligible only when direct fulfillment or
+shipment proof exists. Historical `SOLD` transactions are never used as shipment truth.
+
+```powershell
+node --env-file=.env.local scripts/audit-sku-physical-reconciliation.mjs 4PXL-10
+node --env-file=.env.local scripts/audit-sku-physical-reconciliation.mjs --all
+```
+
+The single-SKU report is `tmp/import-reports/4pxl-10-physical-reconciliation.json`; `--all` writes
+`tmp/import-reports/all-sku-physical-reconciliation.json` with per-identity ledgers and ranked
+physical discrepancies. A product is rankable only with one opening recount or a final explicit
+`OLD_ERP_OPENING_CORRECTION`. Other multi-recount identities are `BASELINE_AMBIGUOUS` and must be
+explained before any correction. No audit command writes inventory, orders, fulfillment, or queue
+metadata.
+
+The `4PXL-10` reconciliation additionally accepts the authoritative date-only OLD ERP inventory
+snapshot supplied for August 7, 2026: `32` on floor, `22` outstanding demand, and `33` incoming.
+The 33 incoming units are reported separately by container and affect physical stock only through a
+subsequent `CONTAINER_RECEIVED` event; an open `PRODUCTION` or `INBOUND` container remains incoming.
+
+To explain a raw `ON_FLOOR` difference without mutating inventory, run:
+
+```powershell
+node --env-file=.env.local scripts/audit-4pxl-on-floor-discrepancy.mjs
+```
+
+The report classifies each `ON_FLOOR` transaction using its linked fulfillment or shipment business
+date, rather than its ledger-posting timestamp. It writes a no-apply recount proposal only when the
+authoritative baseline and post-baseline physical events explain the difference.
 
 ### Legacy field semantics (verified against the exports)
 
@@ -115,3 +180,38 @@ The Inventory projection preserves the established open-line demand population, 
 sibling parent evidence by logical invoice before building Customer List, Sold/Committed, and queue
 values. A fulfilled canonical QBO physical line always takes precedence over an open OLD_ERP
 sibling, so stale sibling metadata cannot resurrect a completed customer obligation.
+
+`getCanonicalOpenDemandLines` in `src/lib/demand/product-demand.ts` is the shared ordered pipeline:
+it shares proven fulfillment across linked lines, suppresses completed QBO line and invoice siblings,
+deduplicates one logical obligation, then retains only active demand. Inventory uses that exact
+population before creating both the Sold/Available totals and Customer List rows; the final
+invoice-level Customer List merge remains in `mergeOpenCustomerDemand`.
+
+### Reviewed terminal resolutions
+
+`reviewed_obligation_resolutions` is an append-only reviewed lifecycle ledger for source evidence
+that cannot safely be inferred from a later import or QuickBooks refresh. An active `SKU_CORRECTION`,
+`REPLACED`, or `DUPLICATE` resolution targets a `source_record_id`, a `qbo_invoice_line_id`, or both.
+The Inventory route loads these active rows and excludes the target plus any bridged sibling before
+the shared fulfillment, completed-QBO, dedupe, and open-demand stages. Revoking a resolution restores
+the normal evidence-based calculation. The ledger changes `Sold` and Customer List membership only;
+it never writes or derives `ON_FLOOR`, Incoming, container quantities, or inventory transactions.
+
+The initial reviewed decisions are invoice `11601` (`SKU_CORRECTION`: HDMBL-10, not 4PXL-10),
+`12580` (`DUPLICATE`: fulfilled before re-import), and `122332` (`REPLACED`: 4PXL-10 changed to
+4PXL-10B before shipment). A later QBO refresh cannot reopen those old obligations.
+
+### Frozen-proof reconciliation preview
+
+Use the frozen SKU proof artifacts only as an allowlist for targeted order-demand investigation:
+
+```powershell
+node --env-file=.env.local scripts/preview-frozen-inventory-demand-reconciliation.mjs
+```
+
+The command writes `tmp/import-reports/frozen-inventory-demand-reconciliation-preview.json` and
+the matching Markdown summary. It lists every live stale line attached to an invoice explicitly
+closed in a fully reconciled proof, its current statuses, quantity effect, and proof source. It is
+read-only: it cannot write inventory transactions, physical ON_FLOOR quantities, shipment or receipt
+events, container history, or order lifecycle statuses. `4PHDXL-12` is always excluded because its
+physical baseline remains unresolved.

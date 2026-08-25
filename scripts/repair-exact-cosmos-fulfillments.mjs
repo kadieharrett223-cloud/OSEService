@@ -111,7 +111,7 @@ async function main() {
     const item = manifestBySource.get(line.source_record_id);
     const eventKey = `${item.evidenceType === "KADIE_CONFIRMED" ? KADIE_EVENT_PREFIX : EVENT_PREFIX}${item.sourceRecordId}`;
     const existingEvent = existingFulfillments.find((event) => event.source_event_key === eventKey);
-    const existingResolution = existingResolutions.find((resolution) => upper(resolution.status) === "ACTIVE");
+    const existingResolution = existingResolutions.find((resolution) => resolution.source_record_id === item.sourceRecordId);
     if (amount(line.fulfilled_qty) >= item.quantity && existingEvent && existingResolution) {
       summary.alreadyCorrect += 1;
       continue;

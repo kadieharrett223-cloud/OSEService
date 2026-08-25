@@ -10,7 +10,7 @@ import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown"
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, withLogicalFulfilledQty, withProvenFulfilledQty } from "@/lib/demand/product-demand";
+import { CLOSED_DEMAND_STATES, demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -612,10 +612,11 @@ export default async function InventoryPage({
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
-  const dedupedQueueLineRows = dedupeDemandLines(excludeCompletedQboSiblings(
-    excludeCompletedQboOrderSiblings(withLogicalFulfilledQty(activeQueueLineRows), completedQboInvoiceIds),
+  const dedupedQueueLineRows = getCanonicalOpenDemandLines(
+    activeQueueLineRows,
     completedQboLineIds,
-  ));
+    completedQboInvoiceIds,
+  );
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

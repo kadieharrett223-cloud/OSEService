@@ -72,6 +72,18 @@ export function excludeCompletedQboOrderSiblings<T extends DemandLineLike>(lines
   return lines.filter((line) => !line.parent_source_invoice_id || !completedQboInvoiceIds.has(line.parent_source_invoice_id));
 }
 
+/** Applies the one canonical demand pipeline used by inventory totals and Customer List rows. */
+export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
+  lines: T[],
+  completedQboLineIds: ReadonlySet<string>,
+  completedQboInvoiceIds: ReadonlySet<string>,
+) {
+  return dedupeDemandLines(excludeCompletedQboSiblings(
+    excludeCompletedQboOrderSiblings(withLogicalFulfilledQty(lines), completedQboInvoiceIds),
+    completedQboLineIds,
+  )).filter(isOpenDemandLine);
+}
+
 /**
  * Identity of the logical obligation behind a line: the QuickBooks invoice line, or the OLD_ERP
  * queue record. Two rows only represent the same obligation when they share one of these.

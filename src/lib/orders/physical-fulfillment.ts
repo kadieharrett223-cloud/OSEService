@@ -9,6 +9,8 @@ export type PhysicalFulfillmentLine = {
   warehouse_status?: string | null;
   fulfillment_status?: string | null;
   fulfillment_source?: string | null;
+  queue_position_start?: number | null;
+  queue_position_count?: number | null;
   ordered_qty?: number | null;
   approved_qty?: number | null;
   fulfilled_qty?: number | null;

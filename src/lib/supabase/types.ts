@@ -489,6 +489,8 @@ export type Database = {
           warehouse_status: string;
           allocation_status: string;
           fulfillment_status: string;
+          fulfillment_source: string | null;
+          fulfillment_notes: string | null;
           priority: string;
           queue_position_start: number | null;
           queue_position_count: number | null;
@@ -525,6 +527,8 @@ export type Database = {
           warehouse_status?: string;
           allocation_status?: string;
           fulfillment_status?: string;
+          fulfillment_source?: string | null;
+          fulfillment_notes?: string | null;
           priority?: string;
           queue_position_start?: number | null;
           queue_position_count?: number | null;
@@ -560,6 +564,8 @@ export type Database = {
           warehouse_status?: string;
           allocation_status?: string;
           fulfillment_status?: string;
+          fulfillment_source?: string | null;
+          fulfillment_notes?: string | null;
           priority?: string;
           queue_position_start?: number | null;
           queue_position_count?: number | null;
@@ -596,6 +602,7 @@ export type Database = {
           reason: string | null;
           actor_id: string | null;
           source_event_key: string | null;
+          fulfillment_type: string;
           created_at: string;
         };
         Insert: {
@@ -609,6 +616,7 @@ export type Database = {
           reason?: string | null;
           actor_id?: string | null;
           source_event_key?: string | null;
+          fulfillment_type?: string;
           created_at?: string;
         };
         Update: {
@@ -621,6 +629,29 @@ export type Database = {
           reason?: string | null;
           actor_id?: string | null;
           source_event_key?: string | null;
+          fulfillment_type?: string;
+        };
+        Relationships: [];
+      };
+      order_shipment_lines: {
+        Row: {
+          id: string;
+          shipment_id: string;
+          shipping_order_line_id: string;
+          quantity: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          shipment_id: string;
+          shipping_order_line_id: string;
+          quantity: number;
+          created_at?: string;
+        };
+        Update: {
+          shipment_id?: string;
+          shipping_order_line_id?: string;
+          quantity?: number;
         };
         Relationships: [];
       };

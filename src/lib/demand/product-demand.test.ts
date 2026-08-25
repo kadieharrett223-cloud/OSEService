@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getWarehouseDemandDisplay } from "./display-status";
-import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
+import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenDemandLine, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -100,5 +100,16 @@ describe("shared active logical demand", () => {
     ];
 
     expect(excludeCompletedQboOrderSiblings(rows, new Set(["invoice-1"])).map((line) => line.id)).toEqual(["open"]);
+  });
+
+  it("keeps a paid QBO-only obligation while excluding its fulfilled and voided siblings", () => {
+    const rows = [
+      { id: "paid-qbo-only", qbo_invoice_line_id: "qbo-live", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "fulfilled-old-erp", logical_demand_key: "qbo-fulfilled", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "fulfilled-qbo", qbo_invoice_line_id: "qbo-fulfilled", approved_qty: 1, fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "FULFILLED" },
+      { id: "voided-qbo", qbo_invoice_line_id: "qbo-voided", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", parent_qbo_voided: true },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-fulfilled"]), new Set()).map((line) => line.id)).toEqual(["paid-qbo-only"]);
   });
 });

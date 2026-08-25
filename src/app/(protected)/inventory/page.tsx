@@ -9,6 +9,7 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
+import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, isOpenDemandLine, withLogicalFulfilledQty, withProvenFulfilledQty } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
@@ -157,6 +158,7 @@ type InventoryViewRow = {
     firstPaymentAt: string | null;
     sourceInvoiceId: string | null;
     invoiceOrderedQty: number | null;
+    provenInvoiceShippedQty: number;
   }>;
 };
 
@@ -423,6 +425,17 @@ export default async function InventoryPage({
     );
   }
   const queueLineRows = rawQueueLineRows.map((line) => withProvenFulfilledQty(line, provenFulfilledQtyByLineId.get(line.id) ?? 0));
+  const fulfilledQtyByQboLineIdentity = new Map<string, number>();
+  for (const line of queueLineRows) {
+    if (!line.qbo_invoice_line_id || !line.shipping_orders?.source_invoice_id || !line.product_id) continue;
+    const key = `${line.shipping_orders.source_invoice_id}|${line.product_id}|${line.qbo_invoice_line_id}`;
+    fulfilledQtyByQboLineIdentity.set(key, Math.max(fulfilledQtyByQboLineIdentity.get(key) ?? 0, Math.max(0, Number(line.fulfilled_qty ?? 0))));
+  }
+  const provenInvoiceShippedQtyByProduct = new Map<string, number>();
+  for (const [key, quantity] of fulfilledQtyByQboLineIdentity) {
+    const invoiceProductKey = key.split("|").slice(0, 2).join("|");
+    provenInvoiceShippedQtyByProduct.set(invoiceProductKey, (provenInvoiceShippedQtyByProduct.get(invoiceProductKey) ?? 0) + quantity);
+  }
   const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
   const orderNumbers = [...new Set(queueLineRows.map((line) => line.shipping_orders?.order_number).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();
@@ -676,6 +689,9 @@ export default async function InventoryPage({
     const invoiceOrderedQty = sourceInvoiceId && line.product_id
       ? invoiceQtyByInvoiceProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? null
       : null;
+    const provenInvoiceShippedQty = sourceInvoiceId && line.product_id
+      ? provenInvoiceShippedQtyByProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? 0
+      : 0;
     const shippedQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
     const approvedQty = invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
     const normalizedShippedQty = Math.min(approvedQty, shippedQty);
@@ -722,6 +738,7 @@ export default async function InventoryPage({
       firstPaymentAt: line.shipping_orders?.first_payment_at ?? null,
       sourceInvoiceId,
       invoiceOrderedQty,
+      provenInvoiceShippedQty,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];
@@ -871,36 +888,7 @@ export default async function InventoryPage({
     .map((group) => {
       // Customer list displays one row per invoice/order for a product, and quantity is
       // authoritative to invoice line quantities when available.
-      const customerDemandByInvoice = new Map<string, (typeof group.customerQueue)[number]>();
-      for (const item of group.customerQueue) {
-        const key = item.invoice && item.invoice !== "—"
-          ? `INVOICE:${item.invoice}`.toUpperCase()
-          : `ORDER:${item.orderId}`.toUpperCase();
-        const existing = customerDemandByInvoice.get(key);
-        if (!existing) {
-          customerDemandByInvoice.set(key, { ...item });
-          continue;
-        }
-        existing.openQty += item.openQty;
-        existing.warehouseQty += item.warehouseQty;
-        existing.waitingQty += item.waitingQty;
-        existing.inWarehouse = existing.inWarehouse || item.inWarehouse;
-        existing.willCall = existing.willCall || item.willCall;
-        existing.qty = Math.max(existing.qty, item.qty);
-        existing.approvedQty = Math.max(existing.approvedQty, item.approvedQty);
-        existing.shippedQty += item.shippedQty;
-        existing.invoiceOrderedQty = existing.invoiceOrderedQty ?? item.invoiceOrderedQty;
-      }
-      for (const item of customerDemandByInvoice.values()) {
-        if (item.invoiceOrderedQty == null) continue;
-        const orderedQty = Math.max(0, Number(item.invoiceOrderedQty));
-        const shippedQty = Math.min(orderedQty, Math.max(0, item.shippedQty));
-        item.qty = orderedQty;
-        item.approvedQty = orderedQty;
-        item.shippedQty = shippedQty;
-        item.openQty = Math.max(0, orderedQty - shippedQty);
-      }
-      group.customerQueue = Array.from(customerDemandByInvoice.values());
+      group.customerQueue = mergeOpenCustomerDemand(group.customerQueue);
       group.openDemand = group.customerQueue.reduce((sum, item) => sum + item.openQty, 0);
 
       // Unallocated open demand still consumes floor stock, matching the OLD_ERP Available = On Floor - Sold rule.

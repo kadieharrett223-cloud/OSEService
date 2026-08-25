@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 const APPLY = process.argv.includes("--apply");
 const REPORT_DIR = "tmp/import-reports";
 const EVENT_PREFIX = "COSMOS_FULFILLED_INVOICE_ROW:";
+const KADIE_EVENT_PREFIX = "KADIE_CONFIRMED_HISTORICAL_FULFILLMENT:";
 
 // This list is deliberately closed. Additions require a separate reviewed repair.
 const MANIFEST = [
@@ -26,7 +27,11 @@ const MANIFEST = [
   ["84eb56ca-cad0-4753-84a1-209f8cc59fb3", "12302", "4PTA-6", "2026-04-24T17:26:12.183Z"],
   ["16a2eaa9-2a1c-4274-b64c-0fca7a1c91bf", "12302", "EPOXY-132488", "2026-04-24T17:26:12.183Z"],
   ["fd5e7061-63f0-4a9c-bcd3-8bc7772849b6", "12302", "HPU1103", "2026-04-24T17:26:12.183Z"],
-].map(([sourceRecordId, invoiceNumber, sku, fulfilledAt]) => ({ sourceRecordId, invoiceNumber, sku, fulfilledAt }));
+  ["51e73fa4-bc55-4ee2-8e4f-e7aa95e4b672", "11540", "4PXL-10", null, 2, "KADIE_CONFIRMED"],
+  ["7d3f3c46-3660-4c73-9f44-d0d4ccb141a1", "11770", "2PBP-12", "2026-04-24T21:17:17.938Z"],
+  ["94a9c352-65c6-4236-bec7-458fe3432ab1", "11770", "2PFC", "2026-04-24T21:17:17.938Z"],
+  ["6bab775f-0145-4fe6-a3f7-0ef9635446a3", "11770", "HPU2204", "2026-04-24T21:17:17.938Z"],
+].map(([sourceRecordId, invoiceNumber, sku, fulfilledAt, quantity = 1, evidenceType = "COSMOS_EXACT_SOURCE"]) => ({ sourceRecordId, invoiceNumber, sku, fulfilledAt, quantity, evidenceType }));
 
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("Missing Supabase credentials. Run with --env-file=.env.local.");
@@ -53,10 +58,10 @@ function assertManifestLines(lines) {
     const matches = linesBySource.get(item.sourceRecordId) ?? [];
     if (matches.length !== 1) throw new Error(`${item.sourceRecordId}: expected one exact source line, found ${matches.length}`);
     const line = matches[0];
-    if (upper(line.legacy_item_code) !== item.sku || amount(line.approved_qty) !== 1 || amount(line.ordered_qty) !== 1) {
+    if (upper(line.legacy_item_code) !== item.sku || amount(line.approved_qty) !== item.quantity || amount(line.ordered_qty) !== item.quantity) {
       throw new Error(`${item.sourceRecordId}: source line no longer matches the approved invoice/SKU/quantity manifest`);
     }
-    if (amount(line.fulfilled_qty) > 1) throw new Error(`${item.sourceRecordId}: fulfillment exceeds approved quantity`);
+    if (amount(line.fulfilled_qty) > item.quantity) throw new Error(`${item.sourceRecordId}: fulfillment exceeds approved quantity`);
   }
 }
 
@@ -104,26 +109,31 @@ async function main() {
   const manifestBySource = new Map(MANIFEST.map((item) => [item.sourceRecordId, item]));
   for (const line of lines) {
     const item = manifestBySource.get(line.source_record_id);
-    const eventKey = `${EVENT_PREFIX}${item.sourceRecordId}`;
+    const eventKey = `${item.evidenceType === "KADIE_CONFIRMED" ? KADIE_EVENT_PREFIX : EVENT_PREFIX}${item.sourceRecordId}`;
     const existingEvent = existingFulfillments.find((event) => event.source_event_key === eventKey);
     const existingResolution = existingResolutions.find((resolution) => upper(resolution.status) === "ACTIVE");
-    if (amount(line.fulfilled_qty) >= 1 && existingEvent && existingResolution) {
+    if (amount(line.fulfilled_qty) >= item.quantity && existingEvent && existingResolution) {
       summary.alreadyCorrect += 1;
       continue;
     }
 
+    const fulfillmentAt = item.fulfilledAt ?? new Date().toISOString();
+    const evidenceDescription = item.evidenceType === "KADIE_CONFIRMED"
+      ? "Kadie-confirmed customer receipt; historical fulfillment date unavailable."
+      : "Exact Cosmos FulfilledInvoiceRows source evidence.";
+
     const { error: fulfillmentError } = await db.from("fulfillments").upsert({
       shipping_order_line_id: line.id,
-      fulfilled_qty: 1,
-      fulfilled_at: item.fulfilledAt,
-      reason: `Historical Cosmos fulfillment for invoice ${item.invoiceNumber}; migrated without physical inventory movement.`,
+      fulfilled_qty: item.quantity,
+      fulfilled_at: fulfillmentAt,
+      reason: `${evidenceDescription} Invoice ${item.invoiceNumber}; reconciled without physical inventory movement.`,
       source_event_key: eventKey,
       fulfillment_type: "OTHER",
     }, { onConflict: "shipping_order_line_id,source_event_key" });
     if (fulfillmentError) throw new Error(`${item.sourceRecordId}: fulfillment upsert failed: ${fulfillmentError.message}`);
 
     const { error: lineError } = await db.from("shipping_order_lines").update({
-      fulfilled_qty: 1,
+      fulfilled_qty: item.quantity,
       fulfillment_status: "FULFILLED",
       warehouse_status: "FULFILLED",
       queue_position_start: null,
@@ -135,8 +145,8 @@ async function main() {
       source_record_id: item.sourceRecordId,
       resolution_type: "HISTORICAL_FULFILLMENT",
       status: "ACTIVE",
-      resolution_note: `Exact Cosmos FulfilledInvoiceRows source evidence; invoice ${item.invoiceNumber}, SKU ${item.sku}, fulfilled ${item.fulfilledAt}.`,
-      reviewed_at: item.fulfilledAt,
+      resolution_note: `${evidenceDescription} Invoice ${item.invoiceNumber}, SKU ${item.sku}, quantity ${item.quantity}.`,
+      reviewed_at: fulfillmentAt,
     };
     const resolutionMutation = existingResolution
       ? db.from("reviewed_obligation_resolutions").update(resolutionPayload).eq("id", existingResolution.id)

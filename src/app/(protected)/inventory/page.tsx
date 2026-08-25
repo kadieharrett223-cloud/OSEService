@@ -159,6 +159,7 @@ type InventoryViewRow = {
     sourceInvoiceId: string | null;
     invoiceOrderedQty: number | null;
     provenInvoiceShippedQty: number;
+    invoiceFullyShipped: boolean;
   }>;
 };
 
@@ -493,6 +494,25 @@ export default async function InventoryPage({
     ? await fetchRowsByIds(missingQboParentInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
     : [];
   const allQboLineRows = [...qboLineRows, ...extraQboLineRows].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
+  const fulfilledQtyByQboInvoiceLineId = new Map<string, number>();
+  for (const line of queueLineRows) {
+    if (!line.qbo_invoice_line_id) continue;
+    fulfilledQtyByQboInvoiceLineId.set(
+      line.qbo_invoice_line_id,
+      Math.max(fulfilledQtyByQboInvoiceLineId.get(line.qbo_invoice_line_id) ?? 0, Math.max(0, Number(line.fulfilled_qty ?? 0))),
+    );
+  }
+  const qboInvoiceFullyShippedIds = new Set<string>();
+  const qboInvoiceLineRowsByInvoiceId = new Map<string, Array<{ id: string; ordered_qty?: number | null }>>();
+  for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; ordered_qty?: number | null }>) {
+    qboInvoiceLineRowsByInvoiceId.set(qboLine.qbo_invoice_id, [...(qboInvoiceLineRowsByInvoiceId.get(qboLine.qbo_invoice_id) ?? []), qboLine]);
+  }
+  for (const [invoiceId, lines] of qboInvoiceLineRowsByInvoiceId) {
+    const physicalLines = lines.filter((line) => Number(line.ordered_qty ?? 0) > 0);
+    if (physicalLines.length > 0 && physicalLines.every((line) => (fulfilledQtyByQboInvoiceLineId.get(line.id) ?? 0) >= Number(line.ordered_qty ?? 0))) {
+      qboInvoiceFullyShippedIds.add(invoiceId);
+    }
+  }
   const invoiceQtyByInvoiceProduct = new Map<string, number>();
   const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty?: number | null }>) {
@@ -692,6 +712,7 @@ export default async function InventoryPage({
     const provenInvoiceShippedQty = sourceInvoiceId && line.product_id
       ? provenInvoiceShippedQtyByProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? 0
       : 0;
+    const invoiceFullyShipped = Boolean(sourceInvoiceId && qboInvoiceFullyShippedIds.has(sourceInvoiceId));
     const shippedQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
     const approvedQty = invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
     const normalizedShippedQty = Math.min(approvedQty, shippedQty);
@@ -739,6 +760,7 @@ export default async function InventoryPage({
       sourceInvoiceId,
       invoiceOrderedQty,
       provenInvoiceShippedQty,
+      invoiceFullyShipped,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];

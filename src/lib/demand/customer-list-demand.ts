@@ -11,6 +11,7 @@ export type CustomerDemandRow = {
   shippedQty: number;
   invoiceOrderedQty: number | null;
   provenInvoiceShippedQty: number;
+  invoiceFullyShipped: boolean;
 };
 
 /** Produces one active Customer List row per invoice after authoritative shipment reconciliation. */
@@ -35,8 +36,16 @@ export function mergeOpenCustomerDemand<T extends CustomerDemandRow>(items: T[])
     existing.shippedQty += item.shippedQty;
     existing.invoiceOrderedQty = existing.invoiceOrderedQty ?? item.invoiceOrderedQty;
     existing.provenInvoiceShippedQty = Math.max(existing.provenInvoiceShippedQty, item.provenInvoiceShippedQty);
+    existing.invoiceFullyShipped = existing.invoiceFullyShipped || item.invoiceFullyShipped;
   }
   for (const item of customerDemandByInvoice.values()) {
+    if (item.invoiceFullyShipped) {
+      item.openQty = 0;
+      item.warehouseQty = 0;
+      item.waitingQty = 0;
+      item.inWarehouse = false;
+      continue;
+    }
     if (item.invoiceOrderedQty == null) continue;
     const orderedQty = Math.max(0, Number(item.invoiceOrderedQty));
     const shippedQty = Math.min(orderedQty, Math.max(0, item.shippedQty, item.provenInvoiceShippedQty));

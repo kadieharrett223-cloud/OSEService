@@ -14,6 +14,7 @@ const row = (overrides = {}) => ({
   shippedQty: 0,
   invoiceOrderedQty: 1,
   provenInvoiceShippedQty: 0,
+  invoiceFullyShipped: false,
   ...overrides,
 });
 
@@ -21,6 +22,14 @@ describe("final Customer List demand", () => {
   it("removes Joshua 122353 after QBO sibling shipment evidence reaches the final merge", () => {
     const finalRows = mergeOpenCustomerDemand([
       row({ provenInvoiceShippedQty: 1 }),
+    ]);
+
+    expect(finalRows).toEqual([]);
+  });
+
+  it("removes Ivan 122332 when the QBO invoice is fully shipped despite a stale different-product sibling", () => {
+    const finalRows = mergeOpenCustomerDemand([
+      row({ invoice: "122332", orderId: "c0606551-92ed-462e-b346-f0fe39092ee5", invoiceFullyShipped: true }),
     ]);
 
     expect(finalRows).toEqual([]);

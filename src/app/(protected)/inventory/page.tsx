@@ -367,6 +367,7 @@ export default async function InventoryPage({
     { data: transactions },
     { data: containerLines },
     queueLines,
+    fulfillmentRows,
     packageDimensionsBySku,
   ] = await Promise.all([
     supabase
@@ -380,6 +381,10 @@ export default async function InventoryPage({
       .from("container_lines")
       .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
     queueLinesPromise,
+    fetchAllRows((from, to) => supabase
+      .from("fulfillments")
+      .select("shipping_order_line_id,fulfilled_qty")
+      .range(from, to)),
     getCachedPackageDimensionsBySku(),
   ]);
 
@@ -410,10 +415,6 @@ export default async function InventoryPage({
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const rawQueueLineRows = (queueLines ?? []) as unknown as QueueLine[];
-  const queueLineIds = rawQueueLineRows.map((line) => line.id);
-  const fulfillmentRows = queueLineIds.length
-    ? await fetchRowsByIds(queueLineIds, (ids) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").in("shipping_order_line_id", ids))
-    : [];
   const provenFulfilledQtyByLineId = new Map<string, number>();
   for (const fulfillment of fulfillmentRows as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null }>) {
     provenFulfilledQtyByLineId.set(
@@ -473,8 +474,10 @@ export default async function InventoryPage({
     activeQboParentsByOrderNumber.set(String(row.order_number), [...(activeQboParentsByOrderNumber.get(String(row.order_number)) ?? []), row]);
   }
   const qboParentInvoiceIds = [...new Set(typedQboParentRows.map((row) => row.source_invoice_id).filter(Boolean))] as string[];
-  const extraQboLineRows = qboParentInvoiceIds.length
-    ? await fetchRowsByIds(qboParentInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
+  const sourceInvoiceIdSet = new Set(sourceInvoiceIds);
+  const missingQboParentInvoiceIds = qboParentInvoiceIds.filter((invoiceId) => !sourceInvoiceIdSet.has(invoiceId));
+  const extraQboLineRows = missingQboParentInvoiceIds.length
+    ? await fetchRowsByIds(missingQboParentInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
     : [];
   const allQboLineRows = [...qboLineRows, ...extraQboLineRows].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
   const invoiceQtyByInvoiceProduct = new Map<string, number>();

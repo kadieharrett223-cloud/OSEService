@@ -50,6 +50,38 @@ function isVoided(invoice: InvoiceRow) {
     || String(payload.TxnStatus ?? payload.status ?? "").trim().toUpperCase() === "VOIDED";
 }
 
+async function fetchAllRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+) {
+  const pageSize = 1000;
+  const allRows: T[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await fetchPage(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    allRows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) return allRows;
+  }
+}
+
+async function loadCustomersById(customerIds: string[]) {
+  const supabase = getSupabaseAdmin();
+  const uniqueCustomerIds = [...new Set(customerIds)];
+  const chunkSize = 100;
+  const customers: Array<{ id: string; company_name: string | null; full_name: string | null }> = [];
+
+  for (let index = 0; index < uniqueCustomerIds.length; index += chunkSize) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("id,company_name,full_name")
+      .in("id", uniqueCustomerIds.slice(index, index + chunkSize));
+    if (error) throw new Error(error.message);
+    customers.push(...(data ?? []));
+  }
+
+  return customers;
+}
+
 export default async function ImportAssignOrdersPage() {
   await requireUser();
   const supabase = getSupabaseAdmin();
@@ -62,26 +94,23 @@ export default async function ImportAssignOrdersPage() {
     recoveryError = error instanceof Error ? error.message : "Unable to query QuickBooks payment history.";
   }
 
-  const [invoiceResult, lineResult, orderResult, productResult, aliasResult] = await Promise.all([
-    supabase.from("qbo_invoices").select("id,qbo_invoice_id,invoice_number,invoice_date,payment_status,customer_id,raw_payload"),
-    supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,source_description,ordered_qty,product_id"),
-    supabase.from("shipping_orders").select("id,source_invoice_id,duplicate_of_order_id,order_number"),
+  const [invoices, invoiceLines, parentOrders, productResult, aliasResult] = await Promise.all([
+    fetchAllRows((from, to) => supabase.from("qbo_invoices").select("id,qbo_invoice_id,invoice_number,invoice_date,payment_status,customer_id,raw_payload").order("id").range(from, to)),
+    fetchAllRows((from, to) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,source_description,ordered_qty,product_id").order("id").range(from, to)),
+    fetchAllRows((from, to) => supabase.from("shipping_orders").select("id,source_invoice_id,duplicate_of_order_id,order_number").order("id").range(from, to)),
     supabase.from("products").select("id,sku"),
     supabase.from("product_aliases").select("product_id,alias"),
   ]);
-  for (const result of [invoiceResult, lineResult, orderResult, productResult, aliasResult]) {
+  for (const result of [productResult, aliasResult]) {
     if (result.error) throw new Error(result.error.message);
   }
 
-  const invoices = (invoiceResult.data ?? []) as unknown as InvoiceRow[];
-  const invoiceLines = (lineResult.data ?? []) as unknown as InvoiceLine[];
-  const customerIds = invoices.map((invoice) => invoice.customer_id).filter((id): id is string => Boolean(id));
-  const { data: customerRows, error: customerError } = customerIds.length
-    ? await supabase.from("customers").select("id,company_name,full_name").in("id", customerIds)
-    : { data: [], error: null };
-  if (customerError) throw new Error(customerError.message);
+  const invoiceRows = invoices as unknown as InvoiceRow[];
+  const invoiceLineRows = invoiceLines as unknown as InvoiceLine[];
+  const customerIds = invoiceRows.map((invoice) => invoice.customer_id).filter((id): id is string => Boolean(id));
+  const customerRows = customerIds.length ? await loadCustomersById(customerIds) : [];
 
-  const customerNameById = new Map((customerRows ?? []).map((customer) => [customer.id, customer.company_name ?? customer.full_name ?? "Customer pending"]));
+  const customerNameById = new Map(customerRows.map((customer) => [customer.id, customer.company_name ?? customer.full_name ?? "Customer pending"]));
   const productIdBySku = new Map<string, string>();
   for (const product of productResult.data ?? []) {
     if (product.sku) productIdBySku.set(product.sku.trim().toUpperCase(), product.id);
@@ -90,19 +119,18 @@ export default async function ImportAssignOrdersPage() {
     if (alias.alias) productIdBySku.set(alias.alias.trim().toUpperCase(), alias.product_id);
   }
   const linesByInvoice = new Map<string, InvoiceLine[]>();
-  for (const line of invoiceLines) {
+  for (const line of invoiceLineRows) {
     const lines = linesByInvoice.get(line.qbo_invoice_id) ?? [];
     lines.push(line);
     linesByInvoice.set(line.qbo_invoice_id, lines);
   }
   const canonicalOrderByInvoice = new Map<string, { id: string; order_number: string | null }>();
-  const parentOrders = (orderResult.data ?? []) as unknown as ParentOrderRow[];
-  for (const order of parentOrders) {
+  for (const order of parentOrders as unknown as ParentOrderRow[]) {
     if (!order.source_invoice_id || canonicalOrderByInvoice.has(order.source_invoice_id) || order.duplicate_of_order_id) continue;
     canonicalOrderByInvoice.set(order.source_invoice_id, order);
   }
 
-  const eligibleRows = invoices
+  const eligibleRows = invoiceRows
     .map((invoice) => {
       const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id) ?? null;
       const physicalItems = (linesByInvoice.get(invoice.id) ?? [])
@@ -129,7 +157,7 @@ export default async function ImportAssignOrdersPage() {
     .filter((row) => row.eligible)
     .sort((left, right) => String(left.firstPaymentDate).localeCompare(String(right.firstPaymentDate)) || String(left.invoice.invoice_number).localeCompare(String(right.invoice.invoice_number)));
   const rows = eligibleRows.filter((row) => !row.existingOrder);
-  const voidedExcluded = invoices.filter((invoice) => {
+  const voidedExcluded = invoiceRows.filter((invoice) => {
     const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
     return firstPaymentDate && Date.parse(firstPaymentDate) >= Date.parse(CUTOFF) && isVoided(invoice);
   }).length;

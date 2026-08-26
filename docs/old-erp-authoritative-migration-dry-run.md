@@ -136,7 +136,9 @@ The protected, read-only review at `/orders/import-assign` reads actual QuickBoo
 uses each invoice's first payment date. It lists only
 eligible invoices missing a canonical ERP order and summarizes eligible, already represented, mapped,
 unmapped, and voided counts. The top of `/orders` shows `Import/Assign (N) New Orders` using this same
-first-payment rule. The review never creates or updates orders, lines, queues, customer demand, inventory,
+first-payment rule. The review loads invoices, lines, and ERP parents in pages and resolves customers in
+bounded batches so the full dataset can be reviewed without Supabase request-size or default row-limit
+failures. The review never creates or updates orders, lines, queues, customer demand, inventory,
 allocations, fulfillments, or shipments, and the link has no import or assignment write action.
 
 ## Historical OLD_ERP Order Status Archive

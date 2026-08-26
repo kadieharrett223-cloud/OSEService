@@ -124,7 +124,12 @@ export default async function ContainerDetailPage({
 
   const isReceived = coverage.isReceived;
   const eligibleLineIds = coverage.eligibleLineIds;
-  const customerRows = coverage.rows;
+  const customerRows = isReceived
+    ? coverage.rows.map((row) => ({ ...row, containerQty: row.coveredQty, stockCovered: row.willMarkInWarehouse }))
+    : coverage.forecastRows
+        .filter((row) => row.forecastQty > 0)
+        .map((row) => ({ ...row, containerQty: row.forecastQty, stockCovered: false }));
+  const customerUnits = customerRows.reduce((sum, row) => sum + row.containerQty, 0);
   const receivedQtyByProduct = new Map(coverage.lines.map((line) => [line.productId, line.receivedQty]));
   const expectedTotal = coverage.lines.reduce((sum, line) => sum + line.expectedQty, 0);
   const receivedTotal = coverage.lines.reduce((sum, line) => sum + line.receivedQty, 0);
@@ -253,8 +258,8 @@ export default async function ContainerDetailPage({
         <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
           <p>
             {isReceived
-              ? `${eligibleLineIds.size} order line(s) have stock covered by this container. ${customerRows.filter((row) => !row.willMarkInWarehouse).length} line(s) remain waiting.`
-              : `Based on expected quantities, ${eligibleLineIds.size} order line(s) would have stock covered and ${customerRows.filter((row) => !row.willMarkInWarehouse).length} would remain waiting.`}
+              ? `${eligibleLineIds.size} order line(s) have stock covered by this container. ${customerRows.filter((row) => !row.stockCovered).length} line(s) remain waiting.`
+              : `Based on expected quantities, ${customerRows.length} customer line(s) are forecast to receive ${customerUnits} unit(s) from this container.`}
           </p>
         </div>
 
@@ -282,7 +287,7 @@ export default async function ContainerDetailPage({
                 </tr>
               ) : (
                 customerRows.map((row, idx) => (
-                  <tr key={`${row.lineId}-${idx}`} className={row.coveredQty > 0 ? "bg-[#f8fbff]" : undefined}>
+                  <tr key={`${row.lineId}-${idx}`} className="bg-[#f8fbff]">
                     <td className="px-3 py-3">{row.queuePosition ?? "—"}</td>
                     <td className="px-3 py-3">{row.invoice}</td>
                     <td className="px-3 py-3 font-medium text-[#111827]">
@@ -292,11 +297,11 @@ export default async function ContainerDetailPage({
                       ) : null}
                     </td>
                     <td className="px-3 py-3">{row.sku}</td>
-                    <td className="px-3 py-3">{row.coveredQty > 0 ? row.coveredQty : "—"}</td>
+                    <td className="px-3 py-3">{row.containerQty}</td>
                     <td className="px-3 py-3">{row.remainingQty}</td>
                     <td className="px-3 py-3">{row.currentWarehouse}</td>
                     <td className="px-3 py-3">
-                      {row.willMarkInWarehouse ? (
+                      {row.stockCovered ? (
                         <span className="rounded-full bg-[#e7f7ed] px-2.5 py-1 text-xs font-semibold text-[#1b7a43]">Yes</span>
                       ) : (
                         <span className="rounded-full bg-[#f3f4f6] px-2.5 py-1 text-xs font-semibold text-[#6b7280]">No</span>

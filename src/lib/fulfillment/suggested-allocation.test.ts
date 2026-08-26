@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveProductCoverage, validateProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "./suggested-allocation";
+import { canonicalSkuKey } from "@/lib/products/canonical-sku";
 
 const productId = "product-1";
 const created_at = "2026-08-01T00:00:00.000Z";
@@ -126,6 +127,36 @@ describe("shared product coverage resolver", () => {
     });
 
     expect(result.lines.get("C")?.allocations).toMatchObject([{ sourceType: "WAREHOUSE", quantity: 1 }]);
+  });
+
+  it("keeps recycled 4PC-6 demand visible on Container 245 after warehouse coverage", () => {
+    const demandProductKey = canonicalSkuKey("HK-4PC-6");
+    const supplyProductKey = canonicalSkuKey("4PC-6");
+    expect(demandProductKey).toBe(supplyProductKey);
+
+    const queue = [
+      ...Array.from({ length: 9 }, (_, index) => line(`warehouse-${index + 1}`, 1, index + 1, { product_id: demandProductKey })),
+      line("stratos", 6, 10, { product_id: demandProductKey }),
+      ...["steven", "wholesale", "henry", "raymond", "gerardo", "spring-creek", "dave"].map((id, index) => line(id, 1, 16 + index, { product_id: demandProductKey })),
+    ];
+    const result = resolveProductCoverage(supplyProductKey, {
+      floorAvailableByProduct: new Map([[supplyProductKey, 11]]),
+      queueLinesByProduct: new Map([[supplyProductKey, queue]]),
+      containerSupplyByProduct: new Map([[supplyProductKey, [container("245", "245", 40, "2026-09-01")]]]),
+    });
+    const container245 = result.allocations.filter((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === "245");
+
+    expect(container245.reduce((sum, allocation) => sum + allocation.quantity, 0)).toBe(11);
+    expect(container245.map((allocation) => `${allocation.orderLineId}:${allocation.quantity}`)).toEqual([
+      "stratos:4",
+      "steven:1",
+      "wholesale:1",
+      "henry:1",
+      "raymond:1",
+      "gerardo:1",
+      "spring-creek:1",
+      "dave:1",
+    ]);
   });
 
   it("validates coverage against the same resolver output", () => {

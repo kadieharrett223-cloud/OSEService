@@ -29,3 +29,11 @@ Mapped imports recalculate every affected product's queue by the existing first-
 The runner writes only `shipping_orders`, `shipping_order_lines`, `first_payment_at`, Product Mappings review rows, and manual-duplicate review rows. It does not write `inventory_transactions`, `ON_FLOOR`, shipments, fulfillment quantities, or allocations. Canonical Inventory calculates Sold from the newly active obligations and Available Now from `ON_FLOOR - Sold`.
 
 Reruns are safe: the QBO parent and line uniqueness constraints prevent duplicate obligations, and a uniqueness conflict is treated as already present. Verify the second execution reports zero imports. If a rollback is necessary, retire only the newly created, unfulfilled QBO order lines and their parent when empty, then recalculate their affected queues. Do not compensate with inventory or fulfillment writes.
+
+After an import, run the read-only reconciliation with the run ID displayed on Settings:
+
+```powershell
+npm run report:qbo-backlog-import -- --run <run-id>
+```
+
+It writes a JSON report under `tmp/import-reports` with the line-level decision and Customer List position, plus each affected SKU's `ON_FLOOR`, Sold, Available, and Customer List quantity before and after the run. Re-run the protected importer and this report once more to demonstrate that the second run adds zero demand.

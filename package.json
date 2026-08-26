@@ -30,6 +30,7 @@
     "archive:old-erp-source:apply": "node --env-file=.env.local scripts/archive-old-erp-source-records.mjs --apply",
     "import:paid-qbo-orders:preview": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs",
     "import:paid-qbo-orders:apply": "node --env-file=.env.local scripts/import-paid-quickbooks-orders.mjs --apply",
+    "preview:qbo-backlog-preflight": "node --env-file=.env.local scripts/preview-post-shutdown-qbo-orders.mjs",
     "import:old-erp-order-history:preview": "node scripts/import-old-erp-order-status-history.mjs",
     "import:old-erp-order-history:apply": "node --env-file=.env.local scripts/import-old-erp-order-status-history.mjs --apply",
     "sync:old-erp-opening-inventory:preview": "node --env-file=.env.local scripts/sync-old-erp-opening-inventory.mjs",

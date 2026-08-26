@@ -11,6 +11,7 @@ type MappingQueueRow = {
   customer_name: string | null;
   invoice_number: string | null;
   quantity: number;
+  first_payment_at: string | null;
   current_product_id: string | null;
   status: string;
   resolution_note: string | null;
@@ -23,6 +24,7 @@ type MappingGroup = {
   customer_name: string | null;
   invoice_number: string | null;
   quantity: number;
+  first_payment_at: string | null;
   current_product_id: string | null;
 };
 
@@ -35,7 +37,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
   const [{ data: rawQueueRows, error: queueError }, { data: rawProducts, error: productsError }] = await Promise.all([
     supabase
       .from("manual_product_mapping_queue")
-      .select("id, source_sku, source_description, customer_name, invoice_number, quantity, current_product_id, status, resolution_note")
+      .select("id, source_sku, source_description, customer_name, invoice_number, quantity, first_payment_at, current_product_id, status, resolution_note")
       .eq("status", "OPEN")
       .order("created_at", { ascending: true }),
     supabase.from("products").select("id, sku, canonical_name").eq("status", "Active").order("sku"),
@@ -50,6 +52,9 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
       existing.customer_name = [existing.customer_name, entry.customer_name].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ") || null;
       existing.invoice_number = [existing.invoice_number, entry.invoice_number].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(", ") || null;
       existing.quantity += Number(entry.quantity ?? 0);
+      if (!existing.first_payment_at || entry.first_payment_at && Date.parse(entry.first_payment_at) < Date.parse(existing.first_payment_at)) {
+        existing.first_payment_at = entry.first_payment_at;
+      }
       return groups;
     }
     groups.set(key, {
@@ -59,6 +64,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
       customer_name: entry.customer_name,
       invoice_number: entry.invoice_number,
       quantity: Number(entry.quantity ?? 0),
+      first_payment_at: entry.first_payment_at,
       current_product_id: entry.current_product_id,
     });
     return groups;
@@ -92,6 +98,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
               <th className="px-4 py-3">Source SKU</th>
               <th className="px-4 py-3">Description</th>
               <th className="px-4 py-3">Customer / Invoice</th>
+              <th className="px-4 py-3">First Paid</th>
               <th className="px-4 py-3">Qty</th>
               <th className="px-4 py-3">Current Mapping</th>
               <th className="px-4 py-3">Select Correct Product</th>
@@ -104,6 +111,7 @@ export default async function ProductMappingsPage({ searchParams }: { searchPara
                 <td className="px-4 py-4 font-semibold text-[#111827]">{entry.source_sku}</td>
                 <td className="px-4 py-4 text-[#475569] break-words">{entry.source_description ?? "—"}</td>
                 <td className="px-4 py-4 text-[#475569]">{entry.customer_name ?? "—"}<div className="text-xs">Invoice {entry.invoice_number ?? "—"}</div></td>
+                <td className="px-4 py-4 text-[#475569]">{entry.first_payment_at ? new Date(entry.first_payment_at).toLocaleString() : "—"}</td>
                 <td className="px-4 py-4 font-semibold">{entry.quantity}</td>
                 <td className="px-4 py-4 text-xs text-[#64748b]">{entry.current_product_id ?? "Unmapped / ambiguous"}</td>
                 <td className="px-4 py-4">

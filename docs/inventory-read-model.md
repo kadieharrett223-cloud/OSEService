@@ -221,22 +221,20 @@ The audit refuses to refresh an expired QBO token. This preserves its read-only 
 write QuickBooks connection state, ERP timestamps, queue positions, demand, fulfillment, inventory,
 allocations, shipments, mappings, or resolutions. An approved backfill is a separate operation.
 
-### Verified First-Payment Backfill Preview
+### Invoice-Date Queue Fallback
 
-`/settings/qbo-first-payment-backfill` is an admin-unlocked, protected, read-only preview for a
-future timestamp-only correction. It proposes one `shipping_orders` parent only when it has active
-canonical demand, a Paid or Partially Paid QBO invoice, a NULL `first_payment_at`, and exactly one
-linked QBO Payment. `UNVERIFIED`, `MULTIPLE_PAYMENTS`, inactive/terminal, populated, and ambiguous
-records are excluded. Each row shows its QBO payment date, affected SKU position changes, and a
-deterministic SHA-256 proposal hash.
+Historical first-payment backfill is cancelled. The Customer List priority rule is read-model-only:
+use `first_payment_at` when present; otherwise use the related QBO invoice date; otherwise use the
+existing deterministic order-creation fallback. An invoice date is never written into or labelled as
+`first_payment_at`.
 
-The execution action has no UI entry point and is disabled unless
-`ENABLE_VERIFIED_QBO_FIRST_PAYMENT_BACKFILL=true` is explicitly configured. If enabled in a future,
-separately approved release, it reruns the preview, requires the exact count and hash, and updates
-only parents still having a NULL `first_payment_at`. The accompanying migration executes the batch
-atomically, so any missing or newly populated parent aborts and rolls back all timestamp changes. It
-does not recalculate stored queue positions or modify inventory, fulfillment, shipment, allocation,
-mapping, resolution, or QBO intake data.
+`/settings/queue-priority-preview` is an admin-unlocked, read-only all-SKU comparison of the prior
+first-payment-or-created ordering against the invoice-date fallback. Inventory Customer Lists, Order
+Detail queue positions, and Customer List CSV exports consume the same shared canonical projection.
+When the fallback is used, Inventory displays `Priority Date` and `Invoice date fallback`, rather
+than falsely displaying the value as `First Paid`. The rule does not change queue membership, Sold
+quantities, stored queue positions, inventory, fulfillment, shipments, allocations, mappings,
+resolutions, QBO intake, or historical order data.
 
 ### Reviewed terminal resolutions
 

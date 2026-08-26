@@ -23,6 +23,8 @@ type CustomerQueueItem = {
   status: string;
   orderId: string;
   firstPaymentAt: string | null;
+  priorityDate: string | null;
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED";
 };
 
 type CustomerDemandDropdownProps = {
@@ -56,7 +58,7 @@ export function CustomerDemandDropdown({
   }
 
   function downloadReport() {
-    const headers = ["Position", "Customer", "Invoice", "Ordered", "Shipped", "Remaining", "Priority", "Assignment", "Expected Availability", "Status"];
+    const headers = ["Position", "Customer", "Invoice", "Ordered", "Shipped", "Remaining", "Priority", "Priority Date", "Priority Date Source", "Assignment", "Expected Availability", "Status"];
     const rows = customerQueue.map((item) => [
       item.position,
       item.customer,
@@ -65,6 +67,8 @@ export function CustomerDemandDropdown({
       String(item.shippedQty),
       String(item.openQty),
       item.priority,
+      item.priorityDate ?? "",
+      item.priorityDateSource === "INVOICE_DATE" ? "Invoice date fallback" : item.priorityDateSource === "FIRST_PAYMENT" ? "First payment" : "Order creation fallback",
       item.assignedTo,
       item.expectedAvailability,
       item.status,
@@ -169,7 +173,13 @@ export function CustomerDemandDropdown({
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
-                    <div className="mt-1 text-[#64748b]">First Paid: {item.firstPaymentAt ? new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not recorded"}</div>
+                    {item.firstPaymentAt ? (
+                      <div className="mt-1 text-[#64748b]">First Paid: {new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                    ) : item.priorityDateSource === "INVOICE_DATE" && item.priorityDate ? (
+                      <div className="mt-1 text-[#64748b]">Priority Date: {new Date(item.priorityDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · Invoice date fallback</div>
+                    ) : (
+                      <div className="mt-1 text-[#64748b]">Priority Date: order creation fallback</div>
+                    )}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}
                       {item.willCall ? <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#92400e]">WILL CALL</span> : null}

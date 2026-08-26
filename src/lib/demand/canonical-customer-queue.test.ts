@@ -19,6 +19,9 @@ function row(overrides: Partial<CanonicalCustomerQueueRow> = {}): CanonicalCusto
     provenInvoiceShippedQty: 0,
     invoiceFullyShipped: false,
     firstPaymentAt: "2026-01-01T00:00:00Z",
+    invoiceDate: "2026-01-01T00:00:00Z",
+    priorityDate: "2026-01-01T00:00:00Z",
+    priorityDateSource: "FIRST_PAYMENT",
     orderCreatedAt: "2026-01-01T00:00:00Z",
     storedPosition: 1,
     ...overrides,
@@ -52,5 +55,15 @@ describe("projectCanonicalCustomerQueue", () => {
       ["first", 3, "1-3"],
       ["later", 1, "4"],
     ]);
+  });
+
+  it("uses invoice date before order creation when first payment is not recorded", () => {
+    const queue = projectCanonicalCustomerQueue([
+      row({ invoice: "newer-invoice", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: "2026-06-01", priorityDate: "2026-06-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-01-01" }),
+      row({ invoice: "older-invoice", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: "2026-05-01", priorityDate: "2026-05-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-07-01" }),
+      row({ invoice: "paid", lineId: "paid", logicalDemandKey: "paid", firstPaymentAt: "2026-04-01", invoiceDate: "2026-06-15", priorityDate: "2026-04-01", priorityDateSource: "FIRST_PAYMENT" }),
+    ]);
+
+    expect(queue.map((item) => item.invoice)).toEqual(["paid", "older-invoice", "newer-invoice"]);
   });
 });

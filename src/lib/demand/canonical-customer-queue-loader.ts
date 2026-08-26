@@ -13,7 +13,7 @@ export type CanonicalQueueLine = {
   shipping_orders?: { id: string; source_invoice_id?: string | null; source_type?: string | null; order_number?: string | null;
     duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null;
     created_at?: string | null; first_payment_at?: string | null; legacy_customer_name?: string | null; fulfillment_method?: "SHIP" | "WILL_CALL" | null;
-    qbo_invoices?: { invoice_number?: string | null; raw_payload?: { PrivateNote?: string | null; Line?: unknown[] } | null;
+    qbo_invoices?: { invoice_number?: string | null; invoice_date?: string | null; raw_payload?: { PrivateNote?: string | null; Line?: unknown[] } | null;
       customers?: { company_name?: string | null; full_name?: string | null } | null } | null } | null;
   products?: { sku?: string | null; canonical_name?: string | null } | null;
   inventory_allocations?: Array<{ source_type?: string | null; container_id?: string | null; quantity?: number | null; allocation_status?: string | null; containers?: { container_number?: string | null; lifecycle_status?: string | null; eta_confirmed_date?: string | null; eta_estimated_date?: string | null } | null }>;
@@ -58,7 +58,7 @@ export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQue
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku").range(from, to)),
     fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").range(from, to)),
-    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,legacy_item_code,qbo_invoice_line_id,source_record_id,shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
+    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,legacy_item_code,qbo_invoice_line_id,source_record_id,shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
     fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
     fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").range(from, to)),
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
@@ -125,7 +125,11 @@ export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQue
     const parent = line.shipping_orders;
     const approvedQty = Math.max(0, Number(line.approved_qty ?? 0));
     const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
-    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt: parent?.first_payment_at ?? null, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) || String(parent?.order_number ?? "") === "126037" };
+    const firstPaymentAt = parent?.first_payment_at ?? null;
+    const invoiceDate = parent?.qbo_invoices?.invoice_date ?? null;
+    const priorityDate = firstPaymentAt ?? invoiceDate ?? parent?.created_at ?? null;
+    const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" = firstPaymentAt ? "FIRST_PAYMENT" : invoiceDate ? "INVOICE_DATE" : "ORDER_CREATED";
+    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) || String(parent?.order_number ?? "") === "126037" };
   }
   for (const line of canonicalLines) {
     if (!line.product_id || !isOpenDemandLine(line)) continue;

@@ -161,6 +161,9 @@ type InventoryViewRow = {
     orderId: string;
     orderCreatedAt: string | null;
     firstPaymentAt: string | null;
+    invoiceDate: string | null;
+    priorityDate: string | null;
+    priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED";
     sourceInvoiceId: string | null;
     invoiceOrderedQty: number | null;
     provenInvoiceShippedQty: number;
@@ -777,7 +780,10 @@ export default async function InventoryPage({
       status: formatStatus(line.warehouse_status ?? line.approval_status),
       orderId: line.shipping_orders?.id ?? "",
       orderCreatedAt: line.shipping_orders?.created_at ?? null,
-      firstPaymentAt: line.shipping_orders?.first_payment_at ?? null,
+      firstPaymentAt: sharedQueueRow.firstPaymentAt,
+      invoiceDate: sharedQueueRow.invoiceDate,
+      priorityDate: sharedQueueRow.priorityDate,
+      priorityDateSource: sharedQueueRow.priorityDateSource,
       sourceInvoiceId,
       invoiceOrderedQty,
       provenInvoiceShippedQty,

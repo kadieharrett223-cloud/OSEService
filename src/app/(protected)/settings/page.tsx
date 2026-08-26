@@ -205,6 +205,9 @@ export default async function SettingsPage({
           <a href="/settings/qbo-first-payment-audit" className="btn-secondary">
             Audit First Payments
           </a>
+          <a href="/settings/queue-priority-preview" className="btn-secondary">
+            Preview Queue Priority
+          </a>
           <form action={disconnectQuickbooksAction}>
             <button type="submit" className="btn-danger" disabled={!isConnected || quickbooksTableMissing}>
               Disconnect

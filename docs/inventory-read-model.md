@@ -187,6 +187,26 @@ deduplicates one logical obligation, then retains only active demand. Inventory 
 population before creating both the Sold/Available totals and Customer List rows; the final
 invoice-level Customer List merge remains in `mergeOpenCustomerDemand`.
 
+### Shared Customer Queue Projection
+
+`src/lib/demand/canonical-customer-queue-loader.ts` is the read-only server loader for the active
+Customer List population. It preserves the Inventory physical-QBO reconciliation, fulfilled-line
+evidence, completed QBO sibling suppression, duplicate/cancelled/voided parent exclusions, reviewed
+resolutions, manual-mapping exclusions, product aliases, and invoice-level merging. It then sends
+each product's surviving rows to `src/lib/demand/canonical-customer-queue.ts`, which sorts by
+`first_payment_at`, then deterministic fallbacks, and assigns compact quantity-aware position ranges.
+
+Both `/inventory` and `/orders/[id]` use this loader. `shipping_order_lines.queue_position_start`
+is retained as historical compatibility metadata only and must never be shown as the authoritative
+Customer List position. Order Detail leaves its narrower supply-coverage query unchanged and uses
+the shared loader only for the Customer Queue position.
+
+The regression case is QBO invoice `127086`, line
+`03ec2e30-1ea9-41f2-8e77-5fa0db138e9d` (`000173` / `4PXL-10`): both pages must calculate position
+`#7`; the stale stored value is `#16`. Any queue change must pass a read-only all-SKU parity audit
+showing zero mismatches between the Inventory and Order Detail calculated positions, with no writes
+to orders, demand, fulfillment, allocations, inventory transactions, or queue metadata.
+
 ### Reviewed terminal resolutions
 
 `reviewed_obligation_resolutions` is an append-only reviewed lifecycle ledger for source evidence

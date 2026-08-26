@@ -9,6 +9,8 @@ import { DisplayOrderButton } from "@/app/(protected)/inventory/display-order-bu
 import { IncomingDropdown } from "@/app/(protected)/inventory/incoming-dropdown";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
+import { projectCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue";
+import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
 import { CLOSED_DEMAND_STATES, demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "@/lib/demand/product-demand";
 import type { ReviewedObligationResolution } from "@/lib/demand/reviewed-obligation-resolutions";
@@ -163,6 +165,8 @@ type InventoryViewRow = {
     invoiceOrderedQty: number | null;
     provenInvoiceShippedQty: number;
     invoiceFullyShipped: boolean;
+    storedPosition: number | null;
+    excludedFromQueue?: boolean;
   }>;
 };
 
@@ -425,6 +429,7 @@ export default async function InventoryPage({
   const groupNames = [...groupSortByName.entries()].sort((left, right) => left[1] - right[1]).map(([name]) => name);
 
   const productRows = (products ?? []) as ProductRow[];
+  const sharedCanonicalQueue = await loadCanonicalCustomerQueue();
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
@@ -623,12 +628,13 @@ export default async function InventoryPage({
     && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
-  const dedupedQueueLineRows = getCanonicalOpenDemandLines(
+  const inventoryCanonicalQueueLineRows = getCanonicalOpenDemandLines(
     activeQueueLineRows,
     completedQboLineIds,
     completedQboInvoiceIds,
     reviewedResolutions as ReviewedObligationResolutionRow[],
   );
+  const dedupedQueueLineRows = sharedCanonicalQueue.canonicalLines as QueueLine[];
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")
@@ -716,6 +722,8 @@ export default async function InventoryPage({
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
+    const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
+    if (!sharedQueueRow) continue;
 
     const operationalOpenQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id ?? null;
@@ -774,6 +782,8 @@ export default async function InventoryPage({
       invoiceOrderedQty,
       provenInvoiceShippedQty,
       invoiceFullyShipped,
+      storedPosition: line.queue_position_start,
+      excludedFromQueue: false,
     };
 
     const arr = queueByProduct.get(line.product_id) ?? [];
@@ -781,21 +791,11 @@ export default async function InventoryPage({
     queueByProduct.set(line.product_id, arr);
   }
 
-  for (const queue of queueByProduct.values()) {
-    queue.sort((a, b) => {
-      const priorityRank: Record<string, number> = { Critical: 0, High: 1, Normal: 2, Low: 3 };
-      const priorityDifference = (priorityRank[a.priority] ?? 2) - (priorityRank[b.priority] ?? 2);
-      if (priorityDifference !== 0) return priorityDifference;
-      const left = a.position === "—" ? Number.MAX_SAFE_INTEGER : Number(a.position);
-      const right = b.position === "—" ? Number.MAX_SAFE_INTEGER : Number(b.position);
-      return left - right;
-    });
-    let displayPosition = 1;
-    for (const row of queue) {
-      const units = Math.max(1, Number(row.openQty ?? 0));
-      row.position = units > 1 ? `${displayPosition}-${displayPosition + units - 1}` : String(displayPosition);
-      displayPosition += units;
-    }
+  for (const [productId, queue] of queueByProduct) {
+    queueByProduct.set(productId, projectCanonicalCustomerQueue(queue).map((row) => ({
+      ...row,
+      position: sharedCanonicalQueue.queueByLineId.get(row.lineId)?.position ?? row.position,
+    })));
   }
 
   const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();

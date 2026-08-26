@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { isOpenDemandLine } from "@/lib/demand/product-demand";
+import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import {
   resolveProductCoverage,
   validateProductCoverage,
@@ -89,6 +90,8 @@ type OrderDetailRow = {
     fulfillment_reference?: string | null;
     fulfillment_tracking?: string | null;
     fulfillment_notes?: string | null;
+    qbo_invoice_line_id?: string | null;
+    source_record_id?: string | null;
     products?: { sku: string | null; canonical_name: string | null } | null;
     inventory_allocations?: Array<{
       quantity: number | null;
@@ -639,6 +642,8 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
     "fulfillment_reference",
     "fulfillment_tracking",
     "fulfillment_notes",
+    "qbo_invoice_line_id",
+    "source_record_id",
   ].filter((column) => column === "id" || column === "product_id" || lineColumnSet.has(column));
 
   columns.push(
@@ -901,6 +906,12 @@ export default async function OrderDetailPage({
     if (leftQueue !== rightQueue) return leftQueue - rightQueue;
     return (left.products?.sku ?? "").localeCompare(right.products?.sku ?? "");
   });
+  const canonicalCustomerQueue = await loadCanonicalCustomerQueue();
+  const canonicalQueuePositionByLineId = new Map(orderLines.map((line) => {
+    const logicalKey = line.qbo_invoice_line_id ? `QBO_LINE:${line.qbo_invoice_line_id}` : line.source_record_id ? `SOURCE:${line.source_record_id}` : null;
+    const queueRow = canonicalCustomerQueue.queueByLineId.get(line.id) ?? (logicalKey ? canonicalCustomerQueue.queueByLogicalDemandKey.get(logicalKey) : undefined);
+    return [line.id, queueRow?.position ?? null] as const;
+  }));
 
   const { data: siblingLineRows } = siblingOrderIds.length > 1
     ? await supabase
@@ -1886,7 +1897,7 @@ export default async function OrderDetailPage({
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
                     <p className="mt-1 text-xs text-[#64748b]">{truncateText(item.description, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
-                      Customer list position: {queueLine?.queue_position_start ? `#${queueLine.queue_position_start}` : "Pending assignment"}
+                      Customer list position: {queueLine && canonicalQueuePositionByLineId.get(queueLine.id) ? `#${canonicalQueuePositionByLineId.get(queueLine.id)}` : "Not in active Customer List"}
                     </p>
                   </div>
                 );

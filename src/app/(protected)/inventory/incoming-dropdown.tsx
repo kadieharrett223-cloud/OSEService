@@ -76,7 +76,7 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
                     <div className="mt-1 text-[#64748b]">ETA/Port {container.eta} · {container.status}</div>
                   </div>
                   <div className="text-[#475569]">Qty {container.qty}</div>
-                  <div className="text-right text-[#475569]">{container.committed} committed · <span className="font-semibold text-[#1e293b]">{container.available} available</span></div>
+                  <div className="text-right text-[#475569]">{container.committed} forecast committed · <span className="font-semibold text-[#1e293b]">{container.available} forecast available</span></div>
                 </div>
               ))}
             </div>

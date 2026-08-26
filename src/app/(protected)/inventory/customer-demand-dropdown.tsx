@@ -198,8 +198,8 @@ export function CustomerDemandDropdown({
                     )}
                     {item.inWarehouse ? <div className="mt-1 font-semibold text-[#1d4ed8]">Preparing for shipment</div> : null}
                     {item.warehouseQty > 0 && item.waitingQty > 0 ? <div className="mt-1 font-medium text-[#475569]">{item.warehouseQty} In Warehouse · {item.waitingQty} Waiting</div> : null}
-                    <div className="mt-1 truncate text-[#64748b]">{item.assignedTo} · {item.status}</div>
-                    <div className="mt-1 truncate font-medium text-[#475569]">{item.expectedAvailability}</div>
+                    <div className="mt-1 truncate text-[#64748b]">Persisted: {item.assignedTo} · {item.status}</div>
+                    <div className="mt-1 truncate font-medium text-[#475569]">Forecast: {item.expectedAvailability}</div>
                   </div>
                   {item.orderId ? <Link href={`/orders/${item.orderId}`} className="inline-flex whitespace-nowrap rounded-md border border-[#bfdbfe] bg-white px-2.5 py-1.5 font-semibold text-[#1d4ed8] hover:border-[#93c5fd] hover:bg-[#eff6ff]">View Invoice</Link> : <span>—</span>}
                   {adminMode && item.lineId ? (

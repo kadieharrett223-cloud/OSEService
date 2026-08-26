@@ -169,6 +169,7 @@ export default async function ContainerDetailPage({
             productName: line.productName,
             expectedQty: line.expectedQty,
             assignedQty: line.assignedQty,
+            forecastCoverageQty: line.forecastCoverageQty,
             demandQty: line.demandQty,
             isUnplanned: line.isUnplanned,
           }))}

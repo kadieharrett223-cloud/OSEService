@@ -12,6 +12,7 @@ type LineInput = {
   productName: string;
   expectedQty: number;
   assignedQty: number;
+  forecastCoverageQty: number;
   demandQty: number;
   isUnplanned: boolean;
 };
@@ -254,7 +255,8 @@ export function ReceiveContainerWorkspace({
               <th className="px-3 py-3 font-semibold">SKU</th>
               <th className="px-3 py-3 font-semibold">Product</th>
               <th className="px-3 py-3 font-semibold">Expected</th>
-              <th className="px-3 py-3 font-semibold">Assigned to Customers</th>
+              <th className="px-3 py-3 font-semibold">Forecast Coverage</th>
+              <th className="px-3 py-3 font-semibold">Actually Assigned</th>
               <th className="px-3 py-3 font-semibold">Actual Received</th>
               <th className="px-3 py-3 font-semibold">Difference</th>
             </tr>
@@ -276,6 +278,7 @@ export function ReceiveContainerWorkspace({
                   </td>
                   <td className="px-3 py-3 text-[#4b5563]">{line.productName}</td>
                   <td className="px-3 py-3">{line.expectedQty}</td>
+                  <td className="px-3 py-3">{line.forecastCoverageQty}</td>
                   <td className="px-3 py-3">{line.assignedQty}</td>
                   <td className="px-3 py-3">
                     <input

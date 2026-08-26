@@ -18,8 +18,9 @@ import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
-import { getCachedPackageDimensionsBySku, packageDimensionsLookupKey } from "@/lib/products/package-dimensions-data";
+import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
+import { canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -229,10 +230,6 @@ function normalizeQboSkuKey(value: string | null | undefined) {
 
 function normalizeQboSkuKeys(value: string | null | undefined) {
   return qboSkuCandidates(value).map(normalizeSkuKey).filter(Boolean) as string[];
-}
-
-function canonicalSkuKey(value: string | null | undefined) {
-  return packageDimensionsLookupKey(value);
 }
 
 const UNSORTED_GROUP = "Other / Unsorted";

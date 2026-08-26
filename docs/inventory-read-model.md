@@ -32,6 +32,21 @@ single `product_id`. The legacy import wrote the same container line under each 
 identity, so merging by container number uses `Math.max` rather than a sum. Summing produced exactly
 2x the true incoming quantity.
 
+### Forecast coverage versus persisted allocation
+
+Container detail and Inventory forecast coverage use the shared `canonicalSkuKey()` utility in
+`src/lib/products/canonical-sku.ts`. It removes operational manufacturer prefixes for the same
+legacy identity rules used by the Inventory read model, so supply on a recycled product ID and
+canonical Customer List demand on a different product ID are resolved together. Forecast demand is
+loaded from `loadCanonicalCustomerQueue()` and passed to the quantity-aware
+`resolveProductCoverage()` solver, which covers Warehouse first and then active containers in ETA
+order.
+
+This is a read-only projection. `Forecast Coverage` and `Forecast: Container ...` do not create
+or alter `inventory_allocations`. `Actually Assigned` and `Persisted: ...` remain derived only
+from live allocation rows. Receiving a container still records physical receipt quantities and
+audit history only; it does not automatically allocate inventory or update warehouse status.
+
 ## Inventory math
 
 ```

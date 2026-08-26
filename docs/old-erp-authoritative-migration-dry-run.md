@@ -170,6 +170,20 @@ invoice references a new QBO identity. This avoids replaying the historical QBO 
 ledger during normal operation. The Orders page links to Import/Assign as the explicit review surface; it
 does not call QBO or execute the intake preflight while rendering.
 
+## Controlled Shipment Test Cleanup
+
+`scripts/audit-controlled-test-shipment.mjs --invoice=<invoice>` is a read-only, fail-closed lifecycle
+audit for a controlled shipment. It verifies one canonical parent and line, the exact shipment and
+fulfillment quantities, the linked `ON_FLOOR` transaction, and the resulting product-level open demand.
+It must pass before a test stock restoration is considered.
+
+`scripts/reverse-controlled-test-shipment-inventory.mjs` is intentionally locked to invoice `127052`, the
+automatic-intake test order. Its default mode is preview. With `--apply`, it writes exactly one
+idempotent `ADJUSTMENT` ledger entry linked to that specific shipment line and restores only the verified
+`ON_FLOOR` decrement. It preserves the order, shipment, fulfillment, and zero open demand. A later QBO
+void must be synchronized through the normal Settings flow before the existing void-cancellation action
+can record the terminal ERP cancellation state.
+
 ## Historical OLD_ERP Order Status Archive
 
 Historical InvoiceQueueItems outcomes are imported separately from live shipping demand with:

@@ -8,6 +8,7 @@ import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillm
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
 import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
+import { previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 import { OrdersTabLinks } from "./orders-tab-links";
@@ -244,28 +245,9 @@ const getCachedOrdersDataset = unstable_cache(async () => {
 }, ["orders-page-dataset"], { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] });
 
 const getPendingQuickbooksRecoveryCount = unstable_cache(async () => {
-  const [firstPaymentByQboInvoiceId, invoiceResult, orderResult] = await Promise.all([
-    getQuickbooksFirstPaymentDates(),
-    getSupabaseAdmin().from("qbo_invoices").select("id,qbo_invoice_id,payment_status,raw_payload"),
-    getSupabaseAdmin().from("shipping_orders").select("source_invoice_id,duplicate_of_order_id"),
-  ]);
-  if (invoiceResult.error) throw new Error(invoiceResult.error.message);
-  if (orderResult.error) throw new Error(orderResult.error.message);
-  const parentOrders = (orderResult.data ?? []) as unknown as Array<{ source_invoice_id: string | null; duplicate_of_order_id?: string | null }>;
-  const representedInvoiceIds = new Set(parentOrders.filter((order) => order.source_invoice_id && !order.duplicate_of_order_id).map((order) => order.source_invoice_id));
-  const cutoff = Date.parse("2026-08-07T00:00:00.000Z");
-  return (invoiceResult.data ?? []).filter((invoice) => {
-    const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-    const rawPayload = invoice.raw_payload as { PrivateNote?: string | null; TxnStatus?: string | null; status?: string | null } | null;
-    const voided = invoice.payment_status === "Voided"
-      || String(rawPayload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED"
-      || String(rawPayload?.TxnStatus ?? rawPayload?.status ?? "").trim().toUpperCase() === "VOIDED";
-    return firstPaymentDate !== undefined
-      && Date.parse(firstPaymentDate) >= cutoff
-      && ["Paid", "Partially Paid"].includes(invoice.payment_status)
-      && !voided
-      && !representedInvoiceIds.has(invoice.id);
-  }).length;
+  const firstPaymentByQboInvoiceId = await getQuickbooksFirstPaymentDates();
+  const preflight = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
+  return preflight.filter((invoice) => invoice.decision !== "ALREADY_REPRESENTED").length;
 }, ["post-shutdown-qbo-recovery-count"], { revalidate: 60 });
 
 export default async function OrdersPage({
@@ -335,7 +317,7 @@ export default async function OrdersPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/orders/import-assign" className="btn-primary inline-flex">
-              {pendingQuickbooksRecoveryCount == null ? "Review QBO Recovery" : `Import/Assign (${pendingQuickbooksRecoveryCount}) New Orders`}
+              {pendingQuickbooksRecoveryCount == null ? "Review QBO Recovery" : `Import/Assign (${pendingQuickbooksRecoveryCount}) Review`}
             </Link>
             <Link href="/orders/new" className="btn-primary inline-flex">Enter QuickBooks Order</Link>
           </div>

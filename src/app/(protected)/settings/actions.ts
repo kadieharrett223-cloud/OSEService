@@ -332,7 +332,6 @@ export async function importQualifiedQboBacklogAction() {
             order_number: invoice.invoice_number,
             source_type: "QBO_INVOICE",
             review_status: "APPROVED",
-            fulfillment_status: "PENDING",
             priority: "NORMAL",
             legacy_customer_name: customerName(invoice),
             first_payment_at: firstPaymentAt,

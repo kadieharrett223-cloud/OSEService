@@ -1064,7 +1064,7 @@ export default async function InventoryPage({
       {mapMessage ? <p className="rounded-md border border-[#bbf7d0] bg-[#f0fdf4] p-3 text-sm text-[#166534]">{mapMessage}</p> : null}
 
       <section className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
-        <div className="max-w-full overflow-x-auto">
+        <div className="max-w-full overflow-x-auto md:overflow-visible">
           <table className="w-full min-w-[1152px] table-fixed text-left text-sm">
             <colgroup>
               <col className="w-[280px]" />
@@ -1076,16 +1076,16 @@ export default async function InventoryPage({
               <col className="w-[128px]" />
               <col className="w-[156px]" />
             </colgroup>
-            <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_0_#dbe3ee]">
+            <thead className="bg-white shadow-[0_1px_0_0_#dbe3ee]">
               <tr className="border-b border-[#eceff3] bg-white text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                <th className="bg-white px-2 py-2.5">Item</th>
-                <th className="bg-white px-2 py-2.5">On Floor</th>
-                <th className="bg-white px-2 py-2.5">Sold</th>
-                <th className="bg-white px-2 py-2.5">Available Now</th>
-                <th className="bg-white px-2 py-2.5">Incoming</th>
-                <th className="bg-white px-2 py-2.5">Available/Incoming</th>
-                <th className="bg-white px-2 py-2.5">Next Arrival</th>
-                <th className="bg-white px-2 py-2.5">Customer List</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Item</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">On Floor</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Sold</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Available Now</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Incoming</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Available/Incoming</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Next Arrival</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Customer List</th>
               </tr>
             </thead>
             <tbody>

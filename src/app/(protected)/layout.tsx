@@ -67,7 +67,7 @@ async function ProtectedHeader() {
   const isQboConnected = await getCachedQuickbooksIndicator();
 
   return (
-    <header className="border-b border-[#e3e6ea] bg-white px-4 py-3 shadow-sm md:px-6">
+    <header className="sticky top-0 z-40 border-b border-[#e3e6ea] bg-white px-4 py-3 shadow-sm md:px-6">
       <div className="flex items-center gap-3">
         <TopbarTools />
         <div className="hidden items-center gap-2 rounded-lg border border-[#e5e7eb] bg-white px-2.5 py-1.5 text-xs md:flex">
@@ -88,7 +88,7 @@ async function ProtectedHeader() {
 }
 
 function HeaderFallback() {
-  return <header className="h-[61px] border-b border-[#e3e6ea] bg-white shadow-sm" />;
+  return <header className="sticky top-0 z-40 h-[61px] border-b border-[#e3e6ea] bg-white shadow-sm" />;
 }
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {

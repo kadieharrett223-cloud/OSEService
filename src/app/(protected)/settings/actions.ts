@@ -20,6 +20,7 @@ import {
   getQuickbooksFirstPaymentDates,
   syncQuickbooksInvoices,
 } from "@/lib/quickbooks/integration";
+import { executeVerifiedQboFirstPaymentBackfill } from "@/lib/quickbooks/first-payment-backfill";
 
 function generateInternalAccessCode() {
   return `AUTO-${crypto.randomUUID()}`;
@@ -32,6 +33,17 @@ async function requireSettingsAdmin() {
     redirect("/settings?error=Admin+code+required");
   }
   return user;
+}
+
+// Deliberately unrendered: deployment flag plus a later explicit UI approval are both required.
+export async function executeVerifiedQboFirstPaymentBackfillAction(formData: FormData) {
+  await requireSettingsAdmin();
+  const expectedProposalCount = Number(formData.get("proposal_count"));
+  const expectedProposalHash = String(formData.get("proposal_hash") ?? "").trim();
+  if (!Number.isSafeInteger(expectedProposalCount) || expectedProposalCount < 1 || !/^[a-f0-9]{64}$/.test(expectedProposalHash)) {
+    throw new Error("A valid verified-backfill preview count and hash are required.");
+  }
+  return executeVerifiedQboFirstPaymentBackfill(expectedProposalCount, expectedProposalHash);
 }
 
 function isRedirectLikeError(error: unknown) {

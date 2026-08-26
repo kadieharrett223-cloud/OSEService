@@ -221,6 +221,23 @@ The audit refuses to refresh an expired QBO token. This preserves its read-only 
 write QuickBooks connection state, ERP timestamps, queue positions, demand, fulfillment, inventory,
 allocations, shipments, mappings, or resolutions. An approved backfill is a separate operation.
 
+### Verified First-Payment Backfill Preview
+
+`/settings/qbo-first-payment-backfill` is an admin-unlocked, protected, read-only preview for a
+future timestamp-only correction. It proposes one `shipping_orders` parent only when it has active
+canonical demand, a Paid or Partially Paid QBO invoice, a NULL `first_payment_at`, and exactly one
+linked QBO Payment. `UNVERIFIED`, `MULTIPLE_PAYMENTS`, inactive/terminal, populated, and ambiguous
+records are excluded. Each row shows its QBO payment date, affected SKU position changes, and a
+deterministic SHA-256 proposal hash.
+
+The execution action has no UI entry point and is disabled unless
+`ENABLE_VERIFIED_QBO_FIRST_PAYMENT_BACKFILL=true` is explicitly configured. If enabled in a future,
+separately approved release, it reruns the preview, requires the exact count and hash, and updates
+only parents still having a NULL `first_payment_at`. The accompanying migration executes the batch
+atomically, so any missing or newly populated parent aborts and rolls back all timestamp changes. It
+does not recalculate stored queue positions or modify inventory, fulfillment, shipment, allocation,
+mapping, resolution, or QBO intake data.
+
 ### Reviewed terminal resolutions
 
 `reviewed_obligation_resolutions` is an append-only reviewed lifecycle ledger for source evidence

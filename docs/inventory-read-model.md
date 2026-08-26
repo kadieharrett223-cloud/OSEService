@@ -207,6 +207,20 @@ The regression case is QBO invoice `127086`, line
 showing zero mismatches between the Inventory and Order Detail calculated positions, with no writes
 to orders, demand, fulfillment, allocations, inventory transactions, or queue metadata.
 
+### Missing First-Payment Audit
+
+`/settings/qbo-first-payment-audit` is an admin-unlocked, protected, read-only audit for active
+canonical Paid and Partially Paid Customer List rows whose ERP parent has no `first_payment_at`.
+It calls the established QuickBooks integration and derives the earliest linked QBO `Payment.TxnDate`;
+it never substitutes invoice dates or ERP creation timestamps. It reports the current and projected
+per-product canonical position, payment-transaction count, and `VERIFIED`, `MULTIPLE_PAYMENTS`, or
+`UNVERIFIED` evidence status. The JSON export is protected by the same employee session and admin
+unlock.
+
+The audit refuses to refresh an expired QBO token. This preserves its read-only contract: it cannot
+write QuickBooks connection state, ERP timestamps, queue positions, demand, fulfillment, inventory,
+allocations, shipments, mappings, or resolutions. An approved backfill is a separate operation.
+
 ### Reviewed terminal resolutions
 
 `reviewed_obligation_resolutions` is an append-only reviewed lifecycle ledger for source evidence

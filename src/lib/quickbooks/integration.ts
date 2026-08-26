@@ -855,6 +855,76 @@ async function loadQuickbooksFirstPaymentDates(
   return paymentsByInvoiceId;
 }
 
+export type QuickbooksFirstPaymentEvidence = {
+  firstPaymentAt: string;
+  paymentTransactionCount: number;
+};
+
+async function loadQuickbooksFirstPaymentEvidence(
+  connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
+  accessToken: string,
+) {
+  const paymentsByInvoiceId = new Map<string, { firstPaymentAt: string; paymentIds: Set<string> }>();
+  const pageSize = 200;
+  for (let page = 0; page < 50; page += 1) {
+    const payload = await fetchQuickbooksQuery({
+      apiBase: getQuickbooksApiBase(connection.environment),
+      realmId: connection.realm_id,
+      accessToken,
+      query: `select * from Payment startposition ${page * pageSize + 1} maxresults ${pageSize}`,
+    });
+    const batch = ((payload.QueryResponse as Record<string, unknown> | undefined)?.Payment ?? []) as Array<Record<string, unknown>>;
+    if (batch.length === 0) break;
+
+    for (const payment of batch) {
+      const paymentDate = typeof payment.TxnDate === "string" ? payment.TxnDate : null;
+      const paymentId = typeof payment.Id === "string" ? payment.Id : null;
+      if (!paymentDate || !paymentId) continue;
+      const lines = Array.isArray(payment.Line) ? payment.Line : [];
+      for (const rawLine of lines) {
+        if (!rawLine || typeof rawLine !== "object") continue;
+        const linked = (rawLine as { LinkedTxn?: unknown[] }).LinkedTxn;
+        if (!Array.isArray(linked)) continue;
+        for (const rawTxn of linked) {
+          if (!rawTxn || typeof rawTxn !== "object") continue;
+          const txn = rawTxn as { TxnId?: unknown; TxnType?: unknown };
+          if (txn.TxnType !== "Invoice" || typeof txn.TxnId !== "string") continue;
+          const existing = paymentsByInvoiceId.get(txn.TxnId);
+          if (!existing) {
+            paymentsByInvoiceId.set(txn.TxnId, { firstPaymentAt: paymentDate, paymentIds: new Set([paymentId]) });
+            continue;
+          }
+          if (Date.parse(paymentDate) < Date.parse(existing.firstPaymentAt)) existing.firstPaymentAt = paymentDate;
+          existing.paymentIds.add(paymentId);
+        }
+      }
+    }
+
+    if (batch.length < pageSize) break;
+  }
+
+  return new Map<string, QuickbooksFirstPaymentEvidence>(
+    [...paymentsByInvoiceId.entries()].map(([invoiceId, evidence]) => [invoiceId, {
+      firstPaymentAt: evidence.firstPaymentAt,
+      paymentTransactionCount: evidence.paymentIds.size,
+    }]),
+  );
+}
+
+/**
+ * Reads QBO Payment evidence without refreshing an expired token or mutating connection state.
+ * Intended for protected audits where the read-only contract is more important than retrying.
+ */
+export async function getQuickbooksFirstPaymentEvidenceReadOnly() {
+  const connection = await loadConnectionForSync();
+  const expiresAt = Date.parse(String(connection.access_token_expires_at ?? ""));
+  if (!Number.isFinite(expiresAt) || expiresAt - Date.now() < 60_000) {
+    throw new Error("QuickBooks access token is expired. This read-only audit will not refresh it; run an approved connection refresh before retrying.");
+  }
+  const accessToken = decryptToken(connection.encrypted_access_token ?? "");
+  return loadQuickbooksFirstPaymentEvidence(connection, accessToken);
+}
+
 export async function getQuickbooksFirstPaymentDates() {
   const connection = await loadConnectionForSync();
   const accessToken = await ensureAccessToken(connection);

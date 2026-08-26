@@ -202,6 +202,9 @@ export default async function SettingsPage({
               Sync Invoices
             </button>
           </form>
+          <a href="/settings/qbo-first-payment-audit" className="btn-secondary">
+            Audit First Payments
+          </a>
           <form action={disconnectQuickbooksAction}>
             <button type="submit" className="btn-danger" disabled={!isConnected || quickbooksTableMissing}>
               Disconnect

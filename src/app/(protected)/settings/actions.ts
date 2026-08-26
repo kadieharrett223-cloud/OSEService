@@ -332,10 +332,8 @@ export async function importQualifiedQboBacklogAction() {
             order_number: invoice.invoice_number,
             source_type: "QBO_INVOICE",
             review_status: "APPROVED",
-            priority: "NORMAL",
             legacy_customer_name: customerName(invoice),
             first_payment_at: firstPaymentAt,
-            notes: "Imported from qualifying QuickBooks payment activity.",
           } as never).select("id").single();
           if (error || !data) throw new Error(error?.message ?? `Could not create order for invoice ${invoice.invoice_number ?? invoice.id}`);
           order = { id: data.id, source_invoice_id: invoice.id, duplicate_of_order_id: null, order_number: invoice.invoice_number, customer_id: invoice.customer_id, legacy_customer_name: customerName(invoice) };

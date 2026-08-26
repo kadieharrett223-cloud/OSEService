@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { findActiveDuplicateParentConflicts } from "@/lib/orders/duplicate-parent-health";
+import { ERP_HEALTH_CACHE_TAG } from "@/lib/orders/erp-health-cache";
 import { evaluateOrderHealth, type HealthLine, type OrderHealthIssue } from "@/lib/orders/order-health";
 import { ExceptionAction } from "./exception-action";
 
@@ -23,8 +25,7 @@ function severityClass(severity: string) {
   return "bg-[#eef2f7] text-[#475569]";
 }
 
-export default async function ExceptionsPage({ searchParams }: { searchParams: Promise<{ severity?: string; type?: string; warehouse?: string; customer?: string; product?: string; view?: string; recheck?: string }> }) {
-  await requireUser();
+const getCachedErpHealthFindings = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
   const baseSelect = "id,order_number,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,queue_position_start,queue_position_count,products(sku,canonical_name),inventory_allocations(quantity,source_type))";
   let result = await supabase.from("shipping_orders").select(`cancellation_status,${baseSelect}`).order("created_at", { ascending: false }).limit(500);
@@ -88,6 +89,12 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
       },
     });
   }
+  return findings;
+}, ["erp-health-findings"], { revalidate: 30, tags: [ERP_HEALTH_CACHE_TAG] });
+
+export default async function ExceptionsPage({ searchParams }: { searchParams: Promise<{ severity?: string; type?: string; warehouse?: string; customer?: string; product?: string; view?: string; recheck?: string }> }) {
+  await requireUser();
+  const findings = await getCachedErpHealthFindings();
   const params = await searchParams;
   const severity = String(params.severity ?? "").toUpperCase();
   const issueType = String(params.type ?? "");

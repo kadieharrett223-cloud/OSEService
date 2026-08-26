@@ -1076,16 +1076,16 @@ export default async function InventoryPage({
               <col className="w-[128px]" />
               <col className="w-[156px]" />
             </colgroup>
-            <thead>
-              <tr className="border-b border-[#eceff3] text-xs uppercase tracking-[0.08em] text-[#64748b]">
-                <th className="px-2 py-2.5">Item</th>
-                <th className="px-2 py-2.5">On Floor</th>
-                <th className="px-2 py-2.5">Sold</th>
-                <th className="px-2 py-2.5">Available Now</th>
-                <th className="px-2 py-2.5">Incoming</th>
-                <th className="px-2 py-2.5">Available/Incoming</th>
-                <th className="px-2 py-2.5">Next Arrival</th>
-                <th className="px-2 py-2.5">Customer List</th>
+            <thead className="sticky top-0 z-20 bg-white shadow-[0_1px_0_0_#dbe3ee]">
+              <tr className="border-b border-[#eceff3] bg-white text-xs uppercase tracking-[0.08em] text-[#64748b]">
+                <th className="bg-white px-2 py-2.5">Item</th>
+                <th className="bg-white px-2 py-2.5">On Floor</th>
+                <th className="bg-white px-2 py-2.5">Sold</th>
+                <th className="bg-white px-2 py-2.5">Available Now</th>
+                <th className="bg-white px-2 py-2.5">Incoming</th>
+                <th className="bg-white px-2 py-2.5">Available/Incoming</th>
+                <th className="bg-white px-2 py-2.5">Next Arrival</th>
+                <th className="bg-white px-2 py-2.5">Customer List</th>
               </tr>
             </thead>
             <tbody>

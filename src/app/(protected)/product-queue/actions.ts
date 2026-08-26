@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
+import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { recalculateProductQueues } from "@/lib/product-queue";
 
 type QueueLineRow = {
@@ -49,6 +51,8 @@ export async function fulfillQueueLineAction(formData: FormData) {
   });
 
   if (typedLine.product_id) await recalculateProductQueues([typedLine.product_id]);
+  revalidateCanonicalCustomerQueue();
+  revalidateErpHealth();
 
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");

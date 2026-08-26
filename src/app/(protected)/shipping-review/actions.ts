@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
+import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { recalculateProductQueues } from "@/lib/product-queue";
 
 async function ensureProductForLine(supabase: Awaited<ReturnType<typeof createClient>>, line: { qbo_sku: string | null; source_description: string | null; product_id: string | null }) {
@@ -129,6 +131,8 @@ export async function approveReviewLineAction(formData: FormData) {
   }).eq("id", line.id);
 
   await recalculateProductQueues([productId]);
+  revalidateCanonicalCustomerQueue();
+  revalidateErpHealth();
 
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");
@@ -156,6 +160,8 @@ export async function holdReviewLineAction(formData: FormData) {
   }).eq("id", lineId);
 
   if (line?.product_id) await recalculateProductQueues([line.product_id]);
+  revalidateCanonicalCustomerQueue();
+  revalidateErpHealth();
 
   revalidatePath("/shipping-review");
   revalidatePath("/order-queue");

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { clearAdminUnlock, isAdminUnlockedForUser, isValidAdminCode, unlockAdminForUser } from "@/lib/admin-access";
 import { requireUser } from "@/lib/auth";
+import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -19,6 +20,11 @@ async function requireInventoryAdmin() {
     redirect("/inventory?mapError=Admin+mode+is+required+for+this+change");
   }
   return user;
+}
+
+function revalidateInventoryReadModel() {
+  revalidateCanonicalCustomerQueue();
+  revalidatePath("/inventory");
 }
 
 export async function createProductAliasAction(formData: FormData) {
@@ -61,7 +67,7 @@ export async function createProductAliasAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(upsertError.message)}`);
   }
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Mapped ${aliasSku} to ${product.sku}.`)}`);
 }
 
@@ -134,7 +140,7 @@ export async function createProductAction(formData: FormData) {
     }
   }
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Created ${sku}.`)}`);
 }
 
@@ -171,7 +177,7 @@ export async function updateProductDisplayOrderAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(error.message)}`);
   }
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved to ${group || "Other / Unsorted"}.`)}`);
 }
 
@@ -184,14 +190,14 @@ export async function unlockInventoryAdminAction(formData: FormData) {
   }
 
   await unlockAdminForUser(user.id);
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect("/inventory?mapMessage=Admin+mode+enabled");
 }
 
 export async function lockInventoryAdminAction() {
   await requireUser();
   await clearAdminUnlock();
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect("/inventory?mapMessage=Admin+mode+turned+off");
 }
 
@@ -214,7 +220,7 @@ export async function updateProductTitleAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(error.message)}`);
   }
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Renamed to ${title}.`)}`);
 }
 
@@ -273,7 +279,7 @@ export async function adjustProductStockAction(formData: FormData) {
     redirect(`/inventory?mapError=${encodeURIComponent(insertError.message)}`);
   }
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   redirect(`/inventory?mapMessage=${encodeURIComponent(`On floor set to ${target} (${delta > 0 ? "+" : ""}${delta}).`)}`);
 }
 
@@ -349,7 +355,7 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
 
   await recalculateProductQueues([line.product_id]);
 
-  revalidatePath("/inventory");
+  revalidateInventoryReadModel();
   revalidateOrdersProjection();
   revalidatePath("/orders");
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Moved ${direction === "up" ? "up" : "down"} one position.`)}`);

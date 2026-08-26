@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { isNonInventoryQuickbooksLine, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -88,10 +89,12 @@ export default async function ImportAssignOrdersPage() {
 
   let recoveryError: string | null = null;
   let firstPaymentByQboInvoiceId = new Map<string, string>();
+  let preflightByInvoiceId = new Map<string, Awaited<ReturnType<typeof previewQboForwardIntake>>[number]>();
   try {
     firstPaymentByQboInvoiceId = await getQuickbooksFirstPaymentDates();
+    preflightByInvoiceId = new Map((await previewQboForwardIntake(firstPaymentByQboInvoiceId)).map((row) => [row.qboInvoiceId, row]));
   } catch (error) {
-    recoveryError = error instanceof Error ? error.message : "Unable to query QuickBooks payment history.";
+    recoveryError = error instanceof Error ? error.message : "Unable to evaluate QuickBooks forward intake.";
   }
 
   const [invoices, invoiceLines, parentOrders, productResult, aliasResult] = await Promise.all([
@@ -164,6 +167,9 @@ export default async function ImportAssignOrdersPage() {
   const fullyMapped = rows.filter((row) => row.mappingStatus === "All mapped").length;
   const partiallyMapped = rows.filter((row) => row.mappingStatus === "Partially mapped").length;
   const unmapped = rows.filter((row) => row.mappingStatus === "Assignment required").length;
+  const autoImport = rows.filter((row) => preflightByInvoiceId.get(row.invoice.id)?.decision === "AUTO_IMPORT").length;
+  const noInventoryDemand = rows.filter((row) => preflightByInvoiceId.get(row.invoice.id)?.decision === "NO_INVENTORY_DEMAND").length;
+  const mappingReview = rows.filter((row) => preflightByInvoiceId.get(row.invoice.id)?.decision === "MAPPING_REVIEW").length;
 
   return (
     <div className="space-y-6">
@@ -172,7 +178,7 @@ export default async function ImportAssignOrdersPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
             <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Import / Assign New Orders</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[#5a5a5a]">Read-only recovery review for QuickBooks invoices first paid on or after August 7, 2026. No order, demand, queue, inventory, or fulfillment data is changed here.</p>
+            <p className="mt-2 max-w-3xl text-sm text-[#5a5a5a]">Read-only forward-intake preflight for QuickBooks invoices first paid on or after August 7, 2026. No order, demand, queue, inventory, fulfillment, or allocation data is changed here.</p>
           </div>
           <Link href="/orders" className="btn-secondary inline-flex">Back to Orders</Link>
         </div>
@@ -184,7 +190,7 @@ export default async function ImportAssignOrdersPage() {
         </div>
       ) : (
         <div className="rounded-lg border border-[#b7e4c7] bg-[#ecfdf3] p-4 text-sm text-[#166534]">
-          Payment history checked. This table shows only the <strong>{rows.length}</strong> eligible invoice{rows.length === 1 ? "" : "s"} missing from the ERP.
+          Payment history checked. This table shows the exact forward-intake decision for <strong>{rows.length}</strong> eligible invoice{rows.length === 1 ? "" : "s"} missing from the ERP.
         </div>
       )}
 
@@ -192,10 +198,10 @@ export default async function ImportAssignOrdersPage() {
         {[
           ["Eligible since Aug 7", eligibleRows.length, "bg-[#eff6ff] text-[#1d4ed8]"],
           ["Already represented", eligibleRows.length - rows.length, "bg-[#f1f5f9] text-[#475569]"],
-          ["Missing from ERP", rows.length, "bg-[#fff7ed] text-[#c2410c]"],
-          ["Fully mapped", fullyMapped, "bg-[#ecfdf5] text-[#15803d]"],
-          ["Partially mapped", partiallyMapped, "bg-[#fff7ed] text-[#c2410c]"],
-          ["Assignment required", unmapped, "bg-[#fff4f5] text-[#8f030d]"],
+          ["Will auto-import", autoImport, "bg-[#ecfdf5] text-[#15803d]"],
+          ["No inventory demand", noInventoryDemand, "bg-[#f1f5f9] text-[#475569]"],
+          ["Mapping review", mappingReview, "bg-[#fff4f5] text-[#8f030d]"],
+          ["Other review", rows.length - autoImport - noInventoryDemand - mappingReview, "bg-[#fff7ed] text-[#c2410c]"],
           ["Excluded / voided", voidedExcluded, "bg-[#f8fafc] text-[#475569]"],
         ].map(([label, value, color]) => (
           <div key={String(label)} className="rounded-lg border border-[#e5e7eb] bg-white p-3 shadow-sm">
@@ -213,7 +219,7 @@ export default async function ImportAssignOrdersPage() {
               <th className="px-4 py-3">Payment</th>
               <th className="px-4 py-3">First Payment</th>
               <th className="px-4 py-3">Physical Products / Qty</th>
-              <th className="px-4 py-3">Product Assignment</th>
+              <th className="px-4 py-3">Forward Decision</th>
               <th className="px-4 py-3">Existing ERP Order?</th>
               <th className="px-4 py-3">Would Import</th>
             </tr>
@@ -221,6 +227,11 @@ export default async function ImportAssignOrdersPage() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.invoice.id} className="border-t border-[#eef2f7] align-top">
+                {(() => {
+                  const decision = preflightByInvoiceId.get(row.invoice.id)?.decision ?? "MAPPING_REVIEW";
+                  const decisionLabel = decision === "AUTO_IMPORT" ? "Will auto-import" : decision === "NO_INVENTORY_DEMAND" ? "No inventory demand" : decision === "MAPPING_REVIEW" ? "Mapping review" : decision === "MANUAL_DUPLICATE_REVIEW" ? "Manual duplicate review" : decision === "ALREADY_REPRESENTED" ? "Already represented" : "Closed";
+                  const decisionClass = decision === "AUTO_IMPORT" ? "bg-[#ecfdf5] text-[#15803d]" : decision === "NO_INVENTORY_DEMAND" ? "bg-[#f1f5f9] text-[#475569]" : "bg-[#fff7ed] text-[#c2410c]";
+                  return <>
                 <td className="px-4 py-4">
                   <p className="font-semibold text-[#111827]">#{row.invoice.invoice_number ?? "—"}</p>
                   <p className="mt-1 text-xs text-[#64748b]">{customerNameById.get(row.invoice.customer_id ?? "") ?? "Customer pending"} · Invoice {formatDate(row.invoice.invoice_date)}</p>
@@ -230,9 +241,11 @@ export default async function ImportAssignOrdersPage() {
                 <td className="px-4 py-4 text-[#334155]">
                   {row.physicalItems.length > 0 ? row.physicalItems.map((item) => <div key={`${item.sku}-${item.quantity}`}>{item.quantity} × {item.sku}</div>) : "No physical items"}
                 </td>
-                <td className="px-4 py-4"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${row.mappingStatus === "All mapped" ? "bg-[#ecfdf5] text-[#15803d]" : "bg-[#fff7ed] text-[#c2410c]"}`}>{row.mappingStatus}</span></td>
+                <td className="px-4 py-4"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${decisionClass}`}>{decisionLabel}</span></td>
                 <td className="px-4 py-4 font-semibold text-[#475569]">No</td>
-                <td className="px-4 py-4 font-semibold text-[#b45309]">Yes, after approval</td>
+                <td className="px-4 py-4 font-semibold text-[#475569]">Read-only preflight</td>
+                  </>;
+                })()}
               </tr>
             ))}
             {!recoveryError && rows.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-[#64748b]">No missing paid or partially paid QuickBooks invoices first paid on or after August 7, 2026 were found.</td></tr> : null}

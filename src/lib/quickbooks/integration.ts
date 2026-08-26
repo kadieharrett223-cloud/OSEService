@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/types";
+import { runEnabledQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
 
 type QboEnvironment = "sandbox" | "production";
 
@@ -866,7 +867,7 @@ async function syncQuickbooksFirstPaymentDates(
 ) {
   const supabase = getSupabaseAdmin();
   const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
-  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true };
+  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true, firstPaymentByQboInvoiceId: new Map<string, string>() };
 
   const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
 
@@ -882,7 +883,7 @@ async function syncQuickbooksFirstPaymentDates(
     .eq("source_invoice_id", row.invoiceId)));
   const failed = results.find((result) => result.error)?.error;
   if (failed) throw new Error(failed.message);
-  return { paymentsProcessed: paymentsByInvoiceId.size, ordersUpdated: updates.length, skipped: false };
+  return { paymentsProcessed: paymentsByInvoiceId.size, ordersUpdated: updates.length, skipped: false, firstPaymentByQboInvoiceId: paymentsByInvoiceId };
 }
 
 export async function syncQuickbooksInvoices() {
@@ -893,6 +894,7 @@ export async function syncQuickbooksInvoices() {
     const accessToken = await ensureAccessToken(connection);
     const result = await syncQuickbooksSnapshots(connection, accessToken);
     const paymentResult = await syncQuickbooksFirstPaymentDates(connection, accessToken);
+    const forwardIntakeResult = await runEnabledQboForwardIntake(paymentResult.firstPaymentByQboInvoiceId);
 
     const syncCursorAt = new Date().toISOString();
       const { error } = await supabase
@@ -909,7 +911,14 @@ export async function syncQuickbooksInvoices() {
       throw new Error(error.message);
     }
 
-    return { ...result, ...paymentResult };
+    return {
+      ...result,
+      paymentsProcessed: paymentResult.paymentsProcessed,
+      ordersUpdated: paymentResult.ordersUpdated,
+      paymentSyncSkipped: paymentResult.skipped,
+      forwardIntakeEnabled: forwardIntakeResult.enabled,
+      forwardIntakeImportedLines: forwardIntakeResult.importedLines,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";
 

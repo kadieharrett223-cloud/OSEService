@@ -141,6 +141,22 @@ bounded batches so the full dataset can be reviewed without Supabase request-siz
 failures. The review never creates or updates orders, lines, queues, customer demand, inventory,
 allocations, fulfillments, or shipments, and the link has no import or assignment write action.
 
+## Forward QBO Intake
+
+`src/lib/orders/qbo-forward-intake.ts` is the shared decision rule for normal QBO intake.
+The read-only `/orders/import-assign` preflight and the post-sync integration use the same exact-QBO-line
+identity, payment, mapping, lifecycle-resolution, and manual-duplicate evidence. Eligible physical lines
+resolve as `AUTO_IMPORT` only when they are paid or partially paid, mapped, conflict-free, and not already
+represented. Service, note, shipping, and accounting-only lines resolve as `NO_INVENTORY_DEMAND`; unmapped
+physical lines go to Product Mappings; manual-duplicate evidence goes to the duplicate-review queue.
+
+The sync integration is protected by `qbo_forward_intake_state`, introduced in
+`supabase/migrations/202608260002_qbo_forward_intake_state.sql`. It defaults to disabled, so deploying the
+code or syncing QBO cannot import demand until an explicit operational enablement decision. When enabled,
+the executor creates only approved order demand and preserves `first_payment_at`; it recalculates affected
+Customer List positions but never creates an allocation, fulfillment, shipment, or inventory transaction.
+In particular, it never changes `ON_FLOOR`.
+
 ## Historical OLD_ERP Order Status Archive
 
 Historical InvoiceQueueItems outcomes are imported separately from live shipping demand with:

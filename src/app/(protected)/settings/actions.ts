@@ -123,11 +123,29 @@ export async function syncQuickbooksAction() {
     revalidateOrdersProjection();
     revalidatePath("/orders");
     revalidatePath("/orders/[id]", "page");
-    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.`)}`);
+    const forwardIntakeMessage = result.forwardIntakeEnabled
+      ? ` ${result.forwardIntakeImportedLines ?? 0} clean demand line(s) automatically imported.`
+      : " Continuous forward intake is disabled.";
+    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.${forwardIntakeMessage}`)}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";
     redirect(`/settings?error=${encodeURIComponent(message)}`);
   }
+}
+
+export async function setQboForwardIntakeEnabledAction(formData: FormData) {
+  await requireSettingsAdmin();
+  const isEnabled = String(formData.get("is_enabled") ?? "false") === "true";
+  const supabase = getSupabaseAdmin();
+  const { error } = await (supabase.from("qbo_forward_intake_state") as any)
+    .upsert({ id: true, is_enabled: isEnabled, activated_at: isEnabled ? new Date().toISOString() : null }, { onConflict: "id" });
+
+  if (error) {
+    redirect(`/settings?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath("/settings");
+  redirect(`/settings?message=${encodeURIComponent(`Continuous QBO forward intake ${isEnabled ? "enabled" : "disabled"}.`)}`);
 }
 
 const QBO_BACKLOG_CUTOFF = Date.parse("2026-08-07T00:00:00.000Z");

@@ -152,10 +152,16 @@ physical lines go to Product Mappings; manual-duplicate evidence goes to the dup
 
 The sync integration is protected by `qbo_forward_intake_state`, introduced in
 `supabase/migrations/202608260002_qbo_forward_intake_state.sql`. It defaults to disabled, so deploying the
-code or syncing QBO cannot import demand until an explicit operational enablement decision. When enabled,
-the executor creates only approved order demand and preserves `first_payment_at`; it recalculates affected
+code or syncing QBO cannot import demand until an explicit operational enablement decision. Once enabled,
+each sync continuously imports every current `AUTO_IMPORT` candidate; the legacy invoice allowlist is no
+longer an execution gate. The Settings switch is protected by the existing admin-unlock requirement and is
+the rollback control: disable it before the next QBO sync to stop new intake.
+
+The executor creates only approved order demand and preserves `first_payment_at`; it recalculates affected
 Customer List positions but never creates an allocation, fulfillment, shipment, or inventory transaction.
-In particular, it never changes `ON_FLOOR`.
+In particular, it never changes `ON_FLOOR`. Exact QBO invoice and line identities make repeated syncs
+idempotent. Mapping and manual-duplicate candidates are recorded in their existing review queues rather
+than being imported.
 
 ## Historical OLD_ERP Order Status Archive
 

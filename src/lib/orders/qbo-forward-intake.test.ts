@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { selectAutomaticForwardIntakeCandidates } from "./qbo-forward-intake-service";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
 
 const cleanMappedPhysicalLine = {
@@ -34,5 +35,15 @@ describe("QBO forward intake classifier", () => {
 
   it("keeps terminal or reviewed obligations closed", () => {
     expect(classifyQboForwardIntakeLine({ ...cleanMappedPhysicalLine, hasTerminalOrReviewedResolution: true })).toBe("CLOSED");
+  });
+
+  it("selects every clean candidate for continuous intake without an invoice allowlist", () => {
+    const candidates = selectAutomaticForwardIntakeCandidates([
+      { qboInvoiceId: "clean", invoiceNumber: "127052", customerName: "ERP TEST - Kadie", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "AUTO_IMPORT", lines: [] },
+      { qboInvoiceId: "mapping", invoiceNumber: "127083", customerName: "Chris Meehan", firstPaymentAt: "2026-08-24T00:00:00.000Z", invoiceDate: "2026-08-24", decision: "MAPPING_REVIEW", lines: [] },
+      { qboInvoiceId: "service", invoiceNumber: "127014", customerName: "James Guthrie", firstPaymentAt: "2026-08-10T00:00:00.000Z", invoiceDate: "2026-08-10", decision: "NO_INVENTORY_DEMAND", lines: [] },
+    ]);
+
+    expect(candidates.map((candidate) => candidate.invoiceNumber)).toEqual(["127052"]);
   });
 });

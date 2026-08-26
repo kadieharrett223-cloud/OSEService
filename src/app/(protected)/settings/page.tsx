@@ -5,9 +5,9 @@ import {
   connectQuickbooksAction,
   createAccessUserAction,
   disconnectQuickbooksAction,
-  importQualifiedQboBacklogAction,
   lockSettingsAdminAction,
   setAccessUserActiveAction,
+  setQboForwardIntakeEnabledAction,
   syncQuickbooksAction,
   unlockSettingsAdminAction,
 } from "@/app/(protected)/settings/actions";
@@ -24,6 +24,8 @@ type QboBacklogReview = {
   quantity: number;
   first_payment_at: string;
 };
+
+type QboForwardIntakeState = { is_enabled: boolean; activated_at: string | null };
 
 export default async function SettingsPage({
   searchParams,
@@ -80,6 +82,7 @@ export default async function SettingsPage({
     quickbooksStatus,
     { count: quickbooksSnapshotCount },
     { data: qboBacklogReviews },
+    { data: qboForwardIntakeState },
   ] = await Promise.all([
     supabase
       .from("access_users")
@@ -99,6 +102,10 @@ export default async function SettingsPage({
       .select("invoice_number, customer_name, qbo_sku, source_description, quantity, first_payment_at")
       .eq("status", "OPEN")
       .order("first_payment_at", { ascending: true }),
+    (supabase.from("qbo_forward_intake_state") as any)
+      .select("is_enabled,activated_at")
+      .eq("id", true)
+      .maybeSingle(),
   ]);
 
   const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
@@ -106,6 +113,7 @@ export default async function SettingsPage({
   const hasSnapshots = (quickbooksSnapshotCount ?? 0) > 0;
   const isConnected = quickbooksTableMissing ? hasSnapshots : Boolean(connectedRow);
   const openQboBacklogReviews = (qboBacklogReviews ?? []) as unknown as QboBacklogReview[];
+  const qboForwardIntakeEnabled = Boolean((qboForwardIntakeState as QboForwardIntakeState | null)?.is_enabled);
 
   return (
     <div className="space-y-5">
@@ -213,9 +221,15 @@ export default async function SettingsPage({
               Disconnect
             </button>
           </form>
-          <form action={importQualifiedQboBacklogAction}>
-            <button type="submit" className="btn-primary" disabled={!isConnected || quickbooksTableMissing}>
-              Import Qualifying Backlog
+        </div>
+
+        <div className={`mt-4 rounded-lg border p-4 text-sm ${qboForwardIntakeEnabled ? "border-[#b7e4c7] bg-[#ecfdf3] text-[#166534]" : "border-[#f1d3a4] bg-[#fff8ec] text-[#915b12]"}`}>
+          <p className="font-semibold">Continuous QBO forward intake: {qboForwardIntakeEnabled ? "Enabled" : "Disabled"}</p>
+          <p className="mt-1">When enabled, each QuickBooks sync imports only clean paid or partially paid mapped physical demand. Mapping and conflict exceptions remain in review; inventory, allocation, fulfillment, and shipment records are never created.</p>
+          <form action={setQboForwardIntakeEnabledAction} className="mt-3">
+            <input type="hidden" name="is_enabled" value={qboForwardIntakeEnabled ? "false" : "true"} />
+            <button type="submit" className={qboForwardIntakeEnabled ? "btn-danger" : "btn-primary"} disabled={!isConnected || quickbooksTableMissing}>
+              {qboForwardIntakeEnabled ? "Disable Continuous Intake" : "Enable Continuous Intake"}
             </button>
           </form>
         </div>

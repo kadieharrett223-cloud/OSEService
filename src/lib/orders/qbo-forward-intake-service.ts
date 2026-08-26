@@ -37,6 +37,10 @@ function invoiceDecision(decisions: QboForwardIntakeDecision[]) {
   return "AUTO_IMPORT" as const;
 }
 
+export function selectAutomaticForwardIntakeCandidates(preview: QboForwardIntakePreviewInvoice[]) {
+  return preview.filter((invoice) => invoice.decision === "AUTO_IMPORT");
+}
+
 /** Read-only candidate analysis. It never writes demand, queues, fulfillments, allocations, or inventory. */
 export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<string, string>) {
   const supabase = getSupabaseAdmin();
@@ -77,13 +81,12 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
   }).sort((left, right) => left.firstPaymentAt.localeCompare(right.firstPaymentAt) || String(left.invoiceNumber).localeCompare(String(right.invoiceNumber)));
 }
 
-/** Writes demand only for preflight-approved QBO lines. It never creates fulfillment, allocation, or inventory records. */
-export async function executeQboForwardIntake(firstPaymentByQboInvoiceId: Map<string, string>, allowedInvoiceNumbers: Set<string>) {
+/** Writes demand only for globally enabled, clean QBO candidates. It never creates fulfillment, allocation, or inventory records. */
+export async function executeQboForwardIntake(firstPaymentByQboInvoiceId: Map<string, string>) {
   const supabase = getSupabaseAdmin();
   const preview = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
-  const authorizedPreview = preview.filter((invoice) => allowedInvoiceNumbers.has(String(invoice.invoiceNumber ?? "")));
-  const candidates = authorizedPreview.filter((invoice) => invoice.decision === "AUTO_IMPORT");
-  const reviewCandidates = authorizedPreview.filter((invoice) => invoice.decision === "MAPPING_REVIEW" || invoice.decision === "MANUAL_DUPLICATE_REVIEW");
+  const candidates = selectAutomaticForwardIntakeCandidates(preview);
+  const reviewCandidates = preview.filter((invoice) => invoice.decision === "MAPPING_REVIEW" || invoice.decision === "MANUAL_DUPLICATE_REVIEW");
   const productIds = new Set<string>();
   let importedLines = 0;
 
@@ -194,9 +197,8 @@ export async function executeQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
 /** Sync integration point. Missing or disabled state is deliberately a no-op for safe deployment. */
 export async function runEnabledQboForwardIntake(firstPaymentByQboInvoiceId: Map<string, string>) {
   const supabase = getSupabaseAdmin();
-  const { data: rawState, error } = await (supabase.from("qbo_forward_intake_state") as any).select("is_enabled,allowed_qbo_invoice_numbers").eq("id", true).maybeSingle();
-  const data = rawState as { is_enabled?: boolean; allowed_qbo_invoice_numbers?: string[] } | null;
-  const allowedInvoiceNumbers = new Set(data?.allowed_qbo_invoice_numbers ?? []);
-  if (error || !data?.is_enabled || allowedInvoiceNumbers.size === 0) return { enabled: false, importedLines: 0, affectedProductIds: [] as string[] };
-  return { enabled: true, ...(await executeQboForwardIntake(firstPaymentByQboInvoiceId, allowedInvoiceNumbers)) };
+  const { data: rawState, error } = await (supabase.from("qbo_forward_intake_state") as any).select("is_enabled").eq("id", true).maybeSingle();
+  const data = rawState as { is_enabled?: boolean } | null;
+  if (error || !data?.is_enabled) return { enabled: false, importedLines: 0, affectedProductIds: [] as string[] };
+  return { enabled: true, ...(await executeQboForwardIntake(firstPaymentByQboInvoiceId)) };
 }

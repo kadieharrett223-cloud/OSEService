@@ -7,8 +7,6 @@ import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderLifecycleTab,
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
-import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
-import { previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
 import { OrdersTabLinks } from "./orders-tab-links";
@@ -244,12 +242,6 @@ const getCachedOrdersDataset = unstable_cache(async () => {
   return { projectedOrders, tabCounts };
 }, ["orders-page-dataset"], { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] });
 
-const getPendingQuickbooksRecoveryCount = unstable_cache(async () => {
-  const firstPaymentByQboInvoiceId = await getQuickbooksFirstPaymentDates();
-  const preflight = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
-  return preflight.filter((invoice) => invoice.decision !== "ALREADY_REPRESENTED").length;
-}, ["post-shutdown-qbo-recovery-count"], { revalidate: 60 });
-
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -257,12 +249,6 @@ export default async function OrdersPage({
 }) {
   await requireUser();
   const params = await searchParams;
-  let pendingQuickbooksRecoveryCount: number | null = null;
-  try {
-    pendingQuickbooksRecoveryCount = await getPendingQuickbooksRecoveryCount();
-  } catch {
-    pendingQuickbooksRecoveryCount = null;
-  }
   const activeTab = params.tab ?? "new";
   const searchText = String(params.q ?? "").trim().toLowerCase();
   const pageSize = 100;
@@ -317,7 +303,7 @@ export default async function OrdersPage({
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/orders/import-assign" className="btn-primary inline-flex">
-              {pendingQuickbooksRecoveryCount == null ? "Review QBO Recovery" : `Import/Assign (${pendingQuickbooksRecoveryCount}) Review`}
+              Import/Assign Review
             </Link>
             <Link href="/orders/new" className="btn-primary inline-flex">Enter QuickBooks Order</Link>
           </div>

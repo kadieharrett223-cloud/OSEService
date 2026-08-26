@@ -511,7 +511,8 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 
   for (let page = 0; page < maxPages; page += 1) {
     const startPosition = page * pageSize + 1;
-    const qboQuery = `select * from Customer startposition ${startPosition} maxresults ${pageSize}`;
+    const cursorFilter = cursor ? ` where Metadata.LastUpdatedTime > '${cursor}'` : "";
+    const qboQuery = `select * from Customer${cursorFilter} order by Metadata.LastUpdatedTime startposition ${startPosition} maxresults ${pageSize}`;
 
     const payload = await fetchQuickbooksQuery({
       apiBase,
@@ -818,15 +819,17 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 async function loadQuickbooksFirstPaymentDates(
   connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
   accessToken: string,
+  minimumPaymentDate?: string,
 ) {
   const paymentsByInvoiceId = new Map<string, string>();
   const pageSize = 200;
   for (let page = 0; page < 50; page += 1) {
+    const paymentDateFilter = minimumPaymentDate ? ` where TxnDate >= '${minimumPaymentDate}'` : "";
     const payload = await fetchQuickbooksQuery({
       apiBase: getQuickbooksApiBase(connection.environment),
       realmId: connection.realm_id,
       accessToken,
-      query: `select * from Payment startposition ${page * pageSize + 1} maxresults ${pageSize}`,
+      query: `select * from Payment${paymentDateFilter} order by TxnDate startposition ${page * pageSize + 1} maxresults ${pageSize}`,
     });
     const batch = ((payload.QueryResponse as Record<string, unknown> | undefined)?.Payment ?? []) as Array<Record<string, unknown>>;
     if (batch.length === 0) break;
@@ -939,7 +942,8 @@ async function syncQuickbooksFirstPaymentDates(
   const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
   if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true, firstPaymentByQboInvoiceId: new Map<string, string>() };
 
-  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
+  // Normal forward intake begins at this recovery boundary; historical payment audits use the unbounded reader.
+  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken, "2026-08-07");
 
   const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
   const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));

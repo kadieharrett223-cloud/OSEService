@@ -34,6 +34,12 @@ async function requireSettingsAdmin() {
   return user;
 }
 
+function isRedirectLikeError(error: unknown) {
+  return typeof error === "object" && error !== null && "digest" in error
+    && typeof (error as { digest?: unknown }).digest === "string"
+    && (error as { digest: string }).digest.startsWith("NEXT_REDIRECT");
+}
+
 export async function unlockSettingsAdminAction(formData: FormData) {
   const user = await requireUser();
   const code = String(formData.get("admin_code") ?? "").trim();
@@ -392,6 +398,7 @@ export async function importQualifiedQboBacklogAction() {
     revalidatePath("/settings");
     redirect(`/settings?message=${encodeURIComponent(`QBO backlog run ${runId}: ${imported} imported, ${alreadyPresent} already present, ${closed} closed, ${manualReview} manual reviews, ${unmappedReview} unmapped reviews.`)}`);
   } catch (error) {
+    if (isRedirectLikeError(error)) throw error;
     const message = error instanceof Error ? error.message : "QuickBooks backlog import failed.";
     redirect(`/settings?error=${encodeURIComponent(message)}`);
   }

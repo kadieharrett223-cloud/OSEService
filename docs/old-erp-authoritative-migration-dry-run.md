@@ -163,10 +163,12 @@ In particular, it never changes `ON_FLOOR`. Exact QBO invoice and line identitie
 idempotent. Mapping and manual-duplicate candidates are recorded in their existing review queues rather
 than being imported.
 
-Routine QBO syncs use the stored sync cursor for invoice and customer snapshots and limit forward-intake
-payment reads to the August 7, 2026 recovery boundary. This avoids replaying the historical QBO directory
-and payment ledger during normal operation. The Orders page links to Import/Assign as the explicit review
-surface; it does not call QBO or execute the intake preflight while rendering.
+Routine QBO syncs use the stored sync cursor for invoice snapshots and limit forward-intake payment reads
+to the August 7, 2026 recovery boundary. The full QBO customer directory is loaded only during the initial
+bootstrap; later syncs retain existing ERP customer profiles and create a customer only when a changed
+invoice references a new QBO identity. This avoids replaying the historical QBO directory and payment
+ledger during normal operation. The Orders page links to Import/Assign as the explicit review surface; it
+does not call QBO or execute the intake preflight while rendering.
 
 ## Historical OLD_ERP Order Status Archive
 

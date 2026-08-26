@@ -509,24 +509,23 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 
   const customers: Array<Record<string, unknown>> = [];
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const startPosition = page * pageSize + 1;
-    const cursorFilter = cursor ? ` where Metadata.LastUpdatedTime > '${cursor}'` : "";
-    const qboQuery = `select * from Customer${cursorFilter} order by Metadata.LastUpdatedTime startposition ${startPosition} maxresults ${pageSize}`;
+  if (!cursor) {
+    for (let page = 0; page < maxPages; page += 1) {
+      const startPosition = page * pageSize + 1;
+      const payload = await fetchQuickbooksQuery({
+        apiBase,
+        realmId: connection.realm_id,
+        accessToken,
+        query: `select * from Customer startposition ${startPosition} maxresults ${pageSize}`,
+      });
 
-    const payload = await fetchQuickbooksQuery({
-      apiBase,
-      realmId: connection.realm_id,
-      accessToken,
-      query: qboQuery,
-    });
+      const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
+      const batch = (queryResponse?.Customer as Array<Record<string, unknown>> | undefined) ?? [];
+      customers.push(...batch);
 
-    const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
-    const batch = (queryResponse?.Customer as Array<Record<string, unknown>> | undefined) ?? [];
-    customers.push(...batch);
-
-    if (batch.length < pageSize) {
-      break;
+      if (batch.length < pageSize) {
+        break;
+      }
     }
   }
 
@@ -555,6 +554,23 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
     });
   }
 
+  const knownCustomerIds = new Set<string>();
+  if (cursor) {
+    const invoiceCustomerIds = [...new Set(invoices
+      .map((invoice) => (invoice.CustomerRef as Record<string, unknown> | undefined)?.value)
+      .filter((customerId): customerId is string => typeof customerId === "string" && customerId.length > 0))];
+    for (let index = 0; index < invoiceCustomerIds.length; index += 500) {
+      const { data, error } = await supabase
+        .from("customers")
+        .select("quickbooks_customer_id")
+        .in("quickbooks_customer_id", invoiceCustomerIds.slice(index, index + 500));
+      if (error) throw new Error(error.message);
+      for (const customer of data ?? []) {
+        if (customer.quickbooks_customer_id) knownCustomerIds.add(customer.quickbooks_customer_id);
+      }
+    }
+  }
+
   const invoiceRows = invoices
     .map((invoice) => {
       const invoiceId = String(invoice.Id ?? "").trim();
@@ -564,7 +580,7 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
       const customerId = typeof customerRef?.value === "string" ? customerRef.value : null;
       const customerName = typeof customerRef?.name === "string" ? customerRef.name : null;
 
-      if (customerId) {
+      if (customerId && !knownCustomerIds.has(customerId)) {
         const existing = customerMap.get(customerId);
         customerMap.set(customerId, {
           quickbooks_customer_id: customerId,

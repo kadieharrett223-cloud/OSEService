@@ -209,6 +209,10 @@ and active-void findings remain visible because they can affect current work eve
 state changes. Sibling-parent conflicts require both preserved parents to retain current operational
 demand; a duplicate printed invoice number alone is not an exception.
 
+The recent QBO intake projection is read-only. If its access token is unavailable, ERP Health still
+renders core findings and shows one warning directing staff to QuickBooks settings; it never refreshes
+the connection while rendering the health page.
+
 ## Known gaps
 
 - Containers imported without a port date show `Pending` for ETA, matching the empty source value.

@@ -79,27 +79,42 @@ const getCachedErpHealthFindings = unstable_cache(async () => {
     const currentDemand = hasCurrentOperationalDemand(order);
     for (const issue of issues) if (shouldSurfaceOrderHealthIssue(issue, currentDemand)) findings.push({ order, issue });
   }
-  const firstPaymentEvidence = await getQuickbooksFirstPaymentEvidenceReadOnly();
-  const firstPaymentByQboInvoiceId = new Map([...firstPaymentEvidence.entries()].map(([invoiceId, evidence]) => [invoiceId, evidence.firstPaymentAt]));
-  const forwardIntake = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
-  for (const invoice of selectForwardIntakeReviewCandidates(forwardIntake)) {
-    const issueCode = invoice.decision === "MAPPING_REVIEW" ? "QBO_FORWARD_MAPPING_REVIEW" : "QBO_FORWARD_IDENTITY_REVIEW";
+  try {
+    const firstPaymentEvidence = await getQuickbooksFirstPaymentEvidenceReadOnly();
+    const firstPaymentByQboInvoiceId = new Map([...firstPaymentEvidence.entries()].map(([invoiceId, evidence]) => [invoiceId, evidence.firstPaymentAt]));
+    const forwardIntake = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
+    for (const invoice of selectForwardIntakeReviewCandidates(forwardIntake)) {
+      const issueCode = invoice.decision === "MAPPING_REVIEW" ? "QBO_FORWARD_MAPPING_REVIEW" : "QBO_FORWARD_IDENTITY_REVIEW";
+      findings.push({
+        order: {
+          id: invoice.qboInvoiceId,
+          order_number: invoice.invoiceNumber,
+          customers: { company_name: invoice.customerName, full_name: null },
+          qbo_invoices: { invoice_number: invoice.invoiceNumber },
+          shipping_order_lines: [],
+        },
+        issue: {
+          severity: "WARNING",
+          code: issueCode,
+          product: null,
+          issue: invoice.decision === "MAPPING_REVIEW" ? "Recent QuickBooks order needs product mapping" : "Recent QuickBooks order has an identity conflict",
+          expected: invoice.decision === "MAPPING_REVIEW" ? "Map every physical QuickBooks line" : "Resolve the conflicting QBO invoice or line identity",
+          actual: `${invoice.lines.filter((line) => line.decision === invoice.decision).length} line${invoice.lines.filter((line) => line.decision === invoice.decision).length === 1 ? "" : "s"} require review`,
+          cause: "This is a recent paid or partially paid QuickBooks invoice selected by the shared forward-intake preflight. No ERP demand has been created.",
+        },
+      });
+    }
+  } catch (error) {
     findings.push({
-      order: {
-        id: invoice.qboInvoiceId,
-        order_number: invoice.invoiceNumber,
-        customers: { company_name: invoice.customerName, full_name: null },
-        qbo_invoices: { invoice_number: invoice.invoiceNumber },
-        shipping_order_lines: [],
-      },
+      order: { id: "qbo-intake-evidence", order_number: null, customers: { company_name: "QuickBooks intake", full_name: null }, shipping_order_lines: [] },
       issue: {
         severity: "WARNING",
-        code: issueCode,
+        code: "QBO_FORWARD_INTAKE_UNAVAILABLE",
         product: null,
-        issue: invoice.decision === "MAPPING_REVIEW" ? "Recent QuickBooks order needs product mapping" : "Recent QuickBooks order has an identity conflict",
-        expected: invoice.decision === "MAPPING_REVIEW" ? "Map every physical QuickBooks line" : "Resolve the conflicting QBO invoice or line identity",
-        actual: `${invoice.lines.filter((line) => line.decision === invoice.decision).length} line${invoice.lines.filter((line) => line.decision === invoice.decision).length === 1 ? "" : "s"} require review`,
-        cause: "This is a recent paid or partially paid QuickBooks invoice selected by the shared forward-intake preflight. No ERP demand has been created.",
+        issue: "Recent QuickBooks manual-review check is unavailable",
+        expected: "Read recent paid QuickBooks invoices without changing the connection",
+        actual: error instanceof Error ? error.message : "QuickBooks payment evidence could not be read",
+        cause: "Core ERP Health findings remain available. Reconnect or refresh QuickBooks through the approved connection workflow, then recheck this page.",
       },
     });
   }

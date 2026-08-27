@@ -192,10 +192,13 @@ The seven parallel base reads completed in approximately 423 ms; the full OLD_ER
 read was on the critical path. The package lookup cache removes that source-record read from
 subsequent Inventory renders, reducing the base request fan-out from seven to six queries.
 
-Orders and its Warehouse tab share the existing 60-second Orders projection cache. ERP Health is
-intentionally uncached because it is a live diagnostic view; it currently reads its 500-order health
-graph and the active source-linked parent set. Its data-preservation diagnostics must remain correct
-before any caching or pagination change is considered.
+Orders and its Warehouse tab share the existing 60-second Orders projection cache. ERP Health uses
+a 30-second tagged diagnostic cache. Its base health graph reads the most recent 500 orders, and a
+separate paginated query adds every QBO order in `PENDING_REVIEW` to the Manual review view. Those
+orders remain excluded from Customer List, fulfillment, and inventory demand until a user confirms
+approval. The confirmation refreshes current QuickBooks lines and recalculates affected queue
+positions; voided invoices remain cancellation-only. Its data-preservation diagnostics must remain
+correct before any caching or pagination change is considered.
 
 ## Known gaps
 

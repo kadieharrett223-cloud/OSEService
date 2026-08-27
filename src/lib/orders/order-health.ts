@@ -50,7 +50,6 @@ export type OrderHealthInput = {
   fulfillments?: HealthFulfillmentEvidence[];
   qboLines?: Array<{ qbo_sku?: string | null; ordered_qty?: number | null; product_id?: string | null }>;
   qboRawPayload?: unknown;
-  qboReviewStatus?: string | null;
   qboVoided?: boolean;
   cancelled?: boolean;
 };
@@ -74,10 +73,6 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
 
   if (input.qboVoided && !input.cancelled) {
     issues.push({ severity: "ERROR", code: "VOIDED_ACTIVE", product: null, issue: "QuickBooks invoice is voided but the ERP order is not cancelled", expected: "Cancelled", actual: "Active", cause: "The invoice status changed after import." });
-  }
-
-  if (upper(input.qboReviewStatus) === "PENDING_REVIEW") {
-    issues.push({ severity: "WARNING", code: "QBO_PENDING_REVIEW", product: null, issue: "QuickBooks order awaits manual review", expected: "Approve current demand or cancel a voided/non-operational order", actual: "Pending review", cause: "The order is intentionally excluded from Customer List, fulfillment, and inventory demand until its operational status is confirmed." });
   }
 
   const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: input.qboRawPayload, lines: input.lines });

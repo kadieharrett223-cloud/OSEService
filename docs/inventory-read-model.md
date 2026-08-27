@@ -193,11 +193,13 @@ read was on the critical path. The package lookup cache removes that source-reco
 subsequent Inventory renders, reducing the base request fan-out from seven to six queries.
 
 Orders and its Warehouse tab share the existing 60-second Orders projection cache. ERP Health uses
-a 30-second tagged diagnostic cache. Its base health graph reads the most recent 500 orders, and a
-separate paginated query adds every QBO order in `PENDING_REVIEW` to the Manual review view. Those
-orders remain excluded from Customer List, fulfillment, and inventory demand until a user confirms
-approval. The confirmation refreshes current QuickBooks lines and recalculates affected queue
-positions; voided invoices remain cancellation-only. Its data-preservation diagnostics must remain
+a 30-second tagged diagnostic cache. Its Manual review view consumes the same recent forward-intake
+preflight as Import / Assign: paid or partially paid QBO invoices first paid on or after August 7,
+2026 whose result is `MAPPING_REVIEW` or `MANUAL_DUPLICATE_REVIEW`. Historical
+`PENDING_REVIEW` parents, clean auto-import candidates, already represented invoices, no-inventory
+demand, and closed/voided records stay out of that view. Printed invoice numbers are never used as
+the deciding identity; the classifier uses immutable QBO invoice and line IDs first. ERP Health is
+read-only and sends review work to Import / Assign. Its data-preservation diagnostics must remain
 correct before any caching or pagination change is considered.
 
 ## Known gaps

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectAutomaticForwardIntakeCandidates } from "./qbo-forward-intake-service";
+import { selectAutomaticForwardIntakeCandidates, selectForwardIntakeReviewCandidates } from "./qbo-forward-intake-service";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
 
 const cleanMappedPhysicalLine = {
@@ -45,5 +45,25 @@ describe("QBO forward intake classifier", () => {
     ]);
 
     expect(candidates.map((candidate) => candidate.invoiceNumber)).toEqual(["127052"]);
+  });
+
+  it("does not suppress distinct QuickBooks identities that share a printed invoice number", () => {
+    const candidates = selectAutomaticForwardIntakeCandidates([
+      { qboInvoiceId: "qbo-36504", invoiceNumber: "125968", customerName: "Cary Stewart", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "AUTO_IMPORT", lines: [] },
+      { qboInvoiceId: "qbo-36505", invoiceNumber: "125968", customerName: "Azeem Abbas", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "AUTO_IMPORT", lines: [] },
+    ]);
+
+    expect(candidates.map((candidate) => candidate.qboInvoiceId)).toEqual(["qbo-36504", "qbo-36505"]);
+  });
+
+  it("selects only mapping and identity conflicts for human review", () => {
+    const review = selectForwardIntakeReviewCandidates([
+      { qboInvoiceId: "represented", invoiceNumber: "127001", customerName: "Ada", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "ALREADY_REPRESENTED", lines: [] },
+      { qboInvoiceId: "mapping", invoiceNumber: "127002", customerName: "Ben", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "MAPPING_REVIEW", lines: [] },
+      { qboInvoiceId: "identity", invoiceNumber: "127003", customerName: "Casey", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "MANUAL_DUPLICATE_REVIEW", lines: [] },
+      { qboInvoiceId: "closed", invoiceNumber: "127004", customerName: "Dee", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "CLOSED", lines: [] },
+    ]);
+
+    expect(review.map((candidate) => candidate.qboInvoiceId)).toEqual(["mapping", "identity"]);
   });
 });

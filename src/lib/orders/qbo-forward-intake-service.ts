@@ -41,6 +41,11 @@ export function selectAutomaticForwardIntakeCandidates(preview: QboForwardIntake
   return preview.filter((invoice) => invoice.decision === "AUTO_IMPORT");
 }
 
+/** The only forward-intake decisions that require a human review. */
+export function selectForwardIntakeReviewCandidates(preview: QboForwardIntakePreviewInvoice[]) {
+  return preview.filter((invoice) => invoice.decision === "MAPPING_REVIEW" || invoice.decision === "MANUAL_DUPLICATE_REVIEW");
+}
+
 /** Read-only candidate analysis. It never writes demand, queues, fulfillments, allocations, or inventory. */
 export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<string, string>) {
   const supabase = getSupabaseAdmin();
@@ -86,7 +91,7 @@ export async function executeQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
   const supabase = getSupabaseAdmin();
   const preview = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
   const candidates = selectAutomaticForwardIntakeCandidates(preview);
-  const reviewCandidates = preview.filter((invoice) => invoice.decision === "MAPPING_REVIEW" || invoice.decision === "MANUAL_DUPLICATE_REVIEW");
+  const reviewCandidates = selectForwardIntakeReviewCandidates(preview);
   const productIds = new Set<string>();
   let importedLines = 0;
 

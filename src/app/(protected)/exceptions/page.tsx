@@ -5,6 +5,8 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { findActiveDuplicateParentConflicts } from "@/lib/orders/duplicate-parent-health";
 import { ERP_HEALTH_CACHE_TAG } from "@/lib/orders/erp-health-cache";
 import { evaluateOrderHealth, type HealthLine, type OrderHealthIssue } from "@/lib/orders/order-health";
+import { selectForwardIntakeReviewCandidates, previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
+import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
 import { ExceptionAction } from "./exception-action";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,6 @@ type OrderRow = {
   id: string;
   order_number: string | null;
   source_type?: string | null;
-  review_status?: string | null;
   cancellation_status?: string | null;
   customers?: { company_name: string | null; full_name: string | null } | null;
   qbo_invoices?: { invoice_number: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null;
@@ -29,43 +30,34 @@ function severityClass(severity: string) {
 
 const getCachedErpHealthFindings = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
-  const baseSelect = "id,order_number,source_type,review_status,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,queue_position_start,queue_position_count,products(sku,canonical_name),inventory_allocations(quantity,source_type))";
+  const baseSelect = "id,order_number,source_type,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,queue_position_start,queue_position_count,products(sku,canonical_name),inventory_allocations(quantity,source_type))";
   let result = await supabase.from("shipping_orders").select(`cancellation_status,${baseSelect}`).order("created_at", { ascending: false }).limit(500);
   if (result.error) result = await supabase.from("shipping_orders").select(baseSelect).order("created_at", { ascending: false }).limit(500);
   const findings: Array<{ order: OrderRow; issue: OrderHealthIssue }> = [];
   for (const order of (result.data ?? []) as unknown as OrderRow[]) {
     const qboVoided = String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED";
-    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboRawPayload: order.qbo_invoices?.raw_payload, qboReviewStatus: order.source_type === "QBO_INVOICE" ? order.review_status : null, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
+    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboRawPayload: order.qbo_invoices?.raw_payload, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
     for (const issue of issues) findings.push({ order, issue });
   }
-  const pendingReviewOrders: OrderRow[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from("shipping_orders")
-      .select("id,order_number,review_status,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload)")
-      .eq("source_type", "QBO_INVOICE")
-      .eq("review_status", "PENDING_REVIEW")
-      .order("created_at", { ascending: false })
-      .range(from, from + 999);
-    if (error) throw new Error(`Pending-review ERP Health query failed: ${error.message}`);
-    pendingReviewOrders.push(...(data ?? []) as unknown as OrderRow[]);
-    if ((data ?? []).length < 1000) break;
-  }
-  const pendingReviewFindingIds = new Set(findings
-    .filter(({ issue }) => issue.code === "QBO_PENDING_REVIEW")
-    .map(({ order }) => order.id));
-  for (const order of pendingReviewOrders) {
-    if (pendingReviewFindingIds.has(order.id)) continue;
+  const forwardIntake = await previewQboForwardIntake(await getQuickbooksFirstPaymentDates());
+  for (const invoice of selectForwardIntakeReviewCandidates(forwardIntake)) {
+    const issueCode = invoice.decision === "MAPPING_REVIEW" ? "QBO_FORWARD_MAPPING_REVIEW" : "QBO_FORWARD_IDENTITY_REVIEW";
     findings.push({
-      order,
+      order: {
+        id: invoice.qboInvoiceId,
+        order_number: invoice.invoiceNumber,
+        customers: { company_name: invoice.customerName, full_name: null },
+        qbo_invoices: { invoice_number: invoice.invoiceNumber },
+        shipping_order_lines: [],
+      },
       issue: {
         severity: "WARNING",
-        code: "QBO_PENDING_REVIEW",
+        code: issueCode,
         product: null,
-        issue: "QuickBooks order awaits manual review",
-        expected: "Approve current demand or cancel a voided/non-operational order",
-        actual: "Pending review",
-        cause: "The order is intentionally excluded from Customer List, fulfillment, and inventory demand until its operational status is confirmed.",
+        issue: invoice.decision === "MAPPING_REVIEW" ? "Recent QuickBooks order needs product mapping" : "Recent QuickBooks order has an identity conflict",
+        expected: invoice.decision === "MAPPING_REVIEW" ? "Map every physical QuickBooks line" : "Resolve the conflicting QBO invoice or line identity",
+        actual: `${invoice.lines.filter((line) => line.decision === invoice.decision).length} line${invoice.lines.filter((line) => line.decision === invoice.decision).length === 1 ? "" : "s"} require review`,
+        cause: "This is a recent paid or partially paid QuickBooks invoice selected by the shared forward-intake preflight. No ERP demand has been created.",
       },
     });
   }
@@ -138,7 +130,7 @@ export default async function ExceptionsPage({ searchParams }: { searchParams: P
   const viewCodes: Record<string, string[]> = {
     demand: ["QUEUE_COUNT_MISMATCH", "QUEUE_POSITION_MISSING", "RESERVATION_EXCEEDS_DEMAND"],
     qbo: ["VOIDED_ACTIVE", "FULFILLED_WITH_OPEN_DEMAND"],
-    review: ["QBO_PENDING_REVIEW"],
+    review: ["QBO_FORWARD_MAPPING_REVIEW", "QBO_FORWARD_IDENTITY_REVIEW"],
     shipment: ["SHIPMENT_EXCEEDS_DEMAND", "FULFILLMENT_TOTAL_MISMATCH"],
     voided: ["VOIDED_ACTIVE", "CANCELLED_OPEN_DEMAND"],
     mapping: ["UNMAPPED_PHYSICAL_LINE"],

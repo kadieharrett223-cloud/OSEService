@@ -565,37 +565,6 @@ async function activateExistingQuickbooksOrder(
   revalidatePath(`/orders/${orderId}`);
 }
 
-export async function approvePendingQuickbooksOrderAction(formData: FormData) {
-  await requireUser();
-  const orderId = getString(formData, "orderId");
-  const confirmation = getString(formData, "confirmation");
-  const adminClient = getSupabaseAdmin();
-  if (!orderId || confirmation !== "CONFIRM_APPROVE_QBO_ORDER") redirect("/exceptions?error=Approval+confirmation+required");
-
-  const { data: order } = await adminClient
-    .from("shipping_orders")
-    .select("id,source_invoice_id,source_type,review_status")
-    .eq("id", orderId)
-    .maybeSingle();
-  if (!order?.source_invoice_id || order.source_type !== "QBO_INVOICE" || String(order.review_status ?? "").toUpperCase() !== "PENDING_REVIEW") {
-    redirect(`/exceptions?error=Only+pending+QuickBooks+orders+can+be+approved+from+ERP+Health`);
-  }
-
-  const { data: invoice } = await adminClient
-    .from("qbo_invoices")
-    .select("id,qbo_invoice_id,invoice_number,raw_payload")
-    .eq("id", order.source_invoice_id)
-    .maybeSingle();
-  if (!invoice) redirect(`/exceptions?error=QuickBooks+invoice+not+found`);
-  if (String((invoice.raw_payload as { PrivateNote?: string | null } | null)?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED") {
-    redirect(`/exceptions?error=Voided+QuickBooks+orders+must+be+cancelled+instead+of+approved`);
-  }
-
-  await activateExistingQuickbooksOrder(adminClient, order.id, invoice);
-  revalidatePath("/exceptions");
-  redirect(`/exceptions?message=${encodeURIComponent(`QuickBooks order ${invoice.invoice_number ?? ""} approved and activated`)}`);
-}
-
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");

@@ -18,20 +18,6 @@ describe("order health diagnostics", () => {
     expect(issues.some((issue) => issue.code === "VOIDED_ACTIVE" && issue.severity === "ERROR")).toBe(true);
   });
 
-  it("reports a dormant QuickBooks order for manual review without treating it as demand", () => {
-    const issues = evaluateOrderHealth({ lines: [line({ approved_qty: 0, approval_status: "PENDING_REVIEW" })], qboReviewStatus: "PENDING_REVIEW" });
-
-    expect(issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "QBO_PENDING_REVIEW", severity: "WARNING" }),
-    ]));
-  });
-
-  it("does not report approved QuickBooks orders as pending review", () => {
-    const issues = evaluateOrderHealth({ lines: [line()], qboReviewStatus: "APPROVED" });
-
-    expect(issues.some((issue) => issue.code === "QBO_PENDING_REVIEW")).toBe(false);
-  });
-
   it("accepts dropship fulfillment evidence without shipment history", () => {
     const issues = evaluateOrderHealth({
       lines: [line({ fulfilled_qty: 1, fulfillment_status: "FULFILLED", fulfillment_source: "DROPSHIP", fulfillment_supplier: "Vendor" })],

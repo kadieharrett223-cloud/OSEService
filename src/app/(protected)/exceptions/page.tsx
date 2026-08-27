@@ -4,9 +4,9 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { findActiveDuplicateParentConflicts } from "@/lib/orders/duplicate-parent-health";
 import { ERP_HEALTH_CACHE_TAG } from "@/lib/orders/erp-health-cache";
-import { evaluateOrderHealth, type HealthLine, type OrderHealthIssue } from "@/lib/orders/order-health";
+import { evaluateOrderHealth, shouldSurfaceOrderHealthIssue, type HealthLine, type OrderHealthIssue } from "@/lib/orders/order-health";
 import { selectForwardIntakeReviewCandidates, previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
-import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
+import { getQuickbooksFirstPaymentEvidenceReadOnly } from "@/lib/quickbooks/integration";
 import { ExceptionAction } from "./exception-action";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,8 @@ type OrderRow = {
   id: string;
   order_number: string | null;
   source_type?: string | null;
+  review_status?: string | null;
+  duplicate_of_order_id?: string | null;
   cancellation_status?: string | null;
   customers?: { company_name: string | null; full_name: string | null } | null;
   qbo_invoices?: { invoice_number: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null;
@@ -28,18 +30,58 @@ function severityClass(severity: string) {
   return "bg-[#eef2f7] text-[#475569]";
 }
 
+function hasCurrentOperationalDemand(order: OrderRow) {
+  if (order.duplicate_of_order_id || String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED") return false;
+  if (["ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(order.review_status ?? "").toUpperCase())) return false;
+  return (order.shipping_order_lines ?? []).some((line) => {
+    const approved = Number(line.approved_qty ?? 0);
+    const fulfilled = Number(line.fulfilled_qty ?? 0);
+    return approved > fulfilled
+      && ["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase())
+      && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
+  });
+}
+
+async function loadFulfillmentEvidence(supabase: ReturnType<typeof getSupabaseAdmin>, lineIds: string[]) {
+  const rows: Array<{ shipping_order_line_id: string; fulfilled_qty: number | null; fulfillment_type: string | null }> = [];
+  for (let from = 0; from < lineIds.length; from += 100) {
+    const { data, error } = await supabase
+      .from("fulfillments")
+      .select("shipping_order_line_id,fulfilled_qty,fulfillment_type")
+      .in("shipping_order_line_id", lineIds.slice(from, from + 100));
+    if (error) throw new Error(`ERP Health fulfillment evidence query failed: ${error.message}`);
+    rows.push(...(data ?? []));
+  }
+  return rows;
+}
+
 const getCachedErpHealthFindings = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
-  const baseSelect = "id,order_number,source_type,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,queue_position_start,queue_position_count,products(sku,canonical_name),inventory_allocations(quantity,source_type))";
-  let result = await supabase.from("shipping_orders").select(`cancellation_status,${baseSelect}`).order("created_at", { ascending: false }).limit(500);
-  if (result.error) result = await supabase.from("shipping_orders").select(baseSelect).order("created_at", { ascending: false }).limit(500);
+  const baseSelect = "id,order_number,source_type,review_status,duplicate_of_order_id,customers(company_name,full_name),qbo_invoices(invoice_number,raw_payload),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,warehouse_status,queue_position_start,queue_position_count,products(sku,canonical_name),inventory_allocations(quantity,source_type))";
+  const primaryResult = await supabase.from("shipping_orders").select(`cancellation_status,${baseSelect}`).order("created_at", { ascending: false }).limit(500);
+  const fallbackResult = primaryResult.error
+    ? await supabase.from("shipping_orders").select(baseSelect).order("created_at", { ascending: false }).limit(500)
+    : null;
+  const resultData = primaryResult.error ? fallbackResult?.data : primaryResult.data;
   const findings: Array<{ order: OrderRow; issue: OrderHealthIssue }> = [];
-  for (const order of (result.data ?? []) as unknown as OrderRow[]) {
+  const recentOrders = (resultData ?? []) as unknown as OrderRow[];
+  const lineIds = recentOrders.flatMap((order) => (order.shipping_order_lines ?? []).map((line) => line.id));
+  const fulfillmentEvidence = await loadFulfillmentEvidence(supabase, lineIds);
+  for (const order of recentOrders) {
     const qboVoided = String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED";
-    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], qboRawPayload: order.qbo_invoices?.raw_payload, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
-    for (const issue of issues) findings.push({ order, issue });
+    const orderLineIds = new Set((order.shipping_order_lines ?? []).map((line) => line.id));
+    const orderFulfillments = fulfillmentEvidence.filter((row) => orderLineIds.has(row.shipping_order_line_id));
+    const shipmentEvidence = orderFulfillments
+      .filter((row) => String(row.fulfillment_type ?? "").toUpperCase() === "SHIPMENT")
+      .map((row) => ({ lines: [{ shipping_order_line_id: row.shipping_order_line_id, quantity: row.fulfilled_qty }] }));
+    const externalFulfillments = orderFulfillments.filter((row) => String(row.fulfillment_type ?? "").toUpperCase() !== "SHIPMENT");
+    const issues = evaluateOrderHealth({ lines: order.shipping_order_lines ?? [], shipments: shipmentEvidence, fulfillments: externalFulfillments, qboRawPayload: order.qbo_invoices?.raw_payload, qboVoided, cancelled: String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" });
+    const currentDemand = hasCurrentOperationalDemand(order);
+    for (const issue of issues) if (shouldSurfaceOrderHealthIssue(issue, currentDemand)) findings.push({ order, issue });
   }
-  const forwardIntake = await previewQboForwardIntake(await getQuickbooksFirstPaymentDates());
+  const firstPaymentEvidence = await getQuickbooksFirstPaymentEvidenceReadOnly();
+  const firstPaymentByQboInvoiceId = new Map([...firstPaymentEvidence.entries()].map(([invoiceId, evidence]) => [invoiceId, evidence.firstPaymentAt]));
+  const forwardIntake = await previewQboForwardIntake(firstPaymentByQboInvoiceId);
   for (const invoice of selectForwardIntakeReviewCandidates(forwardIntake)) {
     const issueCode = invoice.decision === "MAPPING_REVIEW" ? "QBO_FORWARD_MAPPING_REVIEW" : "QBO_FORWARD_IDENTITY_REVIEW";
     findings.push({
@@ -61,22 +103,11 @@ const getCachedErpHealthFindings = unstable_cache(async () => {
       },
     });
   }
-  const ordersByNumber = new Map<string, OrderRow[]>();
-  for (const order of (result.data ?? []) as unknown as OrderRow[]) {
-    const key = String(order.qbo_invoices?.invoice_number ?? order.order_number ?? "").trim().toUpperCase();
-    if (!key) continue;
-    ordersByNumber.set(key, [...(ordersByNumber.get(key) ?? []), order]);
-  }
-  for (const [invoiceNumber, orders] of ordersByNumber) {
-    const customerNames = new Set(orders.map((order) => String(order.customers?.company_name ?? order.customers?.full_name ?? "").trim().toUpperCase()).filter(Boolean));
-    if (customerNames.size <= 1) continue;
-    for (const order of orders) findings.push({ order, issue: { severity: "WARNING", code: "AMBIGUOUS_ORDER_NUMBER_BRIDGE", product: null, issue: "Same invoice/order number appears under multiple customers", expected: "Do not bridge by order number alone", actual: `${invoiceNumber}: ${[...customerNames].join(" / ")}`, cause: "Order-number-only identity is ambiguous and must require compatible customer/source evidence before combining demand." } });
-  }
   const duplicateParentRows: unknown[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await supabase
       .from("shipping_orders")
-      .select("id,order_number,source_type,source_system,source_invoice_id,duplicate_of_order_id,legacy_customer_name,customers(company_name,full_name),shipping_order_lines(product_id,ordered_qty,approved_qty,fulfilled_qty,products(sku,canonical_name))")
+      .select("id,order_number,source_type,source_system,source_invoice_id,duplicate_of_order_id,review_status,cancellation_status,legacy_customer_name,customers(company_name,full_name),shipping_order_lines(id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,products(sku,canonical_name))")
       .is("duplicate_of_order_id", null)
       .not("source_invoice_id", "is", null)
       .range(from, from + 999);
@@ -91,10 +122,12 @@ const getCachedErpHealthFindings = unstable_cache(async () => {
     source_system: string | null;
     source_invoice_id: string | null;
     duplicate_of_order_id: string | null;
+    review_status?: string | null;
+    cancellation_status?: string | null;
     legacy_customer_name: string | null;
     customers?: { company_name: string | null; full_name: string | null } | null;
     shipping_order_lines?: HealthLine[];
-  }>).map((order) => ({
+  }>).filter((order) => hasCurrentOperationalDemand(order as OrderRow)).map((order) => ({
     ...order,
     customerName: order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name,
     lines: order.shipping_order_lines ?? [],

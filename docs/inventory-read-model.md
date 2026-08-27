@@ -202,6 +202,13 @@ the deciding identity; the classifier uses immutable QBO invoice and line IDs fi
 read-only and sends review work to Import / Assign. Its data-preservation diagnostics must remain
 correct before any caching or pagination change is considered.
 
+ERP Health loads fulfillment-ledger evidence before reporting fulfillment-total mismatches. The
+historical-sensitive checks for fulfillment totals, shipment quantity, and canonical order summaries
+are shown only when approved, unfulfilled operational demand remains. Reservation, mapping, queue,
+and active-void findings remain visible because they can affect current work even after fulfillment
+state changes. Sibling-parent conflicts require both preserved parents to retain current operational
+demand; a duplicate printed invoice number alone is not an exception.
+
 ## Known gaps
 
 - Containers imported without a port date show `Pending` for ETA, matching the empty source value.

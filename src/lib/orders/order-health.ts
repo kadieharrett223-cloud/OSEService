@@ -57,6 +57,12 @@ export type OrderHealthInput = {
 const upper = (value: unknown) => String(value ?? "").trim().toUpperCase();
 const productLabel = (line: HealthLine) => line.products?.sku ?? line.products?.canonical_name ?? line.product_id ?? "Unknown product";
 const remaining = (line: HealthLine) => Math.max(0, Number(line.approved_qty ?? line.ordered_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+const CURRENT_DEMAND_ONLY_CODES = new Set(["FULFILLMENT_TOTAL_MISMATCH", "SHIPMENT_EXCEEDS_DEMAND", "ORDER_SUMMARY_MISMATCH"]);
+
+/** Historical fulfillment evidence is not actionable unless the order still has operational demand. */
+export function shouldSurfaceOrderHealthIssue(issue: OrderHealthIssue, hasCurrentOperationalDemand: boolean) {
+  return !CURRENT_DEMAND_ONLY_CODES.has(issue.code) || hasCurrentOperationalDemand;
+}
 
 export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[] {
   const issues: OrderHealthIssue[] = [];

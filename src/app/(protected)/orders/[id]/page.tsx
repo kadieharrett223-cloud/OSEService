@@ -1025,10 +1025,9 @@ export default async function OrderDetailPage({
     }
   }
 
-  const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.map((item) => {
-    const direct = item.sku ? productMap.get(normalizeSkuKey(item.sku) ?? "") : null;
-    return direct?.id ?? null;
-  }).filter(Boolean))) as string[];
+  const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.flatMap((item) =>
+    normalizeInvoiceSkuKeys(item.sku).map((skuKey) => productMap.get(skuKey)?.id).filter(Boolean),
+  ))) as string[];
 
   const [{ data: onFloorRows }, { data: containerLineRows }, { data: allAllocRows }, { data: openQueueRows }] = resolvedProductIds.length
     ? await Promise.all([

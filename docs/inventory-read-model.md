@@ -51,6 +51,11 @@ Before receipt, Container Product Lines show `Forecast Allocated` and `Forecast 
 that same canonical projection. After receipt, their labels and values revert to actual received
 quantity coverage.
 
+Orders detail resolves QuickBooks labels such as `4PML-9 (deleted-1)` through the same deleted-SKU
+candidate sequence used during QuickBooks intake before loading Warehouse and incoming supply. A
+deleted invoice label therefore cannot bypass an active product alias and incorrectly render an
+otherwise covered customer line as waiting.
+
 ## Inventory math
 
 ```

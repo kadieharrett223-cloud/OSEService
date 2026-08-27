@@ -47,6 +47,9 @@ This is a read-only projection. `Forecast Coverage` and `Forecast: Container ...
 or alter `inventory_allocations`. `Actually Assigned` and `Persisted: ...` remain derived only
 from live allocation rows. Receiving a container still records physical receipt quantities and
 audit history only; it does not automatically allocate inventory or update warehouse status.
+Before receipt, Container Product Lines show `Forecast Allocated` and `Forecast Available` from
+that same canonical projection. After receipt, their labels and values revert to actual received
+quantity coverage.
 
 ## Inventory math
 

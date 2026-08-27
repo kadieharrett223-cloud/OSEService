@@ -329,17 +329,20 @@ export default async function ContainerDetailPage({
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Expected</th>
                   <th className="px-3 py-3 font-semibold">Qty Received</th>
-                  <th className="px-3 py-3 font-semibold">Allocated</th>
-                  <th className="px-3 py-3 font-semibold">Available to Sell</th>
+                  <th className="px-3 py-3 font-semibold">{isReceived ? "Allocated" : "Forecast Allocated"}</th>
+                  <th className="px-3 py-3 font-semibold">{isReceived ? "Available to Sell" : "Forecast Available"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e5e7eb] bg-white">
                 {lines.length > 0 ? lines.map((line) => {
                   const ordered = Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0);
                   const received = line.product_id ? receivedQtyByProduct.get(line.product_id) ?? 0 : 0;
-                  const allocated = line.product_id ? allocatedByProduct.get(line.product_id) ?? 0 : 0;
-                  // Only physically received units are sellable.
-                  const available = Math.max(received - allocated, 0);
+                  const allocated = isReceived
+                    ? line.product_id ? allocatedByProduct.get(line.product_id) ?? 0 : 0
+                    : coverage.lines.find((coverageLine) => coverageLine.id === line.id)?.forecastCoverageQty ?? 0;
+                  const available = isReceived
+                    ? Math.max(received - allocated, 0)
+                    : Math.max(ordered - allocated, 0);
 
                   return (
                     <tr key={line.id}>

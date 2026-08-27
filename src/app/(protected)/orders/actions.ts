@@ -9,6 +9,7 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
 import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
+import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 
@@ -176,6 +177,7 @@ export async function cancelVoidedOrderAction(formData: FormData) {
   const { error } = await adminClient.rpc("cancel_voided_order", { p_order_id: orderId, p_reason: "Voided in QuickBooks" } as never);
   if (error) redirect(`/exceptions?error=${encodeURIComponent(error.message)}`);
   await recalculateProductQueues((affectedLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  revalidateErpHealth();
   revalidatePath("/exceptions");
   revalidateOrdersList();
   revalidatePath("/inventory");

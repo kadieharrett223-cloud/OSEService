@@ -8,3 +8,14 @@ export function canonicalSkuKey(value: string | null | undefined) {
   if (!stripped || PREFIX_MERGE_EXCEPTIONS.has(stripped)) return full;
   return stripped;
 }
+
+export function preferredOperationalSku(primarySku: string | null | undefined, aliases: Array<string | null | undefined> = []) {
+  const operationalAlias = aliases
+    .map((alias) => String(alias ?? "").trim().toUpperCase())
+    .find((alias) => alias && !/^\d+$/.test(alias));
+  return operationalAlias ?? String(primarySku ?? "").trim().toUpperCase();
+}
+
+export function canonicalProductSkuKey(primarySku: string | null | undefined, aliases: Array<string | null | undefined> = []) {
+  return canonicalSkuKey(preferredOperationalSku(primarySku, aliases));
+}

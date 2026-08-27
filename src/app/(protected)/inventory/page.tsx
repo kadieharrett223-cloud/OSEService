@@ -20,7 +20,7 @@ import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillm
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
-import { canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -645,7 +645,7 @@ export default async function InventoryPage({
   const operationalSkuByProduct = new Map<string, string>();
   for (const alias of productAliasRows) {
     if (!alias.product_id || !alias.alias) continue;
-    const candidate = alias.alias.trim().toUpperCase();
+    const candidate = preferredOperationalSku(null, [alias.alias]);
     if (!candidate || /^\d+$/.test(candidate)) continue;
     if (!operationalSkuByProduct.has(alias.product_id)) operationalSkuByProduct.set(alias.product_id, candidate);
   }

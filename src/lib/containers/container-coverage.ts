@@ -2,7 +2,7 @@ import type { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
-import { canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { canonicalProductSkuKey, canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
@@ -96,11 +96,12 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
     supabase.from("products").select("id,sku"),
     supabase.from("product_aliases").select("product_id,alias"),
   ]);
-  const productKeyById = new Map((products ?? []).map((product) => [product.id, canonicalSkuKey(product.sku)]));
+  const aliasesByProductId = new Map<string, string[]>();
   for (const alias of (aliases ?? []) as Array<{ product_id: string | null; alias: string | null }>) {
-    if (!alias.product_id || !alias.alias || productKeyById.get(alias.product_id)) continue;
-    productKeyById.set(alias.product_id, canonicalSkuKey(alias.alias));
+    if (!alias.product_id || !alias.alias) continue;
+    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
+  const productKeyById = new Map((products ?? []).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id))]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));
   const productIds = [...productKeyById.entries()].filter(([, key]) => containerKeys.has(key)).map(([id]) => id);
   if (!containerKeys.size || !productIds.length) return { rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };

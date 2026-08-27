@@ -56,6 +56,11 @@ candidate sequence used during QuickBooks intake before loading Warehouse and in
 deleted invoice label therefore cannot bypass an active product alias and incorrectly render an
 otherwise covered customer line as waiting.
 
+Orders still in `PENDING_REVIEW` display `Pending Review` in the detail header, fulfillment panel,
+and unshipped item rows. Their shipment selection controls remain unavailable until the order is
+activated, so physical supply visibility cannot be mistaken for active Customer List demand or
+shipping readiness.
+
 ## Inventory math
 
 ```

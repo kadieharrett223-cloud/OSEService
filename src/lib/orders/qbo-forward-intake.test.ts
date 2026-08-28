@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { selectAutomaticForwardIntakeCandidates, selectForwardIntakeReviewCandidates } from "./qbo-forward-intake-service";
-import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
+import { canApproveHistoricalQboIntakeLine, classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
 
 const cleanMappedPhysicalLine = {
   isPaymentEligible: true,
@@ -35,6 +35,16 @@ describe("QBO forward intake classifier", () => {
 
   it("keeps terminal or reviewed obligations closed", () => {
     expect(classifyQboForwardIntakeLine({ ...cleanMappedPhysicalLine, hasTerminalOrReviewedResolution: true })).toBe("CLOSED");
+  });
+
+  it("approves a historical line only when its exact live source state remains clean", () => {
+    const clean = { isPaid: true, isPhysicalLine: true, hasMappedProduct: true, hasTerminalResolution: false, hasOpenRepresentation: false, hasOpenManualDuplicateReview: false, isVoided: false };
+    expect(canApproveHistoricalQboIntakeLine(clean)).toBe(true);
+    expect(canApproveHistoricalQboIntakeLine({ ...clean, hasOpenRepresentation: true })).toBe(false);
+    expect(canApproveHistoricalQboIntakeLine({ ...clean, hasTerminalResolution: true })).toBe(false);
+    expect(canApproveHistoricalQboIntakeLine({ ...clean, hasOpenManualDuplicateReview: true })).toBe(false);
+    expect(canApproveHistoricalQboIntakeLine({ ...clean, isVoided: true })).toBe(false);
+    expect(canApproveHistoricalQboIntakeLine({ ...clean, hasMappedProduct: false })).toBe(false);
   });
 
   it("selects every clean candidate for continuous intake without an invoice allowlist", () => {

@@ -36,3 +36,24 @@ export function classifyQboForwardIntakeLine(evidence: QboForwardIntakeEvidence)
   if (evidence.hasConflictingSkuIdentity || evidence.hasPossibleManualDuplicate) return "MANUAL_DUPLICATE_REVIEW";
   return "AUTO_IMPORT";
 }
+
+export type HistoricalQboApprovalEvidence = {
+  isPaid: boolean;
+  isPhysicalLine: boolean;
+  hasMappedProduct: boolean;
+  hasTerminalResolution: boolean;
+  hasOpenRepresentation: boolean;
+  hasOpenManualDuplicateReview: boolean;
+  isVoided: boolean;
+};
+
+/** Historical lines require an additional exact-source lifecycle check before demand can be activated. */
+export function canApproveHistoricalQboIntakeLine(evidence: HistoricalQboApprovalEvidence) {
+  return evidence.isPaid
+    && evidence.isPhysicalLine
+    && evidence.hasMappedProduct
+    && !evidence.hasTerminalResolution
+    && !evidence.hasOpenRepresentation
+    && !evidence.hasOpenManualDuplicateReview
+    && !evidence.isVoided;
+}

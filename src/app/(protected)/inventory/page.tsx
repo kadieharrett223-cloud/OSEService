@@ -317,13 +317,15 @@ export default async function InventoryPage({
   const q = String(params.q ?? "").trim().toLowerCase();
   const mapError = String(params.mapError ?? "").trim();
   const mapMessage = String(params.mapMessage ?? "").trim();
-  const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
+  const [{ error: firstPaymentColumnError }, { error: duplicateParentColumnError }, { error: cancellationColumnError }] = await Promise.all([
+    supabase.from("shipping_orders").select("first_payment_at").limit(1),
+    supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1),
+    supabase.from("shipping_orders").select("cancellation_status").limit(1),
+  ]);
   const firstPaymentColumnAvailable = !firstPaymentColumnError;
   const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
-  const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
   const duplicateParentColumnAvailable = !duplicateParentColumnError;
   const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
-  const { error: cancellationColumnError } = await supabase.from("shipping_orders").select("cancellation_status").limit(1);
   const cancellationColumnAvailable = !cancellationColumnError;
   const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
   const queueLinesPromise = fetchAllRows((from, to) => supabase
@@ -388,6 +390,8 @@ export default async function InventoryPage({
     fulfillmentRows,
     packageDimensionsBySku,
     reviewedResolutions,
+    sharedCanonicalQueue,
+    { data: displayGroupData },
   ] = await Promise.all([
     supabase
       .from("products")
@@ -406,6 +410,11 @@ export default async function InventoryPage({
       .range(from, to)),
     getCachedPackageDimensionsBySku(),
     reviewedResolutionsPromise,
+    loadCanonicalCustomerQueue(),
+    supabase
+      .from("inventory_display_groups")
+      .select("name, sort_order")
+      .order("sort_order", { ascending: true }),
   ]);
 
   // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
@@ -414,11 +423,6 @@ export default async function InventoryPage({
     const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
     products = fallback.data as unknown as ProductRow[] | null;
   }
-
-  const { data: displayGroupData } = await supabase
-    .from("inventory_display_groups")
-    .select("name, sort_order")
-    .order("sort_order", { ascending: true });
 
   const displayGroups = displayGroupData as unknown as Array<{ name: string | null; sort_order: number | null }> | null;
 
@@ -431,7 +435,6 @@ export default async function InventoryPage({
   const groupNames = [...groupSortByName.entries()].sort((left, right) => left[1] - right[1]).map(([name]) => name);
 
   const productRows = (products ?? []) as ProductRow[];
-  const sharedCanonicalQueue = await loadCanonicalCustomerQueue();
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];

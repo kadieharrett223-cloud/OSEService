@@ -1,3 +1,5 @@
+import { canonicalSkuKey } from "@/lib/products/canonical-sku";
+
 const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
 
@@ -101,10 +103,6 @@ export function getPhysicalFulfillmentTotals(
   };
 }
 
-function normalizeSkuKey(value: unknown) {
-  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 function qboSkuCandidates(value: unknown) {
   const raw = String(value ?? "").trim();
   if (!raw) return [] as string[];
@@ -154,14 +152,14 @@ function parseInvoicePhysicalItems(rawPayload: unknown) {
 }
 
 export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
-  const invoiceKeys = qboSkuCandidates(invoiceSku).map(normalizeSkuKey).filter(Boolean);
+  const invoiceKeys = qboSkuCandidates(invoiceSku).map(canonicalSkuKey).filter(Boolean);
   if (invoiceKeys.length === 0) return false;
   const canonicalTokens = String(line.products?.canonical_name ?? "")
     .split(/[^A-Za-z0-9-]+/)
-    .map(normalizeSkuKey)
+    .map(canonicalSkuKey)
     .filter((token) => Boolean(token) && /\d/.test(token));
   const lineKeys = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name]
-    .map(normalizeSkuKey)
+    .map(canonicalSkuKey)
     .filter(Boolean)
     .concat(canonicalTokens);
   return invoiceKeys.some((invoiceKey) => lineKeys.includes(invoiceKey));

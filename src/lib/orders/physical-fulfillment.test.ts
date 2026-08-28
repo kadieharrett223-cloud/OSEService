@@ -100,6 +100,21 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("counts fulfilled manufacturer-prefixed legacy identities against their QBO operational SKU", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PHR-9X", 1], ["HPU1103", 1], ["HLCJ-6", 2]]),
+      lines: [
+        line({ id: "cary-lift", products: { sku: "000012", canonical_name: "HK-4PHR-9X" }, approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "cary-hpu", products: { sku: "HPU1103", canonical_name: "HPU-110" }, approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "cary-jacks", products: { sku: "HLCJ-6", canonical_name: "HLCJ-6" }, approved_qty: 2, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 3, ordered: 4, fulfilled: 2, remaining: 2, isPartiallyFulfilled: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["cary-lift", "cary-hpu", "cary-jacks"]);
+    expectInvariant(summary);
+  });
+
   it("summarizes 126163 as complete when physical lines are fulfilled and note is open", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PHR-9X", 2], ["HPU1103", 1], ["Note", 1]]),

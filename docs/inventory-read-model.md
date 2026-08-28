@@ -66,12 +66,21 @@ shipping readiness.
 ```
 committed_floor = max(confirmed floor allocations, min(open_demand, on_floor))
 available_now   = max(0, on_floor - committed_floor)
-projected       = max(0, on_floor + incoming - open_demand)
-uncovered       = max(0, open_demand - on_floor - incoming)
+net_after_incoming = on_floor + active_incoming - canonical_open_demand
+available_after_incoming = max(0, net_after_incoming)
+backordered_after_incoming = max(0, -net_after_incoming)
 ```
 
 `committed_floor` encodes the OLD_ERP `Available = On Floor - Sold` rule: unallocated open demand
-still consumes floor stock. All values are clamped, so physical inventory is never negative.
+still consumes floor stock. `net_after_incoming` is the signed planning position and is intentionally
+not clamped: a negative value is the unit shortage after active incoming supply. `available_now`,
+`available_after_incoming`, and `backordered_after_incoming` remain non-negative display values.
+
+The Inventory table labels canonical open demand as `Sold` and shows `Net After Incoming` separately
+from `Available/Incoming`. `Sold` is current canonical customer obligation, not the historical
+`inventory_transactions.SOLD` ledger bucket. For example, JVCJ-6 with `on_floor = 0`,
+`active_incoming = 0`, and `canonical_open_demand = 14` displays a signed net of `-14` and
+`Backordered 14`.
 
 `next ETA` is the earliest active container with remaining units, taken straight from the container
 record (no recomputation).

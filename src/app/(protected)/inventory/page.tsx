@@ -16,6 +16,7 @@ import { CLOSED_DEMAND_STATES, demandLineIdentity, getCanonicalOpenDemandLines, 
 import type { ReviewedObligationResolution } from "@/lib/demand/reviewed-obligation-resolutions";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
+import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
@@ -128,6 +129,7 @@ type InventoryViewRow = {
   floorCommitted: number;
   availableNow: number;
   incoming: number;
+  netAfterIncoming: number;
   availableAfterIncoming: number;
   backorderedAfterIncoming: number;
   nextEta: string;
@@ -875,6 +877,7 @@ export default async function InventoryPage({
       floorCommitted: 0,
       availableNow: 0,
       incoming: 0,
+      netAfterIncoming: 0,
       availableAfterIncoming: 0,
       backorderedAfterIncoming: 0,
       nextEta: "—",
@@ -977,14 +980,18 @@ export default async function InventoryPage({
         const completeEta = coverage.completeEtaDate ? ` · Complete ETA ${formatShortDate(coverage.completeEtaDate)}` : "";
         return { ...item, expectedAvailability: `${parts.join(" + ")}${completeEta}`, status };
       });
+      const afterIncoming = getAfterIncomingInventory({
+        onFloor: group.onFloor,
+        incoming: group.incoming,
+        openDemand: group.openDemand,
+      });
 
       return {
         ...group,
         incomingContainers,
         customerQueue: coveredQueue,
         availableNow: Math.max(0, group.onFloor - committedFloor),
-        availableAfterIncoming: Math.max(0, group.onFloor + group.incoming - group.openDemand),
-        backorderedAfterIncoming: Math.max(0, group.openDemand - group.onFloor - group.incoming),
+        ...afterIncoming,
         nextEta: incomingContainers[0] ? `${incomingContainers[0].containerNumber} · ${incomingContainers[0].eta}` : "—",
       };
     })
@@ -1081,6 +1088,7 @@ export default async function InventoryPage({
                 <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Available Now</th>
                 <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Incoming</th>
                 <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Available/Incoming</th>
+                <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Net After Incoming</th>
                 <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Next Arrival</th>
                 <th className="sticky top-[61px] z-30 bg-white px-2 py-2.5">Customer List</th>
               </tr>
@@ -1088,13 +1096,13 @@ export default async function InventoryPage({
             <tbody>
               {displayRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
+                  <td colSpan={9} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
                 sections.map((section) => (
                   <Fragment key={section.name}>
                     <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
-                      <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
+                      <th colSpan={9} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
                         {section.name}
                         <span className="ml-2 font-normal normal-case tracking-normal text-[#94a3b8]">{section.rows.length}</span>
                       </th>
@@ -1146,6 +1154,9 @@ export default async function InventoryPage({
                       {row.backorderedAfterIncoming > 0 ? (
                         <div className="mt-1 text-xs font-semibold text-[#b45309]">Backordered {formatNumber(row.backorderedAfterIncoming)}</div>
                       ) : null}
+                    </td>
+                    <td className={`whitespace-nowrap px-2 py-3 font-semibold ${row.netAfterIncoming < 0 ? "text-[#b45309]" : "text-[#111827]"}`}>
+                      {formatNumber(row.netAfterIncoming)}
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">{row.nextEta}</td>
                     <td className="whitespace-nowrap px-2 py-3">

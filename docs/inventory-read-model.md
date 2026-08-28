@@ -61,6 +61,13 @@ and unshipped item rows. Their shipment selection controls remain unavailable un
 activated, so physical supply visibility cannot be mistaken for active Customer List demand or
 shipping readiness.
 
+Re-entering an existing QuickBooks invoice is the explicit single-order activation path. It refreshes
+the order from QBO source lines, marks the parent approved, and changes only untouched,
+unallocated `PENDING_REVIEW` lines to `ON_FLOOR` / `PENDING`. Lines already in Warehouse, picked,
+ready to ship, allocated, cancelled, or fulfilled retain their operational state. Historical
+backlog rows are never bulk-activated from the Inventory page: mapping, payment, duplicate, and
+fulfillment evidence must be reviewed before activation.
+
 ## Inventory math
 
 ```

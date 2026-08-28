@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { isOpenDemandLine } from "@/lib/demand/product-demand";
 
 type QueueLine = {
   id: string;
@@ -12,7 +13,7 @@ type QueueLine = {
   fulfillment_status: string | null;
   priority: string | null;
   queue_position_override: number | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null } | null;
 };
 
 /** Manual overrides win, then earliest payment, then order age. */
@@ -40,11 +41,15 @@ function compareQueueLines(left: QueueLine, right: QueueLine) {
   return left.id.localeCompare(right.id);
 }
 
-function isActiveQueueLine(line: QueueLine) {
+export function isActiveQueueLine(line: QueueLine) {
   return Boolean(
     line.product_id
-      && ["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase())
-      && !["FULFILLED", "CANCELLED"].includes(String(line.fulfillment_status ?? "").toUpperCase()),
+      && isOpenDemandLine({
+        ...line,
+        parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
+        parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+        parent_review_status: line.shipping_orders?.review_status ?? null,
+      }),
   );
 }
 
@@ -67,7 +72,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField})`)
+      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status)`)
       .in("product_id", uniqueProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);

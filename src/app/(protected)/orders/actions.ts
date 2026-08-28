@@ -512,7 +512,7 @@ async function activateExistingQuickbooksOrder(
 
   const { data: orderLines } = await adminClient
     .from("shipping_order_lines")
-    .select("id, qbo_invoice_line_id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .select("id, qbo_invoice_line_id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, warehouse_status, allocation_status, fulfillment_status")
     .eq("shipping_order_id", orderId);
 
   const aliasSkus = (invoiceLines ?? []).flatMap((line) => qboSkuCandidates(line.qbo_sku));
@@ -522,7 +522,12 @@ async function activateExistingQuickbooksOrder(
   const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
 
   const plan = planQuickbooksOrderRefresh(invoiceLines ?? [], orderLines ?? [], productIdByAlias);
+  const existingLineById = new Map((orderLines ?? []).map((line) => [line.id, line]));
   for (const update of plan.updates) {
+    const existing = existingLineById.get(update.lineId);
+    const shouldMoveFromPendingReview = String(existing?.warehouse_status ?? "").toUpperCase() === "PENDING_REVIEW"
+      && String(existing?.fulfillment_status ?? "").toUpperCase() === "PENDING"
+      && ["", "UNALLOCATED"].includes(String(existing?.allocation_status ?? "").toUpperCase());
     const { error } = await adminClient
       .from("shipping_order_lines")
       .update({
@@ -530,6 +535,7 @@ async function activateExistingQuickbooksOrder(
         approved_qty: update.approved_qty,
         approval_status: update.approval_status,
         product_id: update.product_id ?? undefined,
+        ...(shouldMoveFromPendingReview ? { warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" } : {}),
       })
       .eq("id", update.lineId);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);

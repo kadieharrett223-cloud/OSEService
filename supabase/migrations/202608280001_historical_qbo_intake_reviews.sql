@@ -9,15 +9,24 @@ create table if not exists public.historical_qbo_intake_reviews (
   updated_at timestamptz not null default now()
 );
 
+drop trigger if exists historical_qbo_intake_reviews_updated_at
+on public.historical_qbo_intake_reviews;
+
 create trigger historical_qbo_intake_reviews_updated_at
 before update on public.historical_qbo_intake_reviews
 for each row execute function public.update_updated_at_column();
 
 alter table public.historical_qbo_intake_reviews enable row level security;
 
+drop policy if exists "historical_qbo_intake_reviews_read_authenticated"
+on public.historical_qbo_intake_reviews;
+
 create policy "historical_qbo_intake_reviews_read_authenticated"
 on public.historical_qbo_intake_reviews for select
 to authenticated using (true);
+
+drop policy if exists "historical_qbo_intake_reviews_write_authenticated"
+on public.historical_qbo_intake_reviews;
 
 create policy "historical_qbo_intake_reviews_write_authenticated"
 on public.historical_qbo_intake_reviews for all

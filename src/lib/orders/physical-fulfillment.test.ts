@@ -176,6 +176,13 @@ describe("physical fulfillment totals", () => {
     )).toBe(true);
   });
 
+  it("matches a plain duplicate-suffix QBO SKU to its base physical SKU", () => {
+    expect(matchesPhysicalLineToInvoiceSku(
+      line({ legacy_item_code: "4PML-9" }),
+      "4PML-9-1",
+    )).toBe(true);
+  });
+
   it("keeps 122332's fulfilled 4PXL-10B line separate from the open OLD_ERP 4PXL-10 line", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PXL-10B", 1]]),

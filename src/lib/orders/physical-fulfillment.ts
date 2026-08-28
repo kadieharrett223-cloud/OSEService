@@ -1,4 +1,5 @@
 import { canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { qboSkuCandidates } from "./quickbooks-refresh";
 
 const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
@@ -101,22 +102,6 @@ export function getPhysicalFulfillmentTotals(
     remaining: Math.max(0, ordered - fulfilled),
     lineCount: physicalLines.length,
   };
-}
-
-function qboSkuCandidates(value: unknown) {
-  const raw = String(value ?? "").trim();
-  if (!raw) return [] as string[];
-  const candidates = [raw.toUpperCase()];
-  let liveSku = candidates[0];
-  if (/\(deleted/i.test(raw)) {
-    liveSku = raw.replace(/\s*\(deleted[^)]*\)\s*$/i, "").trim().toUpperCase();
-    if (liveSku && liveSku !== candidates[0]) candidates.push(liveSku);
-  }
-  while (/[-\s]1$/.test(liveSku)) {
-    liveSku = liveSku.replace(/[-\s]1$/, "").trim();
-    if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
-  }
-  return candidates;
 }
 
 function parseInvoicePhysicalItems(rawPayload: unknown) {

@@ -543,7 +543,7 @@ export default async function InventoryPage({
       const qtyKey = `${qboLine.qbo_invoice_id}|${qboProductId}`;
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
-    const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeSkuKey(qboLine.qbo_sku)}`;
+    const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeQboSkuKeys(qboLine.qbo_sku).at(-1) ?? normalizeSkuKey(qboLine.qbo_sku)}`;
     const candidates = qboCandidatesByParentProduct.get(key) ?? [];
     candidates.push(qboLine);
     qboCandidatesByParentProduct.set(key, candidates);

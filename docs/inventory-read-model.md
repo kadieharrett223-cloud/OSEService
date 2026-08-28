@@ -246,9 +246,10 @@ invoice-level Customer List merge remains in `mergeOpenCustomerDemand`.
 `src/lib/demand/canonical-customer-queue-loader.ts` is the read-only server loader for the active
 Customer List population. It preserves the Inventory physical-QBO reconciliation, fulfilled-line
 evidence, completed QBO sibling suppression, duplicate/cancelled/voided parent exclusions, reviewed
-resolutions, manual-mapping exclusions, product aliases, and invoice-level merging. QBO SKU values
-with duplicate-style trailing `-1` suffixes are matched to their base operational alias before
-bridging OLD_ERP and QBO representations, so one unit remains one queue position. It then sends
+resolutions, manual-mapping exclusions, product aliases, and invoice-level merging. The shared QBO
+SKU candidate resolver matches duplicate-style trailing `-1` suffixes to their base operational alias
+for product mapping, physical fulfillment, and OLD_ERP/QBO bridging, so one unit remains one queue
+position. It then sends
 each product's surviving rows to `src/lib/demand/canonical-customer-queue.ts`, which sorts by
 `first_payment_at`, then deterministic fallbacks, and assigns compact quantity-aware position ranges.
 

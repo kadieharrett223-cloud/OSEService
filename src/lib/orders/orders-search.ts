@@ -29,6 +29,10 @@ export function getOrderLifecycleLabel(order: Pick<OrdersSearchRow, "tabs">) {
   return LIFECYCLE_LABELS[getOrderLifecycleTab(order)] ?? "Orders";
 }
 
+export function getOrderSearchResultHref(order: Pick<OrdersSearchRow, "id">) {
+  return `/orders/${order.id}`;
+}
+
 export function searchOrders<T extends OrdersSearchRow>(orders: T[], searchText: string) {
   const normalizedSearch = normalize(searchText);
   if (!normalizedSearch) return [] as T[];

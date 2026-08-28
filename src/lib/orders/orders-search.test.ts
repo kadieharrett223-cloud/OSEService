@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getExactInvoiceSearchTab, getOrderLifecycleLabel, searchOrders, type OrdersSearchRow } from "./orders-search";
+import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders, type OrdersSearchRow } from "./orders-search";
 
 function order(overrides: Partial<OrdersSearchRow>): OrdersSearchRow {
   const invoiceNumber = overrides.invoiceNumber ?? "126079";
@@ -49,5 +49,7 @@ describe("Orders projection search", () => {
     expect(searchOrders(orders, "11982")).toHaveLength(2);
     expect(getOrderLifecycleLabel(orders[0])).toBe("Archived");
     expect(getOrderLifecycleLabel(orders[1])).toBe("Partially Shipped");
+    expect(getOrderSearchResultHref(orders[0])).toBe("/orders/john");
+    expect(getOrderSearchResultHref(orders[1])).toBe("/orders/bryant");
   });
 });

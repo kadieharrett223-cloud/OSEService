@@ -3,7 +3,7 @@ import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
-import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderLifecycleTab, searchOrders } from "@/lib/orders/orders-search";
+import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
@@ -364,9 +364,8 @@ export default async function OrdersPage({
             <div className="border-b border-[#dbe3ee] bg-[#f8fafc] px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-[#475569]">Search Results Across All Statuses</div>
             <div className="divide-y divide-[#eef2f7]">
               {globalSearchResults.map((order) => {
-                const lifecycleTab = getOrderLifecycleTab(order);
                 return (
-                  <Link key={order.id} href={`/orders?${new URLSearchParams({ tab: lifecycleTab, q: searchText }).toString()}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 hover:bg-[#f8fafc]">
+                  <Link key={order.id} href={getOrderSearchResultHref(order)} className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 hover:bg-[#f8fafc]">
                     <span className="font-semibold text-[#1d4ed8]">{order.invoiceNumber} <span className="font-normal text-[#64748b]">· {order.customerName}</span></span>
                     <span className="rounded-full bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">{getOrderLifecycleLabel(order)}</span>
                   </Link>

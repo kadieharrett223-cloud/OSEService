@@ -112,13 +112,16 @@ for (const siblings of activeBySource.values()) {
   const obligations = [...identities.entries()].map(([identity, group]) => {
     const provenFulfilled = Math.max(0, ...group.lines.map((line) => Math.max(number(line.fulfilled_qty), (fulfillmentsByLine.get(line.id) ?? []).reduce((sum, event) => sum + number(event.fulfilled_qty), 0))));
     const actualQuantity = group.source ? number(group.source.ordered_qty) : Math.max(...group.lines.map((line) => number(line.approved_qty)));
-    const reviewedResolved = group.source ? resolvedQboLineIds.has(group.source.id) : group.lines.some((line) => line.source_record_id && resolvedSourceRecordIds.has(line.source_record_id));
+    const reviewedResolved = (group.source && resolvedQboLineIds.has(group.source.id)) || group.lines.some((line) => line.source_record_id && resolvedSourceRecordIds.has(line.source_record_id));
     const expectedRemaining = reviewedResolved ? 0 : Math.max(0, actualQuantity - provenFulfilled);
-    const candidates = group.lines.map((line) => ({ line, open: Math.max(0, number(line.approved_qty) - provenFulfilled) })).filter(({ line, open }) => open > 0 && isOpen(line, provenFulfilled));
+    const candidates = reviewedResolved ? [] : group.lines.map((line) => ({
+      line,
+      open: Math.max(0, (group.source && number(line.approved_qty) > 0 ? actualQuantity : number(line.approved_qty)) - provenFulfilled),
+    })).filter(({ line, open }) => open > 0 && isOpen(line, provenFulfilled));
     const selected = candidates.sort((left, right) => right.open - left.open || String(left.line.id).localeCompare(String(right.line.id)))[0] ?? null;
     const canonicalRemaining = selected?.open ?? 0;
     const parentRepresentations = new Set(group.lines.map((line) => line.shipping_order_id)).size;
-    const sourceIntakeGap = Boolean(group.source) && expectedRemaining !== canonicalRemaining && candidates.length === 0;
+    const sourceIntakeGap = Boolean(group.source) && !reviewedResolved && expectedRemaining !== canonicalRemaining && candidates.length === 0;
     const issue = expectedRemaining !== canonicalRemaining && !sourceIntakeGap ? "REMAINING_QTY_MISMATCH" : null;
     return {
       identity,

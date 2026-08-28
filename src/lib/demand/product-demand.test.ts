@@ -54,6 +54,24 @@ describe("shared active logical demand", () => {
     expect(openQtyOf(withLogicalFulfilledQty([{ ...rows[0], approved_qty: 1 }, { ...rows[1], approved_qty: 1, fulfilled_qty: 1 }])[0])).toBe(0);
   });
 
+  it("uses the QBO obligation quantity for an approved bridged representation", () => {
+    const undercounted = getCanonicalOpenDemandLines([
+      { id: "122273-qbo", qbo_invoice_line_id: "122273-hpu", approved_qty: 0, fulfillment_status: "PENDING", warehouse_status: "PENDING_REVIEW" },
+      { id: "122273-old", logical_demand_key: "122273-hpu", approved_qty: 3, canonical_obligation_qty: 8, fulfillment_status: "PENDING", warehouse_status: "APPROVED" },
+      { id: "122273-ramps", logical_demand_key: "122273-ramps", approved_qty: 4, canonical_obligation_qty: 8, fulfillment_status: "PENDING", warehouse_status: "APPROVED" },
+    ], new Set(), new Set());
+    const overcounted = getCanonicalOpenDemandLines([
+      { id: "122307-qbo", qbo_invoice_line_id: "122307-hpu", approved_qty: 0, fulfillment_status: "PENDING", warehouse_status: "PENDING_REVIEW" },
+      { id: "122307-old", logical_demand_key: "122307-hpu", approved_qty: 7, canonical_obligation_qty: 6, fulfillment_status: "PENDING", warehouse_status: "APPROVED" },
+    ], new Set(), new Set());
+
+    expect(undercounted).toMatchObject([{ id: "122273-old", canonical_obligation_qty: 8 }, { id: "122273-ramps", canonical_obligation_qty: 8 }]);
+    expect(openQtyOf(undercounted[0])).toBe(8);
+    expect(openQtyOf(undercounted[1])).toBe(8);
+    expect(overcounted).toMatchObject([{ id: "122307-old", canonical_obligation_qty: 6 }]);
+    expect(openQtyOf(overcounted[0])).toBe(6);
+  });
+
   it("removes Joshua 122353 from every active-demand surface when its QBO sibling shipped", () => {
     const projected = withLogicalFulfilledQty([
       { id: "59b6d8d1-2134-406f-8444-63e99f5856c7", logical_demand_key: "e03613c6-f085-471a-945c-de86f59ff99e", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" },
@@ -129,6 +147,13 @@ describe("shared active logical demand", () => {
     ];
 
     expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["unrelated-open"]);
+  });
+
+  it("keeps a reviewed terminal obligation excluded even when it has remaining quantity", () => {
+    const rows = [{ id: "122332-old", source_record_id: "122332-terminal", approved_qty: 1, fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" }];
+    const resolutions = [{ source_record_id: "122332-terminal", resolution_type: "REPLACED" as const, status: "ACTIVE" as const }];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions)).toEqual([]);
   });
 
   it("does not suppress an obligation when its reviewed resolution is revoked", () => {

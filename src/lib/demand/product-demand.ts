@@ -16,6 +16,7 @@ export type DemandLineLike = {
   id: string;
   product_id?: string | null;
   approved_qty?: number | null;
+  canonical_obligation_qty?: number | null;
   fulfilled_qty?: number | null;
   approval_status?: string | null;
   fulfillment_status?: string | null;
@@ -32,7 +33,8 @@ export type DemandLineLike = {
 };
 
 export function openQtyOf(line: DemandLineLike) {
-  return Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+  const obligationQty = line.canonical_obligation_qty ?? line.approved_qty ?? 0;
+  return Math.max(0, Number(obligationQty) - Number(line.fulfilled_qty ?? 0));
 }
 
 /** Uses recorded fulfillment evidence without mutating the historical queue line. */

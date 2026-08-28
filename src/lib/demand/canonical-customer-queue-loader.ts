@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
+  canonical_obligation_qty?: number | null;
   approval_status: string | null; fulfillment_status: string | null; queue_position_start: number | null;
   queue_position_count: number | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
   source_record_id: string | null; logical_demand_key?: string | null;
@@ -90,6 +91,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   ]);
   const payloadByInvoiceId = new Map((qboInvoices as Array<{ id: string; raw_payload: { PrivateNote?: string | null; Line?: unknown[] } | null }>).map((invoice) => [invoice.id, invoice.raw_payload]));
   const allQboLines = qboLines as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty: number | null }>;
+  const qboOrderedQtyByLineId = new Map(allQboLines.map((line) => [line.id, Math.max(0, Number(line.ordered_qty ?? 0))]));
   const activeQboParentsByNumber = new Map<string, Array<{ source_invoice_id: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>>();
   for (const parent of qboParents as unknown as Array<{ order_number: string | null; source_invoice_id: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null; customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>) {
     if (parent.duplicate_of_order_id || String(parent.cancellation_status ?? "").toUpperCase() === "CANCELLED" || String(parent.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() === "VOIDED") continue;
@@ -99,12 +101,18 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
     const parent = line.shipping_orders;
     const parentFields = { parent_duplicate_of_order_id: parent?.duplicate_of_order_id ?? null, parent_cancellation_status: parent?.cancellation_status ?? null, parent_review_status: parent?.review_status ?? null, parent_qbo_voided: String(payloadByInvoiceId.get(sourceInvoiceId ?? "")?.PrivateNote ?? "").toUpperCase() === "VOIDED", parent_source_invoice_id: sourceInvoiceId ?? null, parent_source_type: parent?.source_type ?? null };
-    if (line.qbo_invoice_line_id || !line.product_id) return { ...line, ...parentFields };
+    if (line.qbo_invoice_line_id || !line.product_id) {
+      const sourceQty = qboOrderedQtyByLineId.get(line.qbo_invoice_line_id ?? "") ?? 0;
+      return { ...line, ...parentFields, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) };
+    }
     const qboParents = activeQboParentsByNumber.get(String(parent?.order_number ?? "")) ?? [];
     const qboParent = qboParents.find((candidate) => normalizeSku(candidate.customers?.company_name ?? candidate.customers?.full_name) === normalizeSku(customerName(line)));
     const bridgeInvoiceId = qboParent?.source_invoice_id ?? sourceInvoiceId;
     const candidates = allQboLines.filter((candidate) => candidate.qbo_invoice_id === bridgeInvoiceId && (candidate.product_id === line.product_id || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key))));
-    return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };
+    const sourceQty = candidates.length === 1 ? qboOrderedQtyByLineId.get(candidates[0].id) ?? 0 : 0;
+    return candidates.length === 1
+      ? { ...line, ...parentFields, logical_demand_key: candidates[0].id, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) }
+      : { ...line, ...parentFields };
   });
 
   const completedInvoiceIds = new Set<string>();

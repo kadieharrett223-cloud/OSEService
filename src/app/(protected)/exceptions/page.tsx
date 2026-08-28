@@ -34,7 +34,7 @@ function severityClass(severity: string) {
 
 function hasCurrentOperationalDemand(order: OrderRow) {
   if (order.duplicate_of_order_id || String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED") return false;
-  if (["ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(order.review_status ?? "").toUpperCase())) return false;
+  if (["PENDING_REVIEW", "ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(order.review_status ?? "").toUpperCase())) return false;
   return (order.shipping_order_lines ?? []).some((line) => {
     const approved = Number(line.approved_qty ?? 0);
     const fulfilled = Number(line.fulfilled_qty ?? 0);

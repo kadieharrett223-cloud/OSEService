@@ -64,6 +64,7 @@ type OpenOrderLineRow = {
   source_record_id?: string | null;
   parent_duplicate_of_order_id?: string | null;
   parent_cancellation_status?: string | null;
+  parent_review_status?: string | null;
   parent_qbo_voided?: boolean;
   warehouse_status: string | null;
   queue_position_start: number | null;
@@ -76,6 +77,7 @@ type OpenOrderLineRow = {
     customers?: { company_name: string | null; full_name: string | null } | null;
     duplicate_of_order_id?: string | null;
     cancellation_status?: string | null;
+    review_status?: string | null;
     qbo_invoices?: { invoice_number: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null;
   } | null;
 };
@@ -206,6 +208,7 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
               order_number,
               duplicate_of_order_id,
               cancellation_status,
+              review_status,
               legacy_customer_name,
               customers (company_name, full_name),
               qbo_invoices (invoice_number, raw_payload)
@@ -230,6 +233,7 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
     ...line,
     parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
     parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+    parent_review_status: line.shipping_orders?.review_status ?? null,
     parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
   }));
   for (const line of dedupeDemandLines(activeOpenLines)) {

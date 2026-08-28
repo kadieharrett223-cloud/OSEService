@@ -20,6 +20,7 @@ type QueueEntry = {
   shipping_orders?: {
     id: string;
     duplicate_of_order_id?: string | null;
+    review_status?: string | null;
     order_number: string | null;
     legacy_customer_name: string | null;
     qbo_invoices?: {
@@ -82,6 +83,7 @@ export default async function OrderQueuePage() {
       shipping_orders (
         id,
         ${duplicateParentField}
+        review_status,
         order_number,
         legacy_customer_name,
         qbo_invoices (
@@ -97,6 +99,7 @@ export default async function OrderQueuePage() {
   const queueEntries = (queueRows ?? []) as QueueEntry[];
   const activeQueueEntries = queueEntries.filter((line) =>
     !line.shipping_orders?.duplicate_of_order_id
+    && String(line.shipping_orders?.review_status ?? "").trim().toUpperCase() !== "PENDING_REVIEW"
     && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
   );
   const openDemand = activeQueueEntries.reduce((sum, line) => sum + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)), 0);

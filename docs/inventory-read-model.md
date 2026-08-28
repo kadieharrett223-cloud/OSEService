@@ -92,7 +92,8 @@ as current customer demand. Active QBO and OLD_ERP sibling parents are resolved 
 `source_invoice_id`, so a completed QBO physical line suppresses a stale OLD_ERP sibling that still
 says `IN_WAREHOUSE` or carries queue metadata. Warehouse status, queue positions, and allocations
 are display or operational metadata only; none may resurrect a line whose canonical remaining
-demand is zero.
+demand is zero. The same activation rule is used by Inventory, Customer List, Order Queue, container
+coverage, and ERP Health when they classify current operational demand.
 
 The read-only production audit is:
 

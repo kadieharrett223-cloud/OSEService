@@ -56,10 +56,12 @@ candidate sequence used during QuickBooks intake before loading Warehouse and in
 deleted invoice label therefore cannot bypass an active product alias and incorrectly render an
 otherwise covered customer line as waiting.
 
-Orders still in `PENDING_REVIEW` display `Pending Review` in the detail header, fulfillment panel,
-and unshipped item rows. Their shipment selection controls remain unavailable until the order is
-activated, so physical supply visibility cannot be mistaken for active Customer List demand or
-shipping readiness.
+Historical parents remain excluded from active Customer List demand until activated. `Pending Review`
+is displayed only while a physical item lacks a product mapping. Mapped physical lines show their
+actual readiness state and can be selected for fulfillment, including lines already moved to
+Warehouse. The existing shipment action continues to enforce authentication, line ownership,
+mapping, quantity, and fulfillment-record checks; historical review status is not a shipment
+blocker.
 
 Re-entering an existing QuickBooks invoice is the explicit single-order activation path. It refreshes
 the order from QBO source lines, marks the parent approved, and changes only untouched,

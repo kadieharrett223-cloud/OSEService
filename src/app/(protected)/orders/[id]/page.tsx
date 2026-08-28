@@ -1389,6 +1389,10 @@ export default async function OrderDetailPage({
     };
   }
 
+  const requiresMappingReview = isPendingReview && visibleItems.some((item) =>
+    !item.isNonInventory && !item.productId && !item.shippingLine?.product_id,
+  );
+
   const itemStockSummary = visibleItems.map((item) => {
     const supply = getItemSupplySnapshot(item);
     const orderedQty = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
@@ -1406,7 +1410,7 @@ export default async function OrderDetailPage({
       ? "N/A"
       : needed === 0 && orderedQty > 0
       ? "Shipped"
-      : isPendingReview
+      : requiresMappingReview && !item.productId && !item.shippingLine?.product_id
         ? "Pending Review"
       : fulfilled > 0
         ? "Partially Shipped"
@@ -1453,7 +1457,7 @@ export default async function OrderDetailPage({
     ? "Fulfilled"
     : totalUnitsShipped > 0
       ? "Partially Shipped"
-      : isPendingReview
+      : requiresMappingReview
         ? "Pending Review"
       : totalUnitsInStock >= totalUnitsNeeded && totalUnitsNeeded > 0
         ? "Ready to Ship"
@@ -1469,12 +1473,12 @@ export default async function OrderDetailPage({
       ? "Complete"
       : totalUnitsShipped > 0
         ? "Partially Fulfilled"
-      : isPendingReview
+      : requiresMappingReview
         ? "Pending Review"
         : "Awaiting Fulfillment";
 
   const shipReadyItems = itemStockSummary
-    .filter(({ item, status }) => !isPendingReview && Boolean(item.shippingLine?.product_id) && Boolean(item.shippingLine) && status === "Ready")
+    .filter(({ item, status }) => Boolean(item.shippingLine?.product_id) && Boolean(item.shippingLine) && status === "Ready")
     .map(({ item }) => ({
       id: item.shippingLine!.id,
       label: item.description,
@@ -1520,7 +1524,7 @@ export default async function OrderDetailPage({
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
               <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
-              <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{isPendingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
+              <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
               <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
               <span className="font-normal text-[#64748b]">· {formatDate(orderRecord.created_at)} · {orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</span>
             </div>
@@ -1574,9 +1578,9 @@ export default async function OrderDetailPage({
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsNeeded} remaining</span>
                 {isServiceOnlyOrder ? (
                   <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>
-                ) : !isPendingReview ? (
+                ) : (
                   <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
-                ) : null}
+                )}
               </div>
             </div>
 
@@ -1640,7 +1644,7 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !isPendingReview && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
+                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>

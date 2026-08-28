@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { autosaveWorkflowWorkspaceAction } from "@/app/(protected)/cases/[id]/actions";
 
 type AutoSaveState = {
@@ -36,6 +37,7 @@ export function WorkflowAutosaveForm({
   etaDate,
 }: WorkflowAutosaveFormProps) {
   const [state, formAction, isPending] = useActionState(autosaveWorkflowWorkspaceAction, initialState);
+  const router = useRouter();
   const [draftStatus, setDraftStatus] = useState(status);
   const [draftAssigneeId, setDraftAssigneeId] = useState(assigneeId);
   const [draftNextAction, setDraftNextAction] = useState(nextAction);
@@ -54,7 +56,11 @@ export function WorkflowAutosaveForm({
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [draftStatus, draftAssigneeId, draftNextAction, draftEtaDate]);
+  }, [draftAssigneeId, draftNextAction, draftEtaDate]);
+
+  useEffect(() => {
+    if (state.savedAt) router.refresh();
+  }, [router, state.savedAt]);
 
   return (
     <form ref={formRef} action={formAction} className="space-y-3">
@@ -69,7 +75,6 @@ export function WorkflowAutosaveForm({
             className="select"
             value={draftStatus}
             onChange={(event) => setDraftStatus(event.target.value)}
-            onBlur={() => formRef.current?.requestSubmit()}
           >
             {statusOptions.map((option) => (
               <option key={option} value={option}>{option}</option>
@@ -128,9 +133,15 @@ export function WorkflowAutosaveForm({
         </select>
       </div>
 
-      <div className="text-xs text-[#64748b]">
-        {isPending ? "Saving..." : state.error ? `Save failed: ${state.error}` : state.savedAt ? "Saved just now" : "Autosave enabled"}
+      <div className="flex items-center gap-3">
+        <button type="submit" className="btn-primary" disabled={isPending}>
+          {isPending ? "Saving..." : "Save Workflow"}
+        </button>
+        <span className="text-xs text-[#64748b]">
+          {state.error ? `Save failed: ${state.error}` : state.savedAt ? "Saved just now" : "Status changes save here"}
+        </span>
       </div>
+
     </form>
   );
 }

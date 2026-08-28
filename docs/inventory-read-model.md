@@ -104,6 +104,12 @@ are display or operational metadata only; none may resurrect a line whose canoni
 demand is zero. The same activation rule is used by Inventory, Customer List, Order Queue, container
 coverage, and ERP Health when they classify current operational demand.
 
+Operational eligibility is evidence-based, never invoice-number-based. A mapped physical line
+with approved remaining quantity remains operational unless its parent is cancelled, voided,
+archived, a reviewed duplicate, or its fulfillment evidence is terminal. A historical invoice
+cannot be suppressed by a hard-coded invoice-number exception; doing so would incorrectly hide
+real products from Customer List, coverage, and fulfillment selection.
+
 The read-only production audit is:
 
 ```powershell

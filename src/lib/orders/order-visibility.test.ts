@@ -50,6 +50,16 @@ describe("orders visibility and activation", () => {
     expect(result.isNewOrder).toBe(true);
   });
 
+  it("keeps a mapped open 126037 order operational", () => {
+    const result = classifyOrder(order({
+      order_number: "126037",
+      shipping_order_lines: [line({ products: { sku: "4032S" } })],
+    }));
+
+    expect(result.isVisibleOperationalOrder).toBe(true);
+    expect(result.operationalLines).toHaveLength(1);
+  });
+
   it("keeps a reconciled OLD_ERP order visible when it has approved remaining demand", () => {
     const result = classifyOrder(order({
       order_number: "11746",

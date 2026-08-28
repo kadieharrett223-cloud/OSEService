@@ -725,7 +725,7 @@ export default async function InventoryPage({
 
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
-    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
+    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code))) continue;
     const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
     if (!sharedQueueRow) continue;
 
@@ -808,7 +808,7 @@ export default async function InventoryPage({
   const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
-    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code)) || String(line.shipping_orders?.order_number ?? "").trim() === "126037") continue;
+    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code))) continue;
     const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     const floorReservedQty = (line.inventory_allocations ?? [])
       .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")

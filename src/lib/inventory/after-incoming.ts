@@ -7,11 +7,10 @@ export function getAfterIncomingInventory({
   incoming: number;
   openDemand: number;
 }) {
-  const netAfterIncoming = onFloor + incoming - openDemand;
+  const balanceAfterIncoming = onFloor + incoming - openDemand;
 
   return {
-    netAfterIncoming,
-    availableAfterIncoming: Math.max(0, netAfterIncoming),
-    backorderedAfterIncoming: Math.max(0, -netAfterIncoming),
+    availableAfterIncoming: Math.max(0, balanceAfterIncoming),
+    backorderedAfterIncoming: Math.max(0, -balanceAfterIncoming),
   };
 }

@@ -78,6 +78,17 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.inserts[0]?.productId).toBe("product-lift");
   });
 
+  it("maps a QBO duplicate-suffix SKU to its base operational alias", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-suffix", product_id: null, qbo_sku: "4PML-9-1" })],
+      [],
+      new Map([["4PML-9", "product-lift"]]),
+    );
+
+    expect(qboSkuCandidates("4PML-9-1")).toEqual(["4PML-9-1", "4PML-9"]);
+    expect(plan.inserts[0]?.productId).toBe("product-lift");
+  });
+
   it("maps a deleted QBO SKU with multiple suffixes without stripping the base capacity", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inv-line-double-deleted", product_id: null, qbo_sku: "4PHDXL-12-1-1 (deleted)" })],

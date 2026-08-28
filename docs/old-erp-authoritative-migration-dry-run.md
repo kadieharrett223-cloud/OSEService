@@ -101,8 +101,8 @@ Behavior:
 - Includes only `Paid` and `Partially Paid` invoices.
 - Skips invoices already represented by a `shipping_orders.source_invoice_id`.
 - Resolves QBO line SKUs through `products.sku` and `product_aliases.alias`.
-- Creates new shipping orders and mapped lines in `PENDING_REVIEW`.
-- Does not approve lines, allocate inventory, or change inventory quantities.
+- Creates new shipping orders and mapped lines as `APPROVED` operational demand with an `ON_FLOOR` warehouse state.
+- Does not allocate inventory or change inventory quantities.
 - Leaves invoices with unmapped lines in the exception report.
 
 Latest apply result:
@@ -112,12 +112,7 @@ Latest apply result:
 - Repeat preview: `1,017` already imported, `0` new orders
 - QBO exceptions: `3,352` invoices with no mapped product line
 
-New/Review order handling:
-
-- New/Review cards now include `Accept Order`.
-- Accepting an order approves each pending line, sets approved quantity to ordered quantity, moves the line to `READY_TO_SHIP`, and marks the order `APPROVED`.
-- Accepting an order does not create inventory allocations or change inventory quantities.
-- Existing line-level review remains available for partial/exception handling.
+Mapped paid QBO lines are immediately eligible for the normal Orders and fulfillment workflow. Unmapped lines remain outside operational demand until a user resolves their product mapping.
 
 Recent customer/order tracking rule:
 

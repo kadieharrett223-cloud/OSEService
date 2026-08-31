@@ -140,6 +140,17 @@ node scripts/debug-inventory-read-model.mjs 4032S 4PHR-9X 2PBP-8
 
 ### Physical reconciliation
 
+For a complete read-only August 7-to-current management report, first run the three source audits, then consolidate their generated evidence:
+
+```powershell
+node --env-file=.env.local scripts/audit-sku-physical-reconciliation.mjs --all
+node --env-file=.env.local scripts/audit-current-operational-inventory-demand.mjs
+$env:RUN_CANONICAL_COVERAGE_AUDIT='1'; node --env-file=.env.local node_modules/vitest/vitest.mjs run src/lib/fulfillment/canonical-coverage-production-audit.test.ts
+node scripts/report-aug7-current-inventory-reconciliation.mjs
+```
+
+The consolidator writes `tmp/import-reports/aug7-current-inventory-reconciliation.json` and `.md`. It never connects to or writes production; it only reads the three generated read-only audit reports. Missing or ambiguous August 7 baseline evidence is explicitly classified `INSUFFICIENT_EVIDENCE`.
+
 `scripts/audit-sku-physical-reconciliation.mjs` is a read-only physical ledger. It starts from a
 trusted final OLD ERP opening recount, adds received-container and legitimate adjustment events, and
 subtracts only warehouse-eligible fulfilled units. Explicit `DROPSHIP` and `OTHER` fulfillment is

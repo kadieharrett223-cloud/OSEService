@@ -299,7 +299,6 @@ const getCachedOrdersDataset = unstable_cache(async () => {
       partial: projectedOrders.filter((order) => order.tabs.includes("partial")).length,
       archived: projectedOrders.filter((order) => order.tabs.includes("archived")).length,
       cancelled: projectedOrders.filter((order) => order.tabs.includes("cancelled")).length,
-      recommended: projectedOrders.filter((order) => order.recommendedForWarehouse).length,
     };
 
   return { projectedOrders, tabCounts };
@@ -318,7 +317,7 @@ export default async function OrdersPage({
   const currentPage = Math.max(1, Number.parseInt(String(params.page ?? "1"), 10) || 1);
 
   let projectedOrders: ProjectedOrderRow[] = [];
-  let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0, recommended: 0 };
+  let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
   let ordersLoadError: Error | null = null;
   try {
     const dataset = await getCachedOrdersDataset();
@@ -334,8 +333,12 @@ export default async function OrdersPage({
     redirect(`/orders?${new URLSearchParams({ tab: exactSearchTab, q: searchText }).toString()}`);
   }
 
-  const matchingOrders = projectedOrders.filter((order) => (activeTab === "recommended" ? order.recommendedForWarehouse : order.tabs.includes(activeTab)) && (!searchText || globalSearchResults.includes(order)));
-  const filteredOrders = activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders;
+  const matchingOrders = projectedOrders.filter((order) => (order.tabs.includes(activeTab) || (activeTab === "warehouse" && order.recommendedForWarehouse)) && (!searchText || globalSearchResults.includes(order)));
+  const filteredOrders = activeTab === "new"
+    ? sortNewOrdersByOperationalRecency(matchingOrders)
+    : activeTab === "warehouse"
+      ? matchingOrders.toSorted((left, right) => Number(right.recommendedForWarehouse) - Number(left.recommendedForWarehouse))
+      : matchingOrders;
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -346,7 +349,6 @@ export default async function OrdersPage({
   };
 
   const tabs = [
-    { id: "recommended", label: "Recommended Warehouse" },
     { id: "new", label: "New Orders" },
     { id: "orders", label: "Orders" },
     { id: "warehouse", label: "In Warehouse" },
@@ -424,9 +426,9 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
-        {activeTab === "recommended" ? (
+        {activeTab === "warehouse" ? (
           <p className="mb-4 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1e3a8a]">
-            Up to 10 complete, unshipped orders that can be packed from current on-floor inventory, selected oldest first. Orders already assigned to warehouse or floor inventory are excluded from available stock.
+            Recommended orders appear first. Up to 10 complete, unshipped orders that can be packed from current on-floor inventory are selected oldest first. Orders already assigned to warehouse or floor inventory are excluded from available stock.
           </p>
         ) : null}
 
@@ -472,6 +474,7 @@ export default async function OrdersPage({
                 <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
                   <td className="px-3 py-3">
                     <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{order.invoiceNumber}</Link>
+                    {order.recommendedForWarehouse ? <span className="ml-2 rounded-full bg-[#dbeafe] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">Recommended</span> : null}
                     <div className="mt-1 text-xs text-[#64748b]">{order.customerName}</div>
                   </td>
                   <td className="px-3 py-3 font-semibold">{order.hasPhysicalLines ? `${order.itemCount} items · ${order.totalQty} units` : "Service / no inventory"}</td>
@@ -482,7 +485,7 @@ export default async function OrdersPage({
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {(activeTab === "new" || activeTab === "recommended") && order.hasPhysicalLines ? (
+                    {(activeTab === "new" || order.recommendedForWarehouse) && order.hasPhysicalLines ? (
                       <form action={moveOrderToWarehouseAction}>
                         <input type="hidden" name="orderId" value={order.id} />
                         <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>

@@ -34,3 +34,12 @@ ERP Health actions explicitly expire the Inventory route and the queue and/or he
 those inputs. No cache
 invalidation writes to Supabase or alters inventory transactions, demand, queue order, fulfillment, or QBO
 intake behavior.
+
+## Invoice Entry
+
+`/orders/new` is the explicit, invoice-number entry point for manually admitting a QuickBooks invoice into
+operations. Selecting either a missing invoice or an existing dormant representation runs the same guarded
+refresh and activation path, then returns to the first page of the New Orders tab. New Orders sorts by the
+order's operational `updated_at` timestamp, so an invoice entered through this workflow is shown first while
+the displayed source order date remains unchanged. The action updates order/line operational state and queue
+positions when mapping evidence permits; it never changes inventory quantities or bulk-activates invoices.

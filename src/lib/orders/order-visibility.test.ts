@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyOrder, matchesOrderTab, type ClassificationLine, type ClassificationOrder } from "./order-visibility";
+import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency, type ClassificationLine, type ClassificationOrder } from "./order-visibility";
 
 function line(overrides: Partial<ClassificationLine> = {}): ClassificationLine {
   return {
@@ -26,6 +26,16 @@ function order(overrides: Partial<ClassificationOrder> = {}): ClassificationOrde
 }
 
 describe("orders visibility and activation", () => {
+  it("places the most recently entered invoice first in New Orders", () => {
+    const orders = sortNewOrdersByOperationalRecency([
+      { invoice: "older", updatedAt: "2026-08-01T09:00:00.000Z" },
+      { invoice: "just-entered", updatedAt: "2026-08-31T10:00:00.000Z" },
+      { invoice: "middle", updatedAt: "2026-08-20T09:00:00.000Z" },
+    ]);
+
+    expect(orders.map((order) => order.invoice)).toEqual(["just-entered", "middle", "older"]);
+  });
+
   it("hides a dormant PENDING_REVIEW bulk import that was never activated", () => {
     // Exactly the shape of historical imports 7955 / 8040: ordered qty but nothing approved.
     const result = classifyOrder(order({

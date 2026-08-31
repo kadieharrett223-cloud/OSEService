@@ -87,14 +87,12 @@ export default async function NewOrderPage({
                   <p className="mt-1 text-sm text-[#334155]">{invoice.customerName}</p>
                   <p className="mt-1 text-xs text-[#64748b]">{invoice.invoice_date ?? "Date unavailable"} · {invoice.payment_status ?? "Payment status unavailable"} · {invoice.total_amount == null ? "Total unavailable" : `$${invoice.total_amount.toFixed(2)}`}</p>
                 </div>
-                {invoice.existingOrderId ? (
-                  <Link href={`/orders/${invoice.existingOrderId}`} className="btn-secondary inline-flex">Open Order</Link>
-                ) : (
-                  <form action={createOrderFromQuickbooksInvoiceAction}>
-                    <input type="hidden" name="qbo_invoice_id" value={invoice.id} />
-                    <button type="submit" className="btn-primary">Add to New Orders</button>
-                  </form>
-                )}
+                <form action={createOrderFromQuickbooksInvoiceAction}>
+                  <input type="hidden" name="qbo_invoice_id" value={invoice.id} />
+                  <button type="submit" className="btn-primary">
+                    {invoice.existingOrderId ? "Open in New Orders" : "Add to New Orders"}
+                  </button>
+                </form>
               </div>
             ))}
           </div>

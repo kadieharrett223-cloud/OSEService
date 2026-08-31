@@ -145,3 +145,12 @@ export function matchesOrderTab(classification: OrderClassification, tabId: stri
       return true;
   }
 }
+
+/** Explicit invoice entry updates an order, so New Orders displays the most recently entered work first. */
+export function sortNewOrdersByOperationalRecency<T extends { updatedAt: string }>(orders: T[]) {
+  return orders.slice().sort((left, right) => {
+    const leftUpdated = Date.parse(left.updatedAt) || 0;
+    const rightUpdated = Date.parse(right.updatedAt) || 0;
+    return rightUpdated - leftUpdated;
+  });
+}

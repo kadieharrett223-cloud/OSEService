@@ -569,6 +569,7 @@ async function activateExistingQuickbooksOrder(
   if (plan.productIds.length > 0) await recalculateProductQueues(plan.productIds);
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
+  revalidatePath("/inventory");
 }
 
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
@@ -588,7 +589,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   const resolution = resolveInvoiceOrder(existingOrder);
   if (resolution.action === "refresh") {
     await activateExistingQuickbooksOrder(adminClient, resolution.orderId, invoice);
-    redirect(`/orders/${resolution.orderId}?message=Order+refreshed+from+QuickBooks`);
+    redirect(`/orders?tab=new&message=QuickBooks+invoice+opened+in+New+Orders`);
   }
 
   const { data: customer } = invoice.customer_id

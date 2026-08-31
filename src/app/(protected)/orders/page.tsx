@@ -2,7 +2,7 @@ import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
+import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
@@ -39,6 +39,7 @@ type OrderSummary = {
   legacy_customer_name: string | null;
   review_status: string | null;
   created_at: string;
+  updated_at: string;
   customers?: {
     company_name: string | null;
     full_name: string | null;
@@ -74,6 +75,7 @@ type ProjectedOrderRow = {
   invoiceNumber: string;
   customerName: string;
   createdAt: string;
+  updatedAt: string;
   searchable: string;
   hasPhysicalLines: boolean;
   itemCount: number;
@@ -105,6 +107,7 @@ function buildOrdersSelect(includeDuplicateField: boolean) {
     "review_status",
     "cancellation_status",
     "created_at",
+    "updated_at",
   ];
   if (includeDuplicateField) orderFields.splice(3, 0, "duplicate_of_order_id");
   return `
@@ -228,7 +231,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         order.qbo_invoices?.invoice_number,
         ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
       ].filter(Boolean).join(" ").toLowerCase();
-      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs };
+      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs };
     });
     const tabCounts = {
       orders: projectedOrders.filter((order) => order.tabs.includes("orders")).length,
@@ -271,7 +274,8 @@ export default async function OrdersPage({
     redirect(`/orders?${new URLSearchParams({ tab: exactSearchTab, q: searchText }).toString()}`);
   }
 
-  const filteredOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchResults.includes(order)));
+  const matchingOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchResults.includes(order)));
+  const filteredOrders = activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders;
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);

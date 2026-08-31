@@ -44,6 +44,7 @@ function compareQueueLines(left: QueueLine, right: QueueLine) {
 export function isActiveQueueLine(line: QueueLine) {
   return Boolean(
     line.product_id
+      && String(line.shipping_orders?.review_status ?? "").toUpperCase() !== "PENDING_REVIEW"
       && isOpenDemandLine({
         ...line,
         parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,

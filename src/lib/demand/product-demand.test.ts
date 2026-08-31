@@ -20,13 +20,13 @@ describe("shared active logical demand", () => {
     expect(dedupeDemandLines(lines)[0].warehouse_status).toBe("IN_WAREHOUSE");
   });
 
-  it("excludes duplicate, cancelled, pending-review, archived, fulfilled, shipped, and voided parents from active demand", () => {
+  it("includes remaining lines regardless of parent status, while excluding duplicate, cancelled, and voided parents", () => {
     expect(isOpenDemandLine({ id: "duplicate", approved_qty: 1, parent_duplicate_of_order_id: "parent", fulfillment_status: "PENDING" })).toBe(false);
     expect(isOpenDemandLine({ id: "cancelled", approved_qty: 1, parent_cancellation_status: "CANCELLED", fulfillment_status: "PENDING" })).toBe(false);
-    expect(isOpenDemandLine({ id: "pending-review", approved_qty: 1, parent_review_status: "PENDING_REVIEW", fulfillment_status: "PENDING" })).toBe(false);
-    expect(isOpenDemandLine({ id: "archived", approved_qty: 1, parent_review_status: "ARCHIVED", fulfillment_status: "PENDING" })).toBe(false);
-    expect(isOpenDemandLine({ id: "fulfilled-parent", approved_qty: 1, parent_review_status: "FULFILLED", fulfillment_status: "PENDING" })).toBe(false);
-    expect(isOpenDemandLine({ id: "shipped-parent", approved_qty: 1, parent_review_status: "SHIPPED", fulfillment_status: "PENDING" })).toBe(false);
+    expect(isOpenDemandLine({ id: "pending-review", approved_qty: 1, parent_review_status: "PENDING_REVIEW", fulfillment_status: "PENDING" })).toBe(true);
+    expect(isOpenDemandLine({ id: "archived", approved_qty: 1, parent_review_status: "ARCHIVED", fulfillment_status: "PENDING" })).toBe(true);
+    expect(isOpenDemandLine({ id: "fulfilled-parent", approved_qty: 1, parent_review_status: "FULFILLED", fulfillment_status: "PENDING" })).toBe(true);
+    expect(isOpenDemandLine({ id: "shipped-parent", approved_qty: 1, parent_review_status: "SHIPPED", fulfillment_status: "PENDING" })).toBe(true);
     expect(isOpenDemandLine({ id: "voided", approved_qty: 1, parent_qbo_voided: true, fulfillment_status: "PENDING" })).toBe(false);
   });
 
@@ -132,7 +132,7 @@ describe("shared active logical demand", () => {
     expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-fulfilled"]), new Set()).map((line) => line.id)).toEqual(["paid-qbo-only"]);
   });
 
-  it("keeps reviewed SKU corrections, replacements, and duplicate imports terminal across source siblings", () => {
+  it("keeps reviewed SKU corrections visible while excluding reviewed replacements and duplicates", () => {
     const rows = [
       { id: "11601-old", source_record_id: "da25408f-149b-4387-92e9-1591e56c5afb", logical_demand_key: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },
       { id: "11601-qbo", qbo_invoice_line_id: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },
@@ -147,10 +147,10 @@ describe("shared active logical demand", () => {
       { source_record_id: "1752481a-2b8f-4ad2-ae93-efb6c84f24d1", resolution_type: "REPLACED" as const },
     ];
 
-    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["unrelated-open"]);
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["11601-old", "unrelated-open"]);
   });
 
-  it("keeps a reviewed terminal obligation excluded even when it has remaining quantity", () => {
+  it("keeps a reviewed replacement obligation excluded when it has remaining quantity", () => {
     const rows = [{ id: "122332-old", source_record_id: "122332-terminal", approved_qty: 1, fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" }];
     const resolutions = [{ source_record_id: "122332-terminal", resolution_type: "REPLACED" as const, status: "ACTIVE" as const }];
 

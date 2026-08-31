@@ -58,12 +58,11 @@ export function withLogicalFulfilledQty<T extends DemandLineLike>(lines: T[]): T
   return lines.map((line) => withProvenFulfilledQty(line, fulfilledQtyByIdentity.get(demandLineIdentity(line)) ?? 0));
 }
 
-/** Open demand is who still needs the product, not everyone who ever ordered it. */
+/** Customer List demand includes every remaining physical obligation that has not been cancelled, voided, duplicated, or shipped. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
-  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || ["PENDING_REVIEW", "ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(line.parent_review_status ?? "").toUpperCase()) || line.parent_qbo_voided) return false;
-  if (CLOSED_DEMAND_STATES.includes(String(line.approval_status ?? "").toUpperCase())) return false;
-  return !CLOSED_DEMAND_STATES.includes(String(line.fulfillment_status ?? "").toUpperCase());
+  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
+  return !["FULFILLED", "SHIPPED", "CANCELLED", "REPLACED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
 }
 
 /** Keeps a completed QBO order from being resurrected by its bridged OLD_ERP sibling. */
@@ -76,18 +75,18 @@ export function excludeCompletedQboOrderSiblings<T extends DemandLineLike>(lines
   return lines.filter((line) => !line.parent_source_invoice_id || !completedQboInvoiceIds.has(line.parent_source_invoice_id));
 }
 
-/** Applies the one canonical demand pipeline used by inventory totals and Customer List rows. */
+/** Applies the one canonical Customer List pipeline used by inventory totals and Customer List rows. */
 export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   lines: T[],
   completedQboLineIds: ReadonlySet<string>,
   completedQboInvoiceIds: ReadonlySet<string>,
   reviewedResolutions: readonly ReviewedObligationResolution[] = [],
 ) {
-  return dedupeDemandLines(excludeCompletedQboSiblings(
-    excludeCompletedQboOrderSiblings(withLogicalFulfilledQty(
-      excludeReviewedObligationResolutions(lines, reviewedResolutions),
-    ), completedQboInvoiceIds),
-    completedQboLineIds,
+  void completedQboLineIds;
+  void completedQboInvoiceIds;
+  const terminalResolutions = reviewedResolutions.filter((resolution) => ["DUPLICATE", "REPLACED", "HISTORICAL_FULFILLMENT"].includes(resolution.resolution_type));
+  return dedupeDemandLines(withLogicalFulfilledQty(
+    excludeReviewedObligationResolutions(lines, terminalResolutions),
   )).filter(isOpenDemandLine);
 }
 

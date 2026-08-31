@@ -44,6 +44,15 @@ order's operational `updated_at` timestamp, so an invoice entered through this w
 the displayed source order date remains unchanged. The action updates order/line operational state and queue
 positions when mapping evidence permits; it never changes inventory quantities or bulk-activates invoices.
 
+## Customer List Coverage
+
+Customer List is the shared per-item view for all remaining physical ERP order lines. It includes a mapped
+line regardless of source availability, allocation, warehouse state, parent review status, or reconciliation
+health state. Lines are excluded only when they have no remaining quantity, are fulfilled/shipped/cancelled at
+or replaced at the line level, or belong to a cancelled, voided, or duplicate order. Reviewed duplicate,
+replacement, and historical fulfillment evidence also keep a stale re-imported line out of the list. Inventory,
+order detail, and container coverage use the same read-only projection.
+
 ## Warehouse Recommendations
 
 The `In Warehouse` Orders tab shows a read-only recommended packing batch before its existing warehouse work. It selects up to 10 complete New Orders

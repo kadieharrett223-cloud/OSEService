@@ -333,12 +333,11 @@ export default async function OrdersPage({
     redirect(`/orders?${new URLSearchParams({ tab: exactSearchTab, q: searchText }).toString()}`);
   }
 
-  const matchingOrders = projectedOrders.filter((order) => (order.tabs.includes(activeTab) || (activeTab === "warehouse" && order.recommendedForWarehouse)) && (!searchText || globalSearchResults.includes(order)));
-  const filteredOrders = activeTab === "new"
-    ? sortNewOrdersByOperationalRecency(matchingOrders)
-    : activeTab === "warehouse"
-      ? matchingOrders.toSorted((left, right) => Number(right.recommendedForWarehouse) - Number(left.recommendedForWarehouse))
-      : matchingOrders;
+  const matchingOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchResults.includes(order)));
+  const recommendedOrders = activeTab === "warehouse"
+    ? projectedOrders.filter((order) => order.recommendedForWarehouse && (!searchText || globalSearchResults.includes(order)))
+    : [];
+  const filteredOrders = activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders;
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -347,6 +346,51 @@ export default async function OrdersPage({
     if (searchText) query.set("q", searchText);
     return `/orders?${query.toString()}`;
   };
+
+  const renderOrderTable = (orders: ProjectedOrderRow[], showRecommendedBadge = false) => (
+    <div className="overflow-x-auto rounded-xl border border-[#e5e7eb]">
+      <table className="w-full min-w-[980px] text-left text-sm">
+        <thead className="bg-[#f8fafc]">
+          <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
+            <th className="px-3 py-3">Order / Customer</th>
+            <th className="px-3 py-3">Ordered</th>
+            <th className="px-3 py-3">Shipped</th>
+            <th className="px-3 py-3">Remaining</th>
+            <th className="px-3 py-3">Remaining Status</th>
+            <th className="px-3 py-3">Order Date</th>
+            <th className="px-3 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((order) => (
+            <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
+              <td className="px-3 py-3">
+                <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{order.invoiceNumber}</Link>
+                {showRecommendedBadge ? <span className="ml-2 rounded-full bg-[#dbeafe] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">Recommended</span> : null}
+                <div className="mt-1 text-xs text-[#64748b]">{order.customerName}</div>
+              </td>
+              <td className="px-3 py-3 font-semibold">{order.hasPhysicalLines ? `${order.itemCount} items · ${order.totalQty} units` : "Service / no inventory"}</td>
+              <td className="px-3 py-3 font-semibold text-[#0f766e]">{order.hasPhysicalLines ? `${order.shippedQty} of ${order.totalQty}` : "—"}</td>
+              <td className="px-3 py-3 font-semibold text-[#b45309]">{order.hasPhysicalLines ? order.remainingQty : "—"}</td>
+              <td className="px-3 py-3 font-semibold text-[#334155]">{order.hasPhysicalLines ? order.remainingStatus : "No physical fulfillment"}</td>
+              <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.createdAt)}</td>
+              <td className="px-3 py-3 text-right">
+                <div className="flex justify-end gap-2">
+                  <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
+                  {(activeTab === "new" || showRecommendedBadge) && order.hasPhysicalLines ? (
+                    <form action={moveOrderToWarehouseAction}>
+                      <input type="hidden" name="orderId" value={order.id} />
+                      <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>
+                    </form>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 
   const tabs = [
     { id: "new", label: "New Orders" },
@@ -427,9 +471,15 @@ export default async function OrdersPage({
         ) : null}
 
         {activeTab === "warehouse" ? (
-          <p className="mb-4 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1e3a8a]">
-            Recommended orders appear first. Up to 10 complete, unshipped orders that can be packed from current on-floor inventory are selected oldest first. Orders already assigned to warehouse or floor inventory are excluded from available stock.
-          </p>
+          <details className="mb-4">
+            <summary className="btn-secondary inline-flex cursor-pointer">See Recommended ({recommendedOrders.length})</summary>
+            <div className="mt-3 space-y-3">
+              <p className="rounded-lg border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1e3a8a]">
+                Up to 10 complete, unshipped orders that can be packed from current on-floor inventory, selected oldest first. Orders already assigned to warehouse or floor inventory are excluded from available stock.
+              </p>
+              {recommendedOrders.length > 0 ? renderOrderTable(recommendedOrders, true) : <p className="text-sm text-[#64748b]">No orders are currently recommended.</p>}
+            </div>
+          </details>
         ) : null}
 
         {globalSearchResults.length > 1 ? (
@@ -455,50 +505,7 @@ export default async function OrdersPage({
         ) : null}
 
         {orderSummaries.length > 0 ? (
-          <div className="overflow-x-auto rounded-xl border border-[#e5e7eb]">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="bg-[#f8fafc]">
-                <tr className="border-b border-[#e5e7eb] text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">
-                  <th className="px-3 py-3">Order / Customer</th>
-                  <th className="px-3 py-3">Ordered</th>
-                  <th className="px-3 py-3">Shipped</th>
-                  <th className="px-3 py-3">Remaining</th>
-                  <th className="px-3 py-3">Remaining Status</th>
-                  <th className="px-3 py-3">Order Date</th>
-                  <th className="px-3 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-            {orderSummaries.map((order) => {
-              return (
-                <tr key={order.id} className="border-b border-[#f1f5f9] last:border-0 hover:bg-[#fafbfc]">
-                  <td className="px-3 py-3">
-                    <Link href={`/orders/${order.id}`} className="font-semibold text-[#1d4ed8] hover:underline">{order.invoiceNumber}</Link>
-                    {order.recommendedForWarehouse ? <span className="ml-2 rounded-full bg-[#dbeafe] px-2 py-1 text-xs font-semibold text-[#1d4ed8]">Recommended</span> : null}
-                    <div className="mt-1 text-xs text-[#64748b]">{order.customerName}</div>
-                  </td>
-                  <td className="px-3 py-3 font-semibold">{order.hasPhysicalLines ? `${order.itemCount} items · ${order.totalQty} units` : "Service / no inventory"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#0f766e]">{order.hasPhysicalLines ? `${order.shippedQty} of ${order.totalQty}` : "—"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#b45309]">{order.hasPhysicalLines ? order.remainingQty : "—"}</td>
-                  <td className="px-3 py-3 font-semibold text-[#334155]">{order.hasPhysicalLines ? order.remainingStatus : "No physical fulfillment"}</td>
-                  <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.createdAt)}</td>
-                  <td className="px-3 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {(activeTab === "new" || order.recommendedForWarehouse) && order.hasPhysicalLines ? (
-                      <form action={moveOrderToWarehouseAction}>
-                        <input type="hidden" name="orderId" value={order.id} />
-                        <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>
-                      </form>
-                    ) : null}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-              </tbody>
-            </table>
-          </div>
+          renderOrderTable(orderSummaries)
         ) : null}
 
         {filteredOrders.length > pageSize ? (

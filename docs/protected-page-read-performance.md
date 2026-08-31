@@ -55,7 +55,7 @@ order detail, and container coverage use the same read-only projection.
 
 ## Warehouse Recommendations
 
-The `In Warehouse` Orders tab shows a read-only recommended packing batch before its existing warehouse work. It selects up to 10 complete New Orders
+The `In Warehouse` Orders tab keeps its existing warehouse work visible by default and offers the read-only recommended packing batch through its `See Recommended` disclosure. It selects up to 10 complete New Orders
 with remaining mapped physical lines, ordered by the oldest QuickBooks `qbo_invoices.invoice_date` first. When a record has no QuickBooks invoice date,
 it falls back to `shipping_orders.created_at`. Selection uses
 only current `ON_FLOOR` inventory and subtracts live floor allocations plus remaining quantities for active

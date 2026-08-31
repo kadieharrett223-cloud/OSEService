@@ -32,6 +32,10 @@ type ProductRow = {
   inventory_sort_order?: number | null;
 };
 
+function isOperationalInventoryProduct(product: ProductRow) {
+  return product.sku?.trim().toUpperCase() !== "TEST";
+}
+
 type InventoryTransactionRow = {
   product_id: string | null;
   bucket: string | null;
@@ -309,7 +313,7 @@ export default async function InventoryPage({
 
   const groupNames = [...groupSortByName.entries()].sort((left, right) => left[1] - right[1]).map(([name]) => name);
 
-  const productRows = (products ?? []) as ProductRow[];
+  const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];

@@ -151,6 +151,22 @@ node scripts/report-aug7-current-inventory-reconciliation.mjs
 
 The consolidator writes `tmp/import-reports/aug7-current-inventory-reconciliation.json` and `.md`. It never connects to or writes production; it only reads the three generated read-only audit reports. Missing or ambiguous August 7 baseline evidence is explicitly classified `INSUFFICIENT_EVIDENCE`.
 
+`scripts/audit-aug7-inventory-evidence.mjs` is the transaction-level companion audit. It lists every canonical SKU with nonzero current ON_FLOOR descending by quantity, retains every underlying product identity and opening/movement transaction, classifies catalog identities from recorded evidence, and matches physical fulfillment to linked ON_FLOOR deductions. Run it read-only with:
+
+```powershell
+node --env-file=.env.local scripts/audit-aug7-inventory-evidence.mjs
+```
+
+It writes `tmp/import-reports/aug7-inventory-evidence-audit.json` and `.md`.
+
+### August 7 evidence findings (read-only audit, August 31, 2026)
+
+The investigation found that the apparent August 7 baselines for `4PTA45`, `HLCJ-6`, `10YEAR`, and `RJTU` were all ledger entries created on August 14 or later. They are migration opening/recount evidence and must not be presented as direct August 7 physical-count proof. `4PTA45` is the clearest migration artifact: mutually conflicting opening records of 30 and 348 were written within seconds on August 14, no movement followed, and the current balance is zero. The prior apparent 348-unit shortage is therefore not a proven physical loss.
+
+`HLCJ-6` has a six-unit difference between the migration rollforward and current ON_FLOOR, but it also has conflicting 6- and 2-unit importer openings and a known identity review with `JVCJ-6`; it remains an identity/migration-evidence exception, not a count correction. `10YEAR` is an alias on the `4PHR-9X` product identity, not a standalone catalog SKU; its one-unit variance is unproven because its opening was posted August 14. `RJTU` is an alias on `URJT-45`; its one-unit variance is likewise unproven, although linked post-baseline fulfillment deductions reconcile correctly.
+
+The conservation audit also found 203 units with physical fulfillment evidence, 175 linked ON_FLOOR deductions, and 28 units without a linked deduction. The companion invoice/product rollup distinguishes broken line linkage from an invoice-level missing deduction; neither classification authorizes an adjustment. These are historical ledger-completeness exceptions that require invoice-level source review before any inventory adjustment. The `TEST` identity's 525,995 ON_FLOOR units are explicitly excluded from the Inventory page and dashboard operational totals; the current non-test total is 4,768. No inventory, product, alias, fulfillment, order, allocation, or container records were changed by this work.
+
 `scripts/audit-sku-physical-reconciliation.mjs` is a read-only physical ledger. It starts from a
 trusted final OLD ERP opening recount, adds received-container and legitimate adjustment events, and
 subtracts only warehouse-eligible fulfilled units. Explicit `DROPSHIP` and `OTHER` fulfillment is

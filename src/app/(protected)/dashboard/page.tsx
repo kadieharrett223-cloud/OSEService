@@ -4,7 +4,24 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ProductRow = {
   id: string;
+  sku: string | null;
+  canonical_name: string | null;
 };
+
+function isOperationalInventoryProduct(product: ProductRow) {
+  return product.sku?.trim().toUpperCase() !== "TEST";
+}
+
+async function loadAllInventoryTransactions() {
+  const supabase = getSupabaseAdmin();
+  const rows: InventoryTransactionRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").range(from, from + 999);
+    if (error) throw error;
+    rows.push(...((data ?? []) as InventoryTransactionRow[]));
+    if ((data ?? []).length < 1000) return rows;
+  }
+}
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -131,6 +148,7 @@ export default async function DashboardPage() {
   const [
     { data: products },
     { data: inventoryTransactions },
+    allInventoryTransactions,
     { data: containers },
     { data: containerLines },
     { data: orders },
@@ -138,8 +156,9 @@ export default async function DashboardPage() {
     { data: installations },
     { data: audits },
   ] = await Promise.all([
-    supabase.from("products").select("id"),
+    supabase.from("products").select("id, sku, canonical_name"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("created_at", { ascending: false }).limit(120),
+    loadAllInventoryTransactions(),
     supabase
       .from("containers")
       .select("id, container_number, lifecycle_status, created_at, updated_at, entered_date, eta_confirmed_date, eta_estimated_date")
@@ -161,7 +180,8 @@ export default async function DashboardPage() {
     supabase.from("audit_log").select("id, entity_type, entity_id, action, created_at").order("created_at", { ascending: false }).limit(120),
   ]);
 
-  const productRows = (products ?? []) as ProductRow[];
+  const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
+  const operationalProductIds = new Set(productRows.map((product) => product.id));
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
   const containerRows = (containers ?? []) as ContainerRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
@@ -171,8 +191,8 @@ export default async function DashboardPage() {
   const auditRows = (audits ?? []) as AuditRow[];
 
   const inventoryByProduct = new Map<string, { onFloor: number; incomingAvailable: number }>();
-  for (const row of transactionRows) {
-    if (!row.product_id) continue;
+  for (const row of allInventoryTransactions) {
+    if (!row.product_id || !operationalProductIds.has(row.product_id)) continue;
     const current = inventoryByProduct.get(row.product_id) ?? { onFloor: 0, incomingAvailable: 0 };
     const delta = Number(row.delta ?? 0);
     if (row.bucket === "ON_FLOOR") current.onFloor += delta;

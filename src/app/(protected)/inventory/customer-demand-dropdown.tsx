@@ -42,6 +42,18 @@ function toCsvCell(value: string) {
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
+export function sortCustomerQueue(items: CustomerQueueItem[]) {
+  return [...items].sort((left, right) => {
+    const leftPosition = Number.parseInt(left.position, 10);
+    const rightPosition = Number.parseInt(right.position, 10);
+    const leftSortPosition = Number.isFinite(leftPosition) ? leftPosition : Number.MAX_SAFE_INTEGER;
+    const rightSortPosition = Number.isFinite(rightPosition) ? rightPosition : Number.MAX_SAFE_INTEGER;
+    return leftSortPosition - rightSortPosition
+      || left.invoice.localeCompare(right.invoice)
+      || left.lineId.localeCompare(right.lineId);
+  });
+}
+
 export function CustomerDemandDropdown({
   productName,
   sku,
@@ -52,6 +64,7 @@ export function CustomerDemandDropdown({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const sortedCustomerQueue = sortCustomerQueue(customerQueue);
 
   function toggleDropdown() {
     setOpen((current) => !current);
@@ -59,7 +72,7 @@ export function CustomerDemandDropdown({
 
   function downloadReport() {
     const headers = ["Position", "Customer", "Invoice", "Ordered", "Shipped", "Remaining", "Priority", "Priority Date", "Priority Date Source", "Assignment", "Expected Availability", "Status"];
-    const rows = customerQueue.map((item) => [
+    const rows = sortedCustomerQueue.map((item) => [
       item.position,
       item.customer,
       item.invoice,
@@ -168,7 +181,7 @@ export function CustomerDemandDropdown({
             <p className="px-2 py-2 text-xs text-[#64748b]">No approved open queue for this SKU.</p>
           ) : (
             <div className="mt-3 flex-1 space-y-2 overflow-y-auto pr-1">
-              {customerQueue.map((item, index) => (
+              {sortedCustomerQueue.map((item, index) => (
                 <div key={`${item.orderId}-${item.invoice}-${index}`} className={`grid gap-3 rounded-lg border p-3 text-xs sm:grid-cols-[minmax(0,1.4fr)_minmax(150px,1fr)_auto] sm:items-center ${item.inWarehouse ? "border-[#93c5fd] bg-[#eff6ff]" : item.willCall ? "border-[#f5c26b] bg-[#fffbeb]" : "border-[#e2e8f0] bg-[#f8fafc]"}`}>
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>

@@ -43,3 +43,12 @@ refresh and activation path, then returns to the first page of the New Orders ta
 order's operational `updated_at` timestamp, so an invoice entered through this workflow is shown first while
 the displayed source order date remains unchanged. The action updates order/line operational state and queue
 positions when mapping evidence permits; it never changes inventory quantities or bulk-activates invoices.
+
+## Warehouse Recommendations
+
+The `Recommended Warehouse` Orders tab is a read-only packing batch. It selects up to 10 complete New Orders
+with remaining mapped physical lines, ordered by the oldest `shipping_orders.created_at` first. Selection uses
+only current `ON_FLOOR` inventory and subtracts live floor allocations plus remaining quantities for active
+warehouse, picked, and ready-to-ship work before considering a recommendation. Each recommended order must fit
+in full; unmapped, partial, shipped, incoming-container-only, and already-warehouse orders are excluded. Moving
+an order remains an explicit warehouse action and uses the existing guarded `moveOrderToWarehouseAction` path.

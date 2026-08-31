@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { recommendWarehouseOrderIds } from "@/lib/orders/warehouse-recommendations";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -67,6 +68,11 @@ type OrderSummary = {
       sku: string | null;
       canonical_name: string | null;
     } | null;
+    inventory_allocations?: Array<{
+      quantity: number | null;
+      source_type: string | null;
+      allocation_status: string | null;
+    }>;
   }>;
 };
 
@@ -84,6 +90,7 @@ type ProjectedOrderRow = {
   remainingQty: number;
   remainingStatus: string;
   tabs: string[];
+  recommendedForWarehouse: boolean;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -142,7 +149,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
       .eq("status", "OPEN");
     const manualMappingSkus = (manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase());
 
-    const [directLines, qboParentRows] = await Promise.all([
+    const [directLines, qboParentRows, onFloorTransactions] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from("shipping_order_lines")
         .select(`
@@ -159,7 +166,8 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         fulfilled_qty,
         legacy_item_code,
         source_system,
-        products (sku, canonical_name)
+        products (sku, canonical_name),
+        inventory_allocations (quantity, source_type, allocation_status)
       `)
         .order("id", { ascending: true })
         .range(from, to)),
@@ -168,6 +176,11 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         .select("id")
         .eq("source_type", "QBO_INVOICE")
         .order("created_at", { ascending: false })
+        .range(from, to)),
+      fetchAllRows((from, to) => supabase
+        .from("inventory_transactions")
+        .select("product_id, delta")
+        .eq("bucket", "ON_FLOOR")
         .range(from, to)),
     ]);
     const parentIds = [...new Set([
@@ -199,6 +212,52 @@ const getCachedOrdersDataset = unstable_cache(async () => {
       if (leftCreated !== rightCreated) return rightCreated - leftCreated;
       return right.id.localeCompare(left.id);
     });
+    const floorQuantityByProduct = new Map<string, number>();
+    for (const transaction of onFloorTransactions as Array<{ product_id: string | null; delta: number | null }>) {
+      if (!transaction.product_id) continue;
+      floorQuantityByProduct.set(transaction.product_id, (floorQuantityByProduct.get(transaction.product_id) ?? 0) + Number(transaction.delta ?? 0));
+    }
+    const allocationsByLineId = new Map<string, NonNullable<OrderSummary["shipping_order_lines"]>[number]["inventory_allocations"]>();
+    for (const order of allOrders) {
+      for (const line of order.shipping_order_lines ?? []) {
+        allocationsByLineId.set(line.id, line.inventory_allocations);
+      }
+    }
+    const reservedQuantityByProduct = new Map<string, number>();
+    const recommendationCandidates: Array<{ id: string; createdAt: string; requirements: Array<{ productId: string; quantity: number }> }> = [];
+    for (const order of allOrders) {
+      const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
+      const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
+      const requirements: Array<{ productId: string; quantity: number }> = [];
+      let hasUnmappedPhysicalLine = false;
+      for (const item of canonicalSummary.items) {
+        const line = item.line;
+        const productId = line?.product_id ?? null;
+        const remaining = Math.max(0, item.quantity - Number(line?.fulfilled_qty ?? 0));
+        if (remaining <= 0) continue;
+        if (!productId) {
+          hasUnmappedPhysicalLine = true;
+          continue;
+        }
+        requirements.push({ productId, quantity: remaining });
+        if (classification.isVisibleOperationalOrder) {
+          const floorAllocation = (allocationsByLineId.get(line?.id ?? "") ?? [])
+            .filter((allocation) => String(allocation.allocation_status ?? "ALLOCATED").toUpperCase() !== "RELEASED" && String(allocation.source_type ?? "").toUpperCase() === "FLOOR")
+            .reduce((sum, allocation) => sum + Math.max(0, Number(allocation.quantity ?? 0)), 0);
+          const stagedWarehouse = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line?.warehouse_status ?? "").toUpperCase()) ? remaining : 0;
+          const reserved = Math.max(floorAllocation, stagedWarehouse);
+          if (reserved > 0) reservedQuantityByProduct.set(productId, (reservedQuantityByProduct.get(productId) ?? 0) + reserved);
+        }
+      }
+      if (classification.isNewOrder && canonicalSummary.lineCount > 0 && !hasUnmappedPhysicalLine) {
+        recommendationCandidates.push({ id: order.id, createdAt: order.created_at, requirements });
+      }
+    }
+    const recommendedOrderIds = new Set(recommendWarehouseOrderIds({
+      candidates: recommendationCandidates,
+      floorQuantityByProduct,
+      reservedQuantityByProduct,
+    }));
     const projectedOrders: ProjectedOrderRow[] = allOrders.map((order) => {
       const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
       const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
@@ -231,7 +290,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         order.qbo_invoices?.invoice_number,
         ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
       ].filter(Boolean).join(" ").toLowerCase();
-      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs };
+      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs, recommendedForWarehouse: recommendedOrderIds.has(order.id) };
     });
     const tabCounts = {
       orders: projectedOrders.filter((order) => order.tabs.includes("orders")).length,
@@ -240,6 +299,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
       partial: projectedOrders.filter((order) => order.tabs.includes("partial")).length,
       archived: projectedOrders.filter((order) => order.tabs.includes("archived")).length,
       cancelled: projectedOrders.filter((order) => order.tabs.includes("cancelled")).length,
+      recommended: projectedOrders.filter((order) => order.recommendedForWarehouse).length,
     };
 
   return { projectedOrders, tabCounts };
@@ -258,7 +318,7 @@ export default async function OrdersPage({
   const currentPage = Math.max(1, Number.parseInt(String(params.page ?? "1"), 10) || 1);
 
   let projectedOrders: ProjectedOrderRow[] = [];
-  let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
+  let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0, recommended: 0 };
   let ordersLoadError: Error | null = null;
   try {
     const dataset = await getCachedOrdersDataset();
@@ -274,7 +334,7 @@ export default async function OrdersPage({
     redirect(`/orders?${new URLSearchParams({ tab: exactSearchTab, q: searchText }).toString()}`);
   }
 
-  const matchingOrders = projectedOrders.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchResults.includes(order)));
+  const matchingOrders = projectedOrders.filter((order) => (activeTab === "recommended" ? order.recommendedForWarehouse : order.tabs.includes(activeTab)) && (!searchText || globalSearchResults.includes(order)));
   const filteredOrders = activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders;
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
@@ -286,6 +346,7 @@ export default async function OrdersPage({
   };
 
   const tabs = [
+    { id: "recommended", label: "Recommended Warehouse" },
     { id: "new", label: "New Orders" },
     { id: "orders", label: "Orders" },
     { id: "warehouse", label: "In Warehouse" },
@@ -363,6 +424,12 @@ export default async function OrdersPage({
           </div>
         ) : null}
 
+        {activeTab === "recommended" ? (
+          <p className="mb-4 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] p-3 text-sm text-[#1e3a8a]">
+            Up to 10 complete, unshipped orders that can be packed from current on-floor inventory, selected oldest first. Orders already assigned to warehouse or floor inventory are excluded from available stock.
+          </p>
+        ) : null}
+
         {globalSearchResults.length > 1 ? (
           <div className="mb-4 overflow-hidden rounded-lg border border-[#dbe3ee]">
             <div className="border-b border-[#dbe3ee] bg-[#f8fafc] px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-[#475569]">Search Results Across All Statuses</div>
@@ -415,7 +482,7 @@ export default async function OrdersPage({
                   <td className="px-3 py-3 text-right">
                     <div className="flex justify-end gap-2">
                       <Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>
-                    {activeTab === "new" && order.hasPhysicalLines ? (
+                    {(activeTab === "new" || activeTab === "recommended") && order.hasPhysicalLines ? (
                       <form action={moveOrderToWarehouseAction}>
                         <input type="hidden" name="orderId" value={order.id} />
                         <button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button>

@@ -12,11 +12,13 @@ read-only projections, never by omitting operational records or weakening calcul
   Detail. Its source reads and canonical projection are cached for 60 seconds with the
   `canonical-customer-queue` tag. The public loader reconstructs its lookup maps on every call, so callers
   retain the same queue, line, logical-demand, and product indexes.
-- Inventory caches its 60-second read-only base dataset: product catalog and aliases, inventory ledger
-  totals, incoming containers, open order lines and allocations, fulfillment evidence, review resolutions,
-  and display groups. Authentication, admin-mode access, URL filtering, and the final screen projection
-  remain request-specific. This removes repeated full-table reads during routine Inventory navigation
-  without changing Customer List, coverage, or physical-inventory semantics.
+- Inventory reuses the canonical Customer List projection for its open order lines, fulfillment evidence,
+  reviewed resolutions, QBO sibling handling, and queue placement. Its separate 60-second base dataset is
+  limited to the product catalog and aliases, inventory ledger totals, incoming containers, and display
+  groups. A targeted QBO invoice-line lookup retains authoritative invoice quantities for displayed demand.
+  Authentication, admin-mode access, URL filtering, and the final screen projection remain request-specific.
+  This avoids a second cold full-table order reconciliation without changing Customer List, coverage, or
+  physical-inventory semantics.
 - The Orders list already uses the `orders-projection` cache for its complete logical-order projection.
   Invalidating that tag also expires the canonical Customer List and ERP Health diagnostic caches because
   those pages depend on the same operational order state.

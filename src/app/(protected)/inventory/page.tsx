@@ -13,12 +13,10 @@ import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { projectCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
-import { CLOSED_DEMAND_STATES, demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "@/lib/demand/product-demand";
-import type { ReviewedObligationResolution } from "@/lib/demand/reviewed-obligation-resolutions";
+import { demandLineIdentity, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
-import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
@@ -59,8 +57,6 @@ type ProductAliasRow = {
   product_id: string | null;
   alias: string | null;
 };
-
-type ReviewedObligationResolutionRow = ReviewedObligationResolution;
 
 type QueueLine = {
   id: string;
@@ -207,37 +203,12 @@ function normalizeSkuKey(value: string | null | undefined) {
   return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function normalizeCustomerKey(value: string | null | undefined) {
-  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-function orderCustomerName(order: { legacy_customer_name?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { customers?: { company_name?: string | null; full_name?: string | null } | null } | null } | null | undefined) {
-  return order?.customers?.company_name
-    ?? order?.customers?.full_name
-    ?? order?.qbo_invoices?.customers?.company_name
-    ?? order?.qbo_invoices?.customers?.full_name
-    ?? order?.legacy_customer_name
-    ?? null;
-}
-
-function compatibleCustomerNames(left: string | null | undefined, right: string | null | undefined) {
-  const leftKey = normalizeCustomerKey(left);
-  const rightKey = normalizeCustomerKey(right);
-  return Boolean(leftKey && rightKey && leftKey === rightKey);
-}
-
-function normalizeQboSkuKey(value: string | null | undefined) {
-  return normalizeQboSkuKeys(value).at(-1) ?? normalizeSkuKey(value);
-}
-
 function normalizeQboSkuKeys(value: string | null | undefined) {
   return qboSkuCandidates(value).map(normalizeSkuKey).filter(Boolean) as string[];
 }
 
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
-
-const CLOSED_QUEUE_STATES = CLOSED_DEMAND_STATES;
 
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 function isOpenQueueLine(line: QueueLine) {
@@ -258,19 +229,6 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
   return map;
 }
 
-async function fetchAllRows<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-) {
-  const pageSize = 1000;
-  const rows: T[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await fetchPage(from, from + pageSize - 1);
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if ((data ?? []).length < pageSize) return rows;
-  }
-}
-
 async function fetchRowsByIds<T>(
   ids: string[],
   fetchBatch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
@@ -287,50 +245,11 @@ async function fetchRowsByIds<T>(
 
 const getCachedInventoryBaseDataset = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
-  const [{ error: firstPaymentColumnError }, { error: duplicateParentColumnError }, { error: cancellationColumnError }] = await Promise.all([
-    supabase.from("shipping_orders").select("first_payment_at").limit(1),
-    supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1),
-    supabase.from("shipping_orders").select("cancellation_status").limit(1),
-  ]);
-  const firstPaymentColumnAvailable = !firstPaymentColumnError;
-  const duplicateParentColumnAvailable = !duplicateParentColumnError;
-  const cancellationColumnAvailable = !cancellationColumnError;
-  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
-  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
-  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
-  const queueLinesPromise = fetchAllRows((from, to) => supabase
-    .from("shipping_order_lines")
-    .select(`
-        id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status,
-        fulfillment_source, priority, warehouse_status, queue_position_start, queue_position_count,
-        source_system, legacy_item_code, qbo_invoice_line_id, source_record_id,
-        shipping_orders (
-          id, source_invoice_id, source_type, ${duplicateParentField}${cancellationField}
-          review_status, created_at, fulfillment_method, ${shippingOrderPaymentField}
-          order_number, legacy_customer_name,
-          qbo_invoices (invoice_number, customers (company_name, full_name))
-        ),
-        inventory_allocations (
-          source_type, container_id, quantity, allocation_status,
-          containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
-        )
-      `)
-    .neq("fulfillment_status", "CANCELLED")
-    .order("queue_position_start", { ascending: true, nullsFirst: false })
-    .range(from, to));
-  const reviewedResolutionsPromise = fetchAllRows((from, to) => supabase
-    .from("reviewed_obligation_resolutions")
-    .select("source_record_id,qbo_invoice_line_id,resolution_type,status")
-    .eq("status", "ACTIVE")
-    .range(from, to));
-  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, queueLines, fulfillmentRows, reviewedResolutions, displayGroupResult] = await Promise.all([
+  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
     supabase.from("product_aliases").select("product_id, alias"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
-    queueLinesPromise,
-    fetchAllRows((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
-    reviewedResolutionsPromise,
     supabase.from("inventory_display_groups").select("name, sort_order").order("sort_order", { ascending: true }),
   ]);
   let products = productsResult.data as unknown as ProductRow[] | null;
@@ -338,7 +257,7 @@ const getCachedInventoryBaseDataset = unstable_cache(async () => {
     const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
     products = fallback.data as unknown as ProductRow[] | null;
   }
-  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, queueLines, fulfillmentRows, reviewedResolutions, displayGroupData: displayGroupResult.data, firstPaymentColumnAvailable, duplicateParentColumnAvailable, cancellationColumnAvailable };
+  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, displayGroupData: displayGroupResult.data };
 }, ["inventory-base-read-model"], { revalidate: 60 });
 
 function getAssignmentLabel(line: QueueLine) {
@@ -378,10 +297,7 @@ export default async function InventoryPage({
     getCachedPackageDimensionsBySku(),
     loadCanonicalCustomerQueue(),
   ]);
-  const { products, aliases, transactions, containerLines, queueLines, fulfillmentRows, reviewedResolutions, displayGroupData, firstPaymentColumnAvailable, duplicateParentColumnAvailable, cancellationColumnAvailable } = inventoryBase;
-  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
-  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
-  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
+  const { products, aliases, transactions, containerLines, displayGroupData } = inventoryBase;
 
   const displayGroups = displayGroupData as unknown as Array<{ name: string | null; sort_order: number | null }> | null;
 
@@ -397,17 +313,9 @@ export default async function InventoryPage({
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
-  const rawQueueLineRows = (queueLines ?? []) as unknown as QueueLine[];
-  const provenFulfilledQtyByLineId = new Map<string, number>();
-  for (const fulfillment of fulfillmentRows as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null }>) {
-    provenFulfilledQtyByLineId.set(
-      fulfillment.shipping_order_line_id,
-      (provenFulfilledQtyByLineId.get(fulfillment.shipping_order_line_id) ?? 0) + Math.max(0, Number(fulfillment.fulfilled_qty ?? 0)),
-    );
-  }
-  const queueLineRows = rawQueueLineRows.map((line) => withProvenFulfilledQty(line, provenFulfilledQtyByLineId.get(line.id) ?? 0));
+  const dedupedQueueLineRows = sharedCanonicalQueue.canonicalLines as QueueLine[];
   const fulfilledQtyByQboLineIdentity = new Map<string, number>();
-  for (const line of queueLineRows) {
+  for (const line of dedupedQueueLineRows) {
     if (!line.qbo_invoice_line_id || !line.shipping_orders?.source_invoice_id || !line.product_id) continue;
     const key = `${line.shipping_orders.source_invoice_id}|${line.product_id}|${line.qbo_invoice_line_id}`;
     fulfilledQtyByQboLineIdentity.set(key, Math.max(fulfilledQtyByQboLineIdentity.get(key) ?? 0, Math.max(0, Number(line.fulfilled_qty ?? 0))));
@@ -417,8 +325,7 @@ export default async function InventoryPage({
     const invoiceProductKey = key.split("|").slice(0, 2).join("|");
     provenInvoiceShippedQtyByProduct.set(invoiceProductKey, (provenInvoiceShippedQtyByProduct.get(invoiceProductKey) ?? 0) + quantity);
   }
-  const sourceInvoiceIds = [...new Set(queueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
-  const orderNumbers = [...new Set(queueLineRows.map((line) => line.shipping_orders?.order_number).filter(Boolean))] as string[];
+  const sourceInvoiceIds = [...new Set(dedupedQueueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();
   for (const product of productRows) {
     if (product.sku) productIdByAliasKey.set(normalizeSkuKey(product.sku), product.id);
@@ -426,67 +333,22 @@ export default async function InventoryPage({
   for (const alias of productAliasRows) {
     if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
   }
-  const [qboInvoiceRows, qboLineRows, qboParentRows, sourceOrderRows] = await Promise.all([
-    sourceInvoiceIds.length
-      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids))
-      : Promise.resolve([]),
-    sourceInvoiceIds.length
-      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
-      : Promise.resolve([]),
-    orderNumbers.length
-      ? fetchRowsByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select(`id,order_number,source_invoice_id,source_type,legacy_customer_name,${duplicateParentField}${cancellationField}customers(company_name,full_name),qbo_invoices(raw_payload,customers(company_name,full_name))`).in("order_number", numbers).eq("source_type", "QBO_INVOICE"))
-      : Promise.resolve([]),
-    sourceInvoiceIds.length
-      ? fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select([
-        "source_invoice_id",
-        "review_status",
-        ...(duplicateParentColumnAvailable ? ["duplicate_of_order_id"] : []),
-        ...(cancellationColumnAvailable ? ["cancellation_status"] : []),
-      ].join(",")).in("source_invoice_id", ids))
-      : Promise.resolve([]),
-  ]);
-  const qboRawPayloadByInvoiceId = new Map<string, { PrivateNote?: string | null; Line?: unknown[] } | null>(
-    qboInvoiceRows.map((invoice) => [invoice.id, invoice.raw_payload as unknown as { PrivateNote?: string | null; Line?: unknown[] } | null]),
-  );
-  const queueLineRowsWithRawPayload = queueLineRows.map((line) => {
-    const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
-    if (!sourceInvoiceId || !line.shipping_orders?.qbo_invoices) return line;
-    return {
-      ...line,
-      shipping_orders: {
-        ...line.shipping_orders,
-        qbo_invoices: {
-          ...line.shipping_orders.qbo_invoices,
-          raw_payload: qboRawPayloadByInvoiceId.get(sourceInvoiceId) ?? null,
-        },
-      },
-    };
-  });
-  const typedQboParentRows = (qboParentRows ?? []) as unknown as Array<{ id: string; order_number: string | null; source_invoice_id: string | null; legacy_customer_name?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null; customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>;
-  const activeQboParentsByOrderNumber = new Map<string, typeof typedQboParentRows>();
-  for (const row of typedQboParentRows.filter((candidate) => !candidate.duplicate_of_order_id && String(candidate.cancellation_status ?? "").toUpperCase() !== "CANCELLED" && String(candidate.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() !== "VOIDED")) {
-    activeQboParentsByOrderNumber.set(String(row.order_number), [...(activeQboParentsByOrderNumber.get(String(row.order_number)) ?? []), row]);
-  }
-  const qboParentInvoiceIds = [...new Set(typedQboParentRows.map((row) => row.source_invoice_id).filter(Boolean))] as string[];
-  const sourceInvoiceIdSet = new Set(sourceInvoiceIds);
-  const missingQboParentInvoiceIds = qboParentInvoiceIds.filter((invoiceId) => !sourceInvoiceIdSet.has(invoiceId));
-  const extraQboLineRows = missingQboParentInvoiceIds.length
-    ? await fetchRowsByIds(missingQboParentInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
+  const allQboLineRows = sourceInvoiceIds.length
+    ? await fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
     : [];
-  const allQboLineRows = [...qboLineRows, ...extraQboLineRows].filter((row, index, rows) => rows.findIndex((candidate) => candidate.id === row.id) === index);
   const fulfilledQtyByQboInvoiceLineId = new Map<string, number>();
-  for (const line of queueLineRows) {
+  for (const line of dedupedQueueLineRows) {
     if (!line.qbo_invoice_line_id) continue;
     fulfilledQtyByQboInvoiceLineId.set(
       line.qbo_invoice_line_id,
       Math.max(fulfilledQtyByQboInvoiceLineId.get(line.qbo_invoice_line_id) ?? 0, Math.max(0, Number(line.fulfilled_qty ?? 0))),
     );
   }
-  const qboInvoiceFullyShippedIds = new Set<string>();
   const qboInvoiceLineRowsByInvoiceId = new Map<string, Array<{ id: string; ordered_qty?: number | null }>>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; ordered_qty?: number | null }>) {
     qboInvoiceLineRowsByInvoiceId.set(qboLine.qbo_invoice_id, [...(qboInvoiceLineRowsByInvoiceId.get(qboLine.qbo_invoice_id) ?? []), qboLine]);
   }
+  const qboInvoiceFullyShippedIds = new Set<string>();
   for (const [invoiceId, lines] of qboInvoiceLineRowsByInvoiceId) {
     const physicalLines = lines.filter((line) => Number(line.ordered_qty ?? 0) > 0);
     if (physicalLines.length > 0 && physicalLines.every((line) => (fulfilledQtyByQboInvoiceLineId.get(line.id) ?? 0) >= Number(line.ordered_qty ?? 0))) {
@@ -494,7 +356,6 @@ export default async function InventoryPage({
     }
   }
   const invoiceQtyByInvoiceProduct = new Map<string, number>();
-  const qboCandidatesByParentProduct = new Map<string, Array<{ id: string; qbo_sku: string | null; product_id: string | null }>>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty?: number | null }>) {
     const qboProductId = qboLine.product_id ?? normalizeQboSkuKeys(qboLine.qbo_sku).map((key) => productIdByAliasKey.get(key)).find(Boolean) ?? null;
     const orderedQty = Math.max(0, Number(qboLine.ordered_qty ?? 0));
@@ -502,103 +363,7 @@ export default async function InventoryPage({
       const qtyKey = `${qboLine.qbo_invoice_id}|${qboProductId}`;
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
-    const key = `${qboLine.qbo_invoice_id}|${qboProductId ?? normalizeQboSkuKeys(qboLine.qbo_sku).at(-1) ?? normalizeSkuKey(qboLine.qbo_sku)}`;
-    const candidates = qboCandidatesByParentProduct.get(key) ?? [];
-    candidates.push(qboLine);
-    qboCandidatesByParentProduct.set(key, candidates);
   }
-  const bridgedQueueLineRows = queueLineRowsWithRawPayload.map((line) => {
-    const parentFields = {
-      parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
-      parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
-      parent_review_status: line.shipping_orders?.review_status ?? null,
-      parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED",
-      parent_source_invoice_id: line.shipping_orders?.source_invoice_id ?? null,
-      parent_source_type: line.shipping_orders?.source_type ?? null,
-    };
-    if (line.qbo_invoice_line_id || !line.product_id) return { ...line, ...parentFields };
-    const qboParents = activeQboParentsByOrderNumber.get(String(line.shipping_orders?.order_number ?? "")) ?? [];
-    const qboParent = qboParents.find((candidate) => compatibleCustomerNames(orderCustomerName(line.shipping_orders), orderCustomerName(candidate)));
-    const bridgeInvoiceId = qboParent?.source_invoice_id ?? line.shipping_orders?.source_invoice_id;
-    if (!bridgeInvoiceId) return { ...line, ...parentFields };
-    const productKey = `${bridgeInvoiceId}|${line.product_id}`;
-    const directCandidates = qboCandidatesByParentProduct.get(productKey) ?? [];
-    const skuCandidates = allQboLineRows.filter((qboLine) => {
-      const row = qboLine as { qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null };
-      const qboKeys = normalizeQboSkuKeys(row.qbo_sku);
-      const lineKeys = normalizeQboSkuKeys(line.legacy_item_code);
-      return row.qbo_invoice_id === bridgeInvoiceId && qboKeys.some((key) => lineKeys.includes(key));
-    });
-    const candidates = directCandidates.length === 1 ? directCandidates : skuCandidates;
-    return candidates.length === 1 ? { ...line, ...parentFields, logical_demand_key: candidates[0].id } : { ...line, ...parentFields };
-  });
-  const queueLinesByOrderId = new Map<string, typeof bridgedQueueLineRows>();
-  for (const line of bridgedQueueLineRows) {
-    const orderId = line.shipping_orders?.id;
-    if (!orderId) continue;
-    queueLinesByOrderId.set(orderId, [...(queueLinesByOrderId.get(orderId) ?? []), line]);
-  }
-  const canonicalLineIdsByOrderId = new Map<string, Set<string> | null>();
-  const completedQboLineIds = new Set<string>();
-  const completedQboInvoiceIds = new Set<string>();
-  for (const parent of sourceOrderRows as Array<{ source_invoice_id?: string | null; review_status?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null }>) {
-    const reviewStatus = String(parent.review_status ?? "").trim().toUpperCase();
-    const isClosedLogicalParent = Boolean(parent.duplicate_of_order_id)
-      || String(parent.cancellation_status ?? "").trim().toUpperCase() === "CANCELLED"
-      || ["ARCHIVED", "FULFILLED", "SHIPPED"].includes(reviewStatus);
-    if (isClosedLogicalParent && parent.source_invoice_id) completedQboInvoiceIds.add(parent.source_invoice_id);
-  }
-  const queueLinesBySourceInvoiceId = new Map<string, typeof bridgedQueueLineRows>();
-  for (const line of bridgedQueueLineRows) {
-    const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
-    if (!sourceInvoiceId) continue;
-    queueLinesBySourceInvoiceId.set(sourceInvoiceId, [...(queueLinesBySourceInvoiceId.get(sourceInvoiceId) ?? []), line]);
-  }
-  for (const [orderId, lines] of queueLinesByOrderId) {
-    const rawPayload = lines[0]?.shipping_orders?.qbo_invoices?.raw_payload;
-    if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) {
-      canonicalLineIdsByOrderId.set(orderId, null);
-      continue;
-    }
-    const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
-    canonicalLineIdsByOrderId.set(orderId, new Set(summary.items.map((item) => item.line?.id).filter((lineId): lineId is string => Boolean(lineId))));
-    if (summary.isComplete) {
-      if (lines[0]?.shipping_orders?.source_type === "QBO_INVOICE" && lines[0].shipping_orders.source_invoice_id) {
-        completedQboInvoiceIds.add(lines[0].shipping_orders.source_invoice_id);
-      }
-      for (const item of summary.items) {
-        if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
-      }
-    }
-  }
-  for (const [sourceInvoiceId, lines] of queueLinesBySourceInvoiceId) {
-    const rawPayload = qboRawPayloadByInvoiceId.get(sourceInvoiceId);
-    if (!Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)) continue;
-    const summary = getCanonicalPhysicalOrderSummary({ rawPayload, lines });
-    if (!summary.isComplete) continue;
-    completedQboInvoiceIds.add(sourceInvoiceId);
-    for (const item of summary.items) {
-      if (item.remaining === 0 && item.line?.qbo_invoice_line_id) completedQboLineIds.add(item.line.qbo_invoice_line_id);
-    }
-  }
-  const canonicalQueueLineRows = bridgedQueueLineRows.filter((line) => {
-    const orderId = line.shipping_orders?.id;
-    if (!orderId) return true;
-    const canonicalLineIds = canonicalLineIdsByOrderId.get(orderId);
-    return canonicalLineIds === null || canonicalLineIds === undefined || canonicalLineIds.has(line.id);
-  });
-  const activeQueueLineRows = canonicalQueueLineRows.filter((line) =>
-    !line.shipping_orders?.duplicate_of_order_id
-    && String(line.shipping_orders?.cancellation_status ?? "").trim().toUpperCase() !== "CANCELLED"
-    && String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED",
-  );
-  const inventoryCanonicalQueueLineRows = getCanonicalOpenDemandLines(
-    activeQueueLineRows,
-    completedQboLineIds,
-    completedQboInvoiceIds,
-    reviewedResolutions as ReviewedObligationResolutionRow[],
-  );
-  const dedupedQueueLineRows = sharedCanonicalQueue.canonicalLines as QueueLine[];
   const manualMappingSkus = new Set<string>();
   const { data: manualMappingRows } = await supabase
     .from("manual_product_mapping_queue")

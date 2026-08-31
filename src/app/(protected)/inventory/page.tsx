@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { Fragment } from "react";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
 import { AddProductModal } from "@/app/(protected)/inventory/add-product-modal";
@@ -284,6 +285,62 @@ async function fetchRowsByIds<T>(
   return rows.flat();
 }
 
+const getCachedInventoryBaseDataset = unstable_cache(async () => {
+  const supabase = getSupabaseAdmin();
+  const [{ error: firstPaymentColumnError }, { error: duplicateParentColumnError }, { error: cancellationColumnError }] = await Promise.all([
+    supabase.from("shipping_orders").select("first_payment_at").limit(1),
+    supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1),
+    supabase.from("shipping_orders").select("cancellation_status").limit(1),
+  ]);
+  const firstPaymentColumnAvailable = !firstPaymentColumnError;
+  const duplicateParentColumnAvailable = !duplicateParentColumnError;
+  const cancellationColumnAvailable = !cancellationColumnError;
+  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
+  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
+  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
+  const queueLinesPromise = fetchAllRows((from, to) => supabase
+    .from("shipping_order_lines")
+    .select(`
+        id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status,
+        fulfillment_source, priority, warehouse_status, queue_position_start, queue_position_count,
+        source_system, legacy_item_code, qbo_invoice_line_id, source_record_id,
+        shipping_orders (
+          id, source_invoice_id, source_type, ${duplicateParentField}${cancellationField}
+          review_status, created_at, fulfillment_method, ${shippingOrderPaymentField}
+          order_number, legacy_customer_name,
+          qbo_invoices (invoice_number, customers (company_name, full_name))
+        ),
+        inventory_allocations (
+          source_type, container_id, quantity, allocation_status,
+          containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
+        )
+      `)
+    .neq("fulfillment_status", "CANCELLED")
+    .order("queue_position_start", { ascending: true, nullsFirst: false })
+    .range(from, to));
+  const reviewedResolutionsPromise = fetchAllRows((from, to) => supabase
+    .from("reviewed_obligation_resolutions")
+    .select("source_record_id,qbo_invoice_line_id,resolution_type,status")
+    .eq("status", "ACTIVE")
+    .range(from, to));
+  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, queueLines, fulfillmentRows, reviewedResolutions, displayGroupResult] = await Promise.all([
+    supabase.from("products").select("id, sku, canonical_name, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
+    supabase.from("product_aliases").select("product_id, alias"),
+    supabase.from("inventory_transactions").select("product_id, bucket, delta"),
+    supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
+    queueLinesPromise,
+    fetchAllRows((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
+    reviewedResolutionsPromise,
+    supabase.from("inventory_display_groups").select("name, sort_order").order("sort_order", { ascending: true }),
+  ]);
+  let products = productsResult.data as unknown as ProductRow[] | null;
+  if (productsResult.error) {
+    const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
+    products = fallback.data as unknown as ProductRow[] | null;
+  }
+  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, queueLines, fulfillmentRows, reviewedResolutions, displayGroupData: displayGroupResult.data, firstPaymentColumnAvailable, duplicateParentColumnAvailable, cancellationColumnAvailable };
+}, ["inventory-base-read-model"], { revalidate: 60 });
+
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];
   if (allocations.length === 0) return "Unassigned";
@@ -316,112 +373,15 @@ export default async function InventoryPage({
   const q = String(params.q ?? "").trim().toLowerCase();
   const mapError = String(params.mapError ?? "").trim();
   const mapMessage = String(params.mapMessage ?? "").trim();
-  const [{ error: firstPaymentColumnError }, { error: duplicateParentColumnError }, { error: cancellationColumnError }] = await Promise.all([
-    supabase.from("shipping_orders").select("first_payment_at").limit(1),
-    supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1),
-    supabase.from("shipping_orders").select("cancellation_status").limit(1),
-  ]);
-  const firstPaymentColumnAvailable = !firstPaymentColumnError;
-  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
-  const duplicateParentColumnAvailable = !duplicateParentColumnError;
-  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
-  const cancellationColumnAvailable = !cancellationColumnError;
-  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
-  const queueLinesPromise = fetchAllRows((from, to) => supabase
-    .from("shipping_order_lines")
-    .select(`
-        id,
-        product_id,
-        approved_qty,
-        fulfilled_qty,
-        approval_status,
-        fulfillment_status,
-        fulfillment_source,
-        priority,
-        warehouse_status,
-        queue_position_start,
-        queue_position_count,
-        source_system,
-        legacy_item_code,
-        qbo_invoice_line_id,
-        source_record_id,
-        shipping_orders (
-          id,
-          source_invoice_id,
-          source_type,
-          ${duplicateParentField}
-          ${cancellationField}
-          review_status,
-          created_at,
-          fulfillment_method,
-          ${shippingOrderPaymentField}
-          order_number,
-          legacy_customer_name,
-          qbo_invoices (
-            invoice_number,
-            customers (company_name, full_name)
-          )
-        ),
-        inventory_allocations (
-          source_type,
-          container_id,
-          quantity,
-          allocation_status,
-          containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date)
-        )
-      `)
-    .neq("fulfillment_status", "CANCELLED")
-    .order("queue_position_start", { ascending: true, nullsFirst: false })
-    .range(from, to));
-
-  const reviewedResolutionsPromise = fetchAllRows((from, to) => supabase
-    .from("reviewed_obligation_resolutions")
-    .select("source_record_id,qbo_invoice_line_id,resolution_type,status")
-    .eq("status", "ACTIVE")
-    .range(from, to));
-
-  const [
-    productsResult,
-    { data: aliases },
-    { data: transactions },
-    { data: containerLines },
-    queueLines,
-    fulfillmentRows,
-    packageDimensionsBySku,
-    reviewedResolutions,
-    sharedCanonicalQueue,
-    { data: displayGroupData },
-  ] = await Promise.all([
-    supabase
-      .from("products")
-      .select("id, sku, canonical_name, inventory_group, inventory_sort_order")
-      .neq("status", "Inactive")
-      .order("sku", { ascending: true }),
-    supabase.from("product_aliases").select("product_id, alias"),
-    supabase.from("inventory_transactions").select("product_id, bucket, delta"),
-    supabase
-      .from("container_lines")
-      .select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
-    queueLinesPromise,
-    fetchAllRows((from, to) => supabase
-      .from("fulfillments")
-      .select("shipping_order_line_id,fulfilled_qty")
-      .range(from, to)),
+  const [inventoryBase, packageDimensionsBySku, sharedCanonicalQueue] = await Promise.all([
+    getCachedInventoryBaseDataset(),
     getCachedPackageDimensionsBySku(),
-    reviewedResolutionsPromise,
     loadCanonicalCustomerQueue(),
-    supabase
-      .from("inventory_display_groups")
-      .select("name, sort_order")
-      .order("sort_order", { ascending: true }),
   ]);
-
-  // Display ordering is optional: the page still renders if migration 202608140003 has not been applied.
-  let products = productsResult.data as unknown as ProductRow[] | null;
-  if (productsResult.error) {
-    const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
-    products = fallback.data as unknown as ProductRow[] | null;
-  }
+  const { products, aliases, transactions, containerLines, queueLines, fulfillmentRows, reviewedResolutions, displayGroupData, firstPaymentColumnAvailable, duplicateParentColumnAvailable, cancellationColumnAvailable } = inventoryBase;
+  const shippingOrderPaymentField = firstPaymentColumnAvailable ? "first_payment_at," : "";
+  const duplicateParentField = duplicateParentColumnAvailable ? "duplicate_of_order_id," : "";
+  const cancellationField = cancellationColumnAvailable ? "cancellation_status," : "";
 
   const displayGroups = displayGroupData as unknown as Array<{ name: string | null; sort_order: number | null }> | null;
 

@@ -1,6 +1,7 @@
 export type WarehouseRecommendationCandidate = {
   id: string;
   createdAt: string;
+  quickbooksInvoiceDate?: string | null;
   requirements: Array<{ productId: string; quantity: number }>;
 };
 
@@ -22,9 +23,9 @@ export function recommendWarehouseOrderIds({
 
   const recommended: string[] = [];
   const oldestFirst = candidates.slice().sort((left, right) => {
-    const leftCreated = Date.parse(left.createdAt) || Number.MAX_SAFE_INTEGER;
-    const rightCreated = Date.parse(right.createdAt) || Number.MAX_SAFE_INTEGER;
-    return leftCreated - rightCreated || left.id.localeCompare(right.id);
+    const leftOrderDate = Date.parse(left.quickbooksInvoiceDate ?? left.createdAt) || Number.MAX_SAFE_INTEGER;
+    const rightOrderDate = Date.parse(right.quickbooksInvoiceDate ?? right.createdAt) || Number.MAX_SAFE_INTEGER;
+    return leftOrderDate - rightOrderDate || left.id.localeCompare(right.id);
   });
 
   for (const candidate of oldestFirst) {

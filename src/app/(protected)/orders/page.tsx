@@ -224,7 +224,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
       }
     }
     const reservedQuantityByProduct = new Map<string, number>();
-    const recommendationCandidates: Array<{ id: string; createdAt: string; requirements: Array<{ productId: string; quantity: number }> }> = [];
+    const recommendationCandidates: Array<{ id: string; createdAt: string; quickbooksInvoiceDate: string | null | undefined; requirements: Array<{ productId: string; quantity: number }> }> = [];
     for (const order of allOrders) {
       const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
       const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
@@ -250,7 +250,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
         }
       }
       if (classification.isNewOrder && canonicalSummary.lineCount > 0 && !hasUnmappedPhysicalLine) {
-        recommendationCandidates.push({ id: order.id, createdAt: order.created_at, requirements });
+        recommendationCandidates.push({ id: order.id, createdAt: order.created_at, quickbooksInvoiceDate: order.qbo_invoices?.invoice_date, requirements });
       }
     }
     const recommendedOrderIds = new Set(recommendWarehouseOrderIds({

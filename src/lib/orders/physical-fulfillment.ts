@@ -18,6 +18,7 @@ export type PhysicalFulfillmentLine = {
   approved_qty?: number | null;
   fulfilled_qty?: number | null;
   legacy_item_code?: string | null;
+  legacy_matched_item_code?: string | null;
   products?: { sku?: string | null; canonical_name?: string | null } | null;
 };
 
@@ -143,7 +144,7 @@ export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, i
     .split(/[^A-Za-z0-9-]+/)
     .map(canonicalSkuKey)
     .filter((token) => Boolean(token) && /\d/.test(token));
-  const lineKeys = [line.legacy_item_code, line.products?.sku, line.products?.canonical_name]
+  const lineKeys = [line.legacy_item_code, line.legacy_matched_item_code, line.products?.sku, line.products?.canonical_name]
     .map(canonicalSkuKey)
     .filter(Boolean)
     .concat(canonicalTokens);

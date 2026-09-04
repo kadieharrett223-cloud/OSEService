@@ -215,6 +215,23 @@ describe("physical fulfillment totals", () => {
     )).toBe(true);
   });
 
+  it("counts a fulfilled per-order QBO correction when its historical source code differs", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4P-4032XL (deleted)", 1]]),
+      lines: [line({
+        id: "chris-meehan-4032xl",
+        legacy_item_code: "4032S",
+        legacy_matched_item_code: "4P-4032XL",
+        products: { sku: "000023", canonical_name: "HK-4032XL Three Car Storage lift" },
+        fulfilled_qty: 1,
+        fulfillment_status: "FULFILLED",
+      })],
+    });
+
+    expect(summary).toMatchObject({ ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(summary.items[0]?.line?.id).toBe("chris-meehan-4032xl");
+  });
+
   it("matches a deleted QBO item's explicit operational model code to its physical line", () => {
     expect(matchesPhysicalLineToInvoiceDescription(
       line({ legacy_item_code: "4032S", products: { sku: "000185", canonical_name: "Short triple stacker" } }),

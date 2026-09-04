@@ -918,7 +918,7 @@ export default async function OrderDetailPage({
   const { data: siblingLineRows } = siblingOrderIds.length > 1
     ? await supabase
         .from("shipping_order_lines")
-        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,products(sku,canonical_name)")
+        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,legacy_matched_item_code,products(sku,canonical_name)")
         .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
     : { data: [] };
   const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<

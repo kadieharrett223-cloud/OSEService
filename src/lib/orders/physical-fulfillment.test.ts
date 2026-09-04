@@ -134,6 +134,19 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("counts a fulfilled HPU2203 sibling against its deleted packaged invoice SKU", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["HPU2203-PKG (deleted)", 1]]),
+      lines: [
+        line({ id: "sibling-motor", legacy_item_code: "HPU2203", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expect(summary.items[0]?.line?.id).toBe("sibling-motor");
+    expectInvariant(summary);
+  });
+
   it("summarizes 126163 as complete when physical lines are fulfilled and note is open", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PHR-9X", 2], ["HPU1103", 1], ["Note", 1]]),

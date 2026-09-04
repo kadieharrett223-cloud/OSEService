@@ -105,6 +105,11 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.inserts[0]?.productId).toBe("product-motor");
   });
 
+  it.each(["HPU1103-PKG (deleted)", "HPU1103-PKG-1 (deleted)", "HPU2203-PKG (deleted)", "HPU2203-PKG-1 (deleted)", "HPU2204-PKG (deleted)"])("keeps the exact motor identity for %s", (sku) => {
+    const baseSku = sku.replace(/\s*\(deleted\)$/i, "").replace(/-1$/, "").replace(/-PKG$/, "");
+    expect(qboSkuCandidates(sku)).toContain(baseSku);
+  });
+
   it("maps a deleted QBO SKU with multiple suffixes without stripping the base capacity", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inv-line-double-deleted", product_id: null, qbo_sku: "4PHDXL-12-1-1 (deleted)" })],

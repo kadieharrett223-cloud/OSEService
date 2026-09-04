@@ -35,10 +35,12 @@ identity, so merging by container number uses `Math.max` rather than a sum. Summ
 ### Forecast coverage versus persisted allocation
 
 Container detail and Inventory forecast coverage use the shared `canonicalProductSkuKey()` utility
-in `src/lib/products/canonical-sku.ts`. It prefers a non-numeric operational product alias before
-normalizing manufacturer prefixes, so supply on a recycled product ID and canonical Customer List
-demand on a different product ID are resolved together even when one stored product SKU is a legacy
-numeric identifier. Forecast demand is
+in `src/lib/products/canonical-sku.ts`. It keeps a non-numeric primary product SKU, or selects a
+non-generic operational alias for a legacy numeric SKU before normalizing manufacturer prefixes.
+Generic descriptors such as `220V`, `10-YEAR`, `NOTE`, and `SHIPPING` are never product identities,
+so they cannot merge supply and demand for different models. Supply on a recycled product ID and
+canonical Customer List demand on a different product ID can still resolve together when they share
+an actual operational SKU. Forecast demand is
 loaded from `loadCanonicalCustomerQueue()` and passed to the quantity-aware
 `resolveProductCoverage()` solver, which covers Warehouse first and then active containers in ETA
 order.

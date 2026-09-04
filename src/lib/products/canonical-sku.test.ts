@@ -15,4 +15,9 @@ describe("canonicalSkuKey", () => {
     expect(preferredOperationalSku("000011", ["HK-4PC-6"])).toBe("HK-4PC-6");
     expect(canonicalProductSkuKey("000011", ["HK-4PC-6"])).toBe("4PC6");
   });
+
+  it("never uses generic aliases to merge distinct product models", () => {
+    expect(canonicalProductSkuKey("000245", ["220V", "220V3HP", "HPU2203"])).toBe("HPU2203");
+    expect(canonicalProductSkuKey("000246", ["220V", "HPU2204"])).toBe("HPU2204");
+  });
 });

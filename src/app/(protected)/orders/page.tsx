@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { recommendWarehouseOrderIds } from "@/lib/orders/warehouse-recommendations";
-import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { moveOrderToWarehouseAction } from "./actions";
@@ -139,7 +137,7 @@ async function fetchRowsByIds<T>(
   return rows;
 }
 
-const getCachedOrdersDataset = unstable_cache(async () => {
+async function getOrdersDataset() {
     const supabase = getSupabaseAdmin();
     const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
     const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
@@ -302,7 +300,7 @@ const getCachedOrdersDataset = unstable_cache(async () => {
     };
 
   return { projectedOrders, tabCounts };
-}, ["orders-page-dataset"], { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] });
+}
 
 export default async function OrdersPage({
   searchParams,
@@ -320,7 +318,7 @@ export default async function OrdersPage({
   let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
   let ordersLoadError: Error | null = null;
   try {
-    const dataset = await getCachedOrdersDataset();
+    const dataset = await getOrdersDataset();
     projectedOrders = dataset.projectedOrders;
     tabCounts = dataset.tabCounts;
   } catch (error) {

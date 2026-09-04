@@ -54,6 +54,18 @@ export function sortCustomerQueue(items: CustomerQueueItem[]) {
   });
 }
 
+function formatPriorityDate(value: string) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function priorityDateLabel(item: Pick<CustomerQueueItem, "firstPaymentAt" | "priorityDate" | "priorityDateSource">) {
+  if (item.firstPaymentAt) return `First Paid: ${formatPriorityDate(item.firstPaymentAt)}`;
+  if (item.priorityDateSource === "INVOICE_DATE" && item.priorityDate) return `Invoice created: ${formatPriorityDate(item.priorityDate)}`;
+  if (item.priorityDateSource === "INVOICE_NUMBER") return "Priority: Invoice number fallback";
+  return "Priority unavailable";
+}
+
 export function CustomerDemandDropdown({
   productName,
   sku,
@@ -186,13 +198,7 @@ export function CustomerDemandDropdown({
                   <div className="min-w-0">
                     <div className="truncate font-semibold text-[#1e293b]">{item.customer}</div>
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
-                    {item.firstPaymentAt ? (
-                      <div className="mt-1 text-[#64748b]">First Paid: {new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
-                    ) : item.priorityDateSource === "INVOICE_NUMBER" ? (
-                      <div className="mt-1 text-[#64748b]">Priority: Invoice number fallback</div>
-                    ) : (
-                      <div className="mt-1 text-[#64748b]">Priority unavailable</div>
-                    )}
+                    <div className="mt-1 text-[#64748b]">{priorityDateLabel(item)}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}
                       {item.willCall ? <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#92400e]">WILL CALL</span> : null}

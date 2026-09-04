@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sortCustomerQueue } from "./customer-demand-dropdown";
+import { priorityDateLabel, sortCustomerQueue } from "./customer-demand-dropdown";
 
 describe("Customer List display order", () => {
   it("sorts rows by their canonical queue position rather than input order", () => {
@@ -12,5 +12,13 @@ describe("Customer List display order", () => {
 
     expect(sortCustomerQueue(queue as Parameters<typeof sortCustomerQueue>[0]).map((item) => item.lineId))
       .toEqual(["john", "kelly", "kc", "rich"]);
+  });
+
+  it("shows the invoice creation date when first payment evidence is unavailable", () => {
+    expect(priorityDateLabel({
+      firstPaymentAt: null,
+      priorityDate: "2026-06-01",
+      priorityDateSource: "INVOICE_DATE",
+    })).toBe("Invoice created: Jun 1, 2026");
   });
 });

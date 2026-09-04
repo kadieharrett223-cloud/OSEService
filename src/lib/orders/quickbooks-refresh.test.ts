@@ -89,6 +89,22 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.inserts[0]?.productId).toBe("product-lift");
   });
 
+  it("maps a deleted packaged SKU variant to its exact operational component", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-package", product_id: null, qbo_sku: "HPU1103-PKG-1 (deleted)" })],
+      [],
+      new Map([["HPU1103", "product-motor"]]),
+    );
+
+    expect(qboSkuCandidates("HPU1103-PKG-1 (deleted)")).toEqual([
+      "HPU1103-PKG-1 (DELETED)",
+      "HPU1103-PKG-1",
+      "HPU1103-PKG",
+      "HPU1103",
+    ]);
+    expect(plan.inserts[0]?.productId).toBe("product-motor");
+  });
+
   it("maps a deleted QBO SKU with multiple suffixes without stripping the base capacity", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inv-line-double-deleted", product_id: null, qbo_sku: "4PHDXL-12-1-1 (deleted)" })],

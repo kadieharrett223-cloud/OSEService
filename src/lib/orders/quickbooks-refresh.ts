@@ -56,6 +56,10 @@ export function qboSkuCandidates(value: string | null | undefined) {
     liveSku = liveSku.replace(/[-\s]1$/, "").trim();
     if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
   }
+  if (/-PKG$/.test(liveSku)) {
+    liveSku = liveSku.replace(/-PKG$/, "").trim();
+    if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
+  }
   return candidates;
 }
 

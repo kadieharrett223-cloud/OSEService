@@ -115,6 +115,25 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("counts a fulfilled sibling motor against a deleted packaged invoice SKU", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([
+        ["4PML-9-1", 1],
+        ["HPU1103-PKG-1 (deleted)", 1],
+        ["HLCJ-6-1 (deleted)", 1],
+      ]),
+      lines: [
+        line({ id: "lift", legacy_item_code: "4PML-9", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "sibling-motor", legacy_item_code: "HPU1103", approved_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "jack", legacy_item_code: "HLCJ-6", approved_qty: 1, fulfilled_qty: 0 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 3, fulfilled: 2, remaining: 1, isPartiallyFulfilled: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["lift", "sibling-motor", "jack"]);
+    expectInvariant(summary);
+  });
+
   it("summarizes 126163 as complete when physical lines are fulfilled and note is open", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PHR-9X", 2], ["HPU1103", 1], ["Note", 1]]),

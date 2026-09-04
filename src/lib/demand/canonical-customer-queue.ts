@@ -6,7 +6,7 @@ export type CanonicalCustomerQueueRow = CustomerDemandRow & {
   firstPaymentAt: string | null;
   invoiceDate: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER";
   orderCreatedAt: string | null;
   storedPosition: number | null;
   excludedFromQueue?: boolean;
@@ -17,16 +17,28 @@ export type ProjectedCustomerQueueRow = CanonicalCustomerQueueRow & {
 };
 
 function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCustomerQueueRow) {
-  const leftPriorityDate = Date.parse(left.priorityDate ?? "");
-  const rightPriorityDate = Date.parse(right.priorityDate ?? "");
-  const leftHasPriorityDate = Number.isFinite(leftPriorityDate);
-  const rightHasPriorityDate = Number.isFinite(rightPriorityDate);
-  if (leftHasPriorityDate !== rightHasPriorityDate) return leftHasPriorityDate ? -1 : 1;
-  if (leftHasPriorityDate && leftPriorityDate !== rightPriorityDate) return leftPriorityDate - rightPriorityDate;
+  const leftFirstPayment = Date.parse(left.firstPaymentAt ?? "");
+  const rightFirstPayment = Date.parse(right.firstPaymentAt ?? "");
+  const leftHasFirstPayment = Number.isFinite(leftFirstPayment);
+  const rightHasFirstPayment = Number.isFinite(rightFirstPayment);
+  if (leftHasFirstPayment !== rightHasFirstPayment) return leftHasFirstPayment ? -1 : 1;
+  if (leftHasFirstPayment && leftFirstPayment !== rightFirstPayment) return leftFirstPayment - rightFirstPayment;
 
-  const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-  const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-  if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+  if (!leftHasFirstPayment) {
+    const leftInvoice = Number.parseInt(left.invoice, 10);
+    const rightInvoice = Number.parseInt(right.invoice, 10);
+    const leftHasInvoiceNumber = Number.isFinite(leftInvoice);
+    const rightHasInvoiceNumber = Number.isFinite(rightInvoice);
+    if (leftHasInvoiceNumber !== rightHasInvoiceNumber) return leftHasInvoiceNumber ? -1 : 1;
+    if (leftHasInvoiceNumber && leftInvoice !== rightInvoice) return leftInvoice - rightInvoice;
+    if (left.invoice !== right.invoice) return left.invoice.localeCompare(right.invoice);
+  }
+
+  if (leftHasFirstPayment) {
+    const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+    const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
+    if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+  }
 
   return (left.storedPosition ?? Number.MAX_SAFE_INTEGER) - (right.storedPosition ?? Number.MAX_SAFE_INTEGER)
     || left.lineId.localeCompare(right.lineId);
@@ -35,7 +47,7 @@ function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCusto
 /**
  * The display-only Customer List queue. Stored line positions remain compatibility metadata;
  * canonical open demand, merged by invoice, is the authoritative display population. Priority is
- * the actual first payment when known, otherwise the QBO invoice date, then order creation time.
+ * the actual first payment when known, otherwise the invoice number in ascending order.
  */
 export function projectCanonicalCustomerQueue<T extends CanonicalCustomerQueueRow>(rows: T[]): Array<T & { position: string }> {
   const merged = mergeOpenCustomerDemand(rows.filter((row) => !row.excludedFromQueue));
@@ -49,4 +61,17 @@ export function projectCanonicalCustomerQueue<T extends CanonicalCustomerQueueRo
       nextPosition += quantity;
       return { ...row, position };
     });
+}
+
+/** Assigns one queue sequence to all raw product records with the same operational product key. */
+export function projectCanonicalCustomerQueuesByProductKey<T extends CanonicalCustomerQueueRow>(
+  rows: T[],
+  productKeyForRow: (row: T) => string,
+): Array<T & { position: string }> {
+  const rowsByProductKey = new Map<string, T[]>();
+  for (const row of rows) {
+    const productKey = productKeyForRow(row);
+    rowsByProductKey.set(productKey, [...(rowsByProductKey.get(productKey) ?? []), row]);
+  }
+  return [...rowsByProductKey.values()].flatMap((productRows) => projectCanonicalCustomerQueue(productRows));
 }

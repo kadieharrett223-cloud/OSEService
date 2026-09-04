@@ -166,7 +166,7 @@ type InventoryViewRow = {
     firstPaymentAt: string | null;
     invoiceDate: string | null;
     priorityDate: string | null;
-    priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED";
+    priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER";
     sourceInvoiceId: string | null;
     invoiceOrderedQty: number | null;
     provenInvoiceShippedQty: number;

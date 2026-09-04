@@ -24,7 +24,7 @@ type CustomerQueueItem = {
   orderId: string;
   firstPaymentAt: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER";
 };
 
 type CustomerDemandDropdownProps = {
@@ -81,7 +81,7 @@ export function CustomerDemandDropdown({
       String(item.openQty),
       item.priority,
       item.priorityDate ?? "",
-      item.priorityDateSource === "INVOICE_DATE" ? "Invoice date fallback" : item.priorityDateSource === "FIRST_PAYMENT" ? "First payment" : "Order creation fallback",
+      item.priorityDateSource === "FIRST_PAYMENT" ? "First payment" : "Invoice number fallback",
       item.assignedTo,
       item.expectedAvailability,
       item.status,
@@ -188,10 +188,10 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                     {item.firstPaymentAt ? (
                       <div className="mt-1 text-[#64748b]">First Paid: {new Date(item.firstPaymentAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
-                    ) : item.priorityDateSource === "INVOICE_DATE" && item.priorityDate ? (
-                      <div className="mt-1 text-[#64748b]">Priority Date: {new Date(item.priorityDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} · Invoice date fallback</div>
+                    ) : item.priorityDateSource === "INVOICE_NUMBER" ? (
+                      <div className="mt-1 text-[#64748b]">Priority: Invoice number fallback</div>
                     ) : (
-                      <div className="mt-1 text-[#64748b]">Priority Date: order creation fallback</div>
+                      <div className="mt-1 text-[#64748b]">Priority unavailable</div>
                     )}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}

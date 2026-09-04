@@ -1,10 +1,11 @@
 import { unstable_cache } from "next/cache";
-import { projectCanonicalCustomerQueue, type ProjectedCustomerQueueRow } from "./canonical-customer-queue";
+import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueueRow } from "./canonical-customer-queue";
 import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export type CanonicalQueueLine = {
@@ -86,8 +87,14 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   ]);
 
   const productIdByAlias = new Map<string, string>();
+  const aliasesByProductId = new Map<string, string[]>();
   for (const product of products as Array<{ id: string; sku: string | null }>) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
-  for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) if (alias.product_id && alias.alias) productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
+  for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) {
+    if (!alias.product_id || !alias.alias) continue;
+    productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
+    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
+  }
+  const productQueueKeyById = new Map((products as Array<{ id: string; sku: string | null }>).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id))]));
   const manualMappingSkus = new Set(((mappingRows.data ?? []) as unknown as Array<{ source_sku: string | null }>).map((row) => normalizeSku(row.source_sku)));
 
   const fulfilledByLineId = new Map<string, number>();
@@ -147,7 +154,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     const ids = line.shipping_orders?.id ? canonicalLineIds.get(line.shipping_orders.id) : null;
     return !ids || ids.has(line.id);
   }), completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
-  const rowsByProductId = new Map<string, Array<ReturnType<typeof toCustomerQueueRow>>>();
+  const queueRows: Array<ReturnType<typeof toCustomerQueueRow>> = [];
   const lineProductIdByLineId = new Map<string, string>();
   function toCustomerQueueRow(line: typeof canonicalLines[number]) {
     const parent = line.shipping_orders;
@@ -155,16 +162,18 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
     const firstPaymentAt = parent?.first_payment_at ?? null;
     const invoiceDate = parent?.qbo_invoices?.invoice_date ?? null;
-    const priorityDate = firstPaymentAt ?? invoiceDate ?? parent?.created_at ?? null;
-    const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" = firstPaymentAt ? "FIRST_PAYMENT" : invoiceDate ? "INVOICE_DATE" : "ORDER_CREATED";
+    const priorityDate = firstPaymentAt;
+    const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER" = firstPaymentAt ? "FIRST_PAYMENT" : "INVOICE_NUMBER";
     return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) };
   }
   for (const line of canonicalLines) {
     if (!line.product_id || !isOpenDemandLine(line)) continue;
-    rowsByProductId.set(line.product_id, [...(rowsByProductId.get(line.product_id) ?? []), toCustomerQueueRow(line)]);
+    queueRows.push(toCustomerQueueRow(line));
     lineProductIdByLineId.set(line.id, line.product_id);
   }
-  const projected = [...rowsByProductId.values()].flatMap((rows) => projectCanonicalCustomerQueue(rows));
+  const projected = projectCanonicalCustomerQueuesByProductKey(queueRows, (row) => (
+    productQueueKeyById.get(lineProductIdByLineId.get(row.lineId) ?? "") || lineProductIdByLineId.get(row.lineId) || row.lineId
+  ));
   const queueByLineId = new Map(projected.map((row) => [row.lineId, row]));
   const queueByLogicalDemandKey = new Map(projected.map((row) => [row.logicalDemandKey, row]));
   const queueByProductId = new Map<string, ProjectedCustomerQueueRow[]>();

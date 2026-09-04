@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectCanonicalCustomerQueue, type CanonicalCustomerQueueRow } from "./canonical-customer-queue";
+import { projectCanonicalCustomerQueue, projectCanonicalCustomerQueuesByProductKey, type CanonicalCustomerQueueRow } from "./canonical-customer-queue";
 
 function row(overrides: Partial<CanonicalCustomerQueueRow> = {}): CanonicalCustomerQueueRow {
   return {
@@ -59,14 +59,14 @@ describe("projectCanonicalCustomerQueue", () => {
     ]);
   });
 
-  it("uses invoice date before order creation when first payment is not recorded", () => {
+  it("uses the invoice number when first payment is not recorded", () => {
     const queue = projectCanonicalCustomerQueue([
-      row({ invoice: "newer-invoice", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: "2026-06-01", priorityDate: "2026-06-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-01-01" }),
-      row({ invoice: "older-invoice", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: "2026-05-01", priorityDate: "2026-05-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-07-01" }),
+      row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: "2026-06-01", priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: "2026-01-01" }),
+      row({ invoice: "122347", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: "2026-05-01", priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: "2026-07-01" }),
       row({ invoice: "paid", sourceInvoiceId: "paid-source", lineId: "paid", logicalDemandKey: "paid", firstPaymentAt: "2026-04-01", invoiceDate: "2026-06-15", priorityDate: "2026-04-01", priorityDateSource: "FIRST_PAYMENT" }),
     ]);
 
-    expect(queue.map((item) => item.invoice)).toEqual(["paid", "older-invoice", "newer-invoice"]);
+    expect(queue.map((item) => item.invoice)).toEqual(["paid", "122347", "127011"]);
   });
 
   it("assigns separate positions to distinct invoices with the same printed number", () => {
@@ -76,5 +76,18 @@ describe("projectCanonicalCustomerQueue", () => {
     ]);
 
     expect(queue.map((item) => [item.orderId, item.position])).toEqual([["jeffrey", "1"], ["kevin", "2"]]);
+  });
+
+  it("shares one sequence between recycled and active product records with the same operational SKU", () => {
+    const productKeyByLineId = new Map([
+      ["jonathan-line", "4PML9"],
+      ["jeffrey-line", "4PML9"],
+    ]);
+    const queue = projectCanonicalCustomerQueuesByProductKey([
+      row({ invoice: "12002", orderId: "jonathan", sourceInvoiceId: "jonathan-source", lineId: "jonathan-line", logicalDemandKey: "jonathan-line", firstPaymentAt: "2026-02-11T00:00:00Z" }),
+      row({ invoice: "122347", orderId: "jeffrey", sourceInvoiceId: "jeffrey-source", lineId: "jeffrey-line", logicalDemandKey: "jeffrey-line", firstPaymentAt: "2026-07-30T00:00:00Z" }),
+    ], (item) => productKeyByLineId.get(item.lineId) ?? item.lineId);
+
+    expect(queue.map((item) => [item.orderId, item.position])).toEqual([["jonathan", "1"], ["jeffrey", "2"]]);
   });
 });

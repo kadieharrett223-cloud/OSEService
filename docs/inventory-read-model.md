@@ -304,8 +304,9 @@ resolutions, manual-mapping exclusions, product aliases, and invoice-level mergi
 SKU candidate resolver matches duplicate-style trailing `-1` suffixes to their base operational alias
 for product mapping, physical fulfillment, and OLD_ERP/QBO bridging, so one unit remains one queue
 position. It then sends
-each product's surviving rows to `src/lib/demand/canonical-customer-queue.ts`, which sorts by
-`first_payment_at`, then deterministic fallbacks, and assigns compact quantity-aware position ranges.
+each product's surviving rows to `src/lib/demand/canonical-customer-queue.ts`, which groups rows by
+their canonical product identity, sorts by `first_payment_at`, then by ascending invoice number when
+payment evidence is unavailable, and assigns compact quantity-aware position ranges.
 
 Both `/inventory` and `/orders/[id]` use this loader. `shipping_order_lines.queue_position_start`
 is retained as historical compatibility metadata only and must never be shown as the authoritative
@@ -332,12 +333,11 @@ The audit refuses to refresh an expired QBO token. This preserves its read-only 
 write QuickBooks connection state, ERP timestamps, queue positions, demand, fulfillment, inventory,
 allocations, shipments, mappings, or resolutions. An approved backfill is a separate operation.
 
-### Invoice-Date Queue Fallback
+### Invoice-Number Queue Fallback
 
-Historical first-payment backfill is cancelled. The Customer List priority rule is read-model-only:
-use `first_payment_at` when present; otherwise use the related QBO invoice date; otherwise use the
-existing deterministic order-creation fallback. An invoice date is never written into or labelled as
-`first_payment_at`.
+The Customer List priority rule is read-model-only: use `first_payment_at` when present; otherwise
+sort by the numeric QBO invoice number in ascending order, keeping newer invoices at the end of the
+fallback population. A fallback never writes or labels an invoice date as `first_payment_at`.
 
 `/settings/queue-priority-preview` is an admin-unlocked, read-only all-SKU comparison of the prior
 first-payment-or-created ordering against the invoice-date fallback. Inventory Customer Lists, Order

@@ -11,7 +11,7 @@ export type InvoiceDateFallbackPreviewRow = {
   fallbackPosition: string;
 };
 
-/** Compares display-only queue positions before and after the invoice-date fallback. */
+/** Compares display-only queue positions before and after the invoice-number fallback. */
 export async function previewInvoiceDateFallbackQueue() {
   const queue = await loadCanonicalCustomerQueue();
   const lineById = new Map(queue.canonicalLines.map((line) => [line.id, line]));
@@ -23,7 +23,7 @@ export async function previewInvoiceDateFallbackQueue() {
     rows.push({
       ...row,
       priorityDate: row.firstPaymentAt,
-      priorityDateSource: row.firstPaymentAt ? "FIRST_PAYMENT" : "ORDER_CREATED",
+      priorityDateSource: row.firstPaymentAt ? "FIRST_PAYMENT" : "INVOICE_NUMBER",
     });
     rowsByProduct.set(productId, rows);
   }

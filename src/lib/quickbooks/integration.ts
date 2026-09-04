@@ -958,8 +958,9 @@ async function syncQuickbooksFirstPaymentDates(
   const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
   if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true, firstPaymentByQboInvoiceId: new Map<string, string>() };
 
-  // Normal forward intake begins at this recovery boundary; historical payment audits use the unbounded reader.
-  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken, "2026-08-07");
+  // Queue priority must reflect every linked invoice's actual first payment; the
+  // forward-intake cutoff is enforced separately when deciding which orders to create.
+  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
 
   const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
   const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));

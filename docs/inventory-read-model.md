@@ -118,8 +118,9 @@ real products from Customer List, coverage, and fulfillment selection.
 
 Customer List rows merge by immutable `source_invoice_id`, never by the displayed invoice number.
 Two distinct QuickBooks invoices can have the same printed number; each keeps an independent
-Customer List row and queue position. Queue ordering uses the QuickBooks first-payment date when
-stored, then the QBO invoice date and order creation date as fallbacks.
+Customer List row and queue position. Each QuickBooks sync reads the complete payment history and
+stores the earliest payment date on every linked order. Queue ordering uses that first-payment date,
+then the QBO invoice date and order creation date only when no QuickBooks payment evidence exists.
 
 The read-only production audit is:
 

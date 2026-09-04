@@ -325,6 +325,10 @@ leaves only the remaining quantity in the canonical Customer List. Status-only f
 intentionally rejected because it cannot prove the fulfilled quantity or maintain the inventory
 ledger.
 
+Deleted QuickBooks product labels remain selectable when their own item description explicitly
+names the exact mapped operational model code. This is limited to meaningful model codes and does
+not make Notes, installation, service, or generic description text selectable for fulfillment.
+
 Both `/inventory` and `/orders/[id]` use this loader. `shipping_order_lines.queue_position_start`
 is retained as historical compatibility metadata only and must never be shown as the authoritative
 Customer List position. Order Detail leaves its narrower supply-coverage query unchanged and uses

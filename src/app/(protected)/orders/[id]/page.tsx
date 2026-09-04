@@ -15,7 +15,7 @@ import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
-import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
@@ -1223,10 +1223,18 @@ export default async function OrderDetailPage({
     const descriptionKey = normalizeSkuKey(description);
     return operationalLines
       .map((candidate) => {
-        const canonical = normalizeSkuKey(candidate.products?.canonical_name);
-        const directIndex = canonical?.indexOf(skuKey) ?? -1;
-        const descriptionIndex = descriptionKey?.indexOf(canonical ?? "") ?? -1;
-        if (!canonical || (directIndex < 0 && descriptionIndex < 0)) return null;
+        const candidateKeys = [
+          normalizeSkuKey(candidate.products?.canonical_name),
+          normalizeSkuKey(candidate.legacy_item_code),
+          normalizeSkuKey(candidate.legacy_matched_item_code),
+          normalizeSkuKey(candidate.legacy_container_assignment),
+        ].filter(Boolean) as string[];
+        const directIndex = candidateKeys.findIndex((key) => key.includes(skuKey) || skuKey.includes(key));
+        const descriptionIndex = candidateKeys
+          .map((key) => descriptionKey?.indexOf(key) ?? -1)
+          .filter((index) => index >= 0)
+          .sort((left, right) => left - right)[0] ?? -1;
+        if (directIndex < 0 && descriptionIndex < 0 && !matchesPhysicalLineToInvoiceDescription(candidate, description)) return null;
         return { candidate, score: directIndex >= 0 ? directIndex : 10000 + descriptionIndex };
       })
       .filter((match): match is { candidate: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]; score: number } => Boolean(match))

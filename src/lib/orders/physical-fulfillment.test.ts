@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, matchesPhysicalLineToInvoiceSku, type PhysicalFulfillmentLine } from "./physical-fulfillment";
+import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, type PhysicalFulfillmentLine } from "./physical-fulfillment";
 import { isRemainingPhysicalFulfillmentLine } from "./physical-fulfillment";
 
 function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfillmentLine {
@@ -213,6 +213,17 @@ describe("physical fulfillment totals", () => {
       line({ legacy_item_code: "4PML-9" }),
       "4PML-9-1",
     )).toBe(true);
+  });
+
+  it("matches a deleted QBO item's explicit operational model code to its physical line", () => {
+    expect(matchesPhysicalLineToInvoiceDescription(
+      line({ legacy_item_code: "4032S", products: { sku: "000185", canonical_name: "Short triple stacker" } }),
+      "Model: Olympic 4032S / Three Level 3-Car Stacking Lift",
+    )).toBe(true);
+    expect(matchesPhysicalLineToInvoiceDescription(
+      line({ legacy_item_code: "4032S", products: { sku: "000185", canonical_name: "Short triple stacker" } }),
+      "4 Post lift installation",
+    )).toBe(false);
   });
 
   it("keeps 122332's fulfilled 4PXL-10B line separate from the open OLD_ERP 4PXL-10 line", () => {

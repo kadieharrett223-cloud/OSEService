@@ -150,6 +150,16 @@ export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, i
   return invoiceKeys.some((invoiceKey) => lineKeys.includes(invoiceKey));
 }
 
+/** Matches a meaningful stored operational code explicitly named in a QBO item description. */
+export function matchesPhysicalLineToInvoiceDescription(line: PhysicalFulfillmentLine, description: string | null | undefined) {
+  const descriptionKey = canonicalSkuKey(description);
+  if (!descriptionKey) return false;
+  const lineKeys = [line.legacy_item_code, line.products?.sku]
+    .map(canonicalSkuKey)
+    .filter((key) => key.length >= 4);
+  return lineKeys.some((key) => descriptionKey.includes(key));
+}
+
 export function prioritizePhysicalFulfillmentLine(left: PhysicalFulfillmentLine, right: PhysicalFulfillmentLine) {
   const leftCompleted = upper(left.fulfillment_status) === "FULFILLED" ? 1 : 0;
   const rightCompleted = upper(right.fulfillment_status) === "FULFILLED" ? 1 : 0;

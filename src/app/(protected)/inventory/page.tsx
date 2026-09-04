@@ -233,20 +233,6 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
   return map;
 }
 
-async function fetchRowsByIds<T>(
-  ids: string[],
-  fetchBatch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-) {
-  const batchSize = 100;
-  const batches = Array.from({ length: Math.ceil(ids.length / batchSize) }, (_, index) => ids.slice(index * batchSize, (index + 1) * batchSize));
-  const rows = await Promise.all(batches.map(async (batch) => {
-    const { data, error } = await fetchBatch(batch);
-    if (error) throw new Error(error.message);
-    return data ?? [];
-  }));
-  return rows.flat();
-}
-
 const getCachedInventoryBaseDataset = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
   const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult] = await Promise.all([
@@ -291,7 +277,6 @@ export default async function InventoryPage({
 }) {
   const currentUser = await requireUser();
   const adminMode = await isAdminUnlockedForUser(currentUser.id);
-  const supabase = getSupabaseAdmin();
   const params = await searchParams;
   const q = String(params.q ?? "").trim().toLowerCase();
   const mapError = String(params.mapError ?? "").trim();
@@ -329,7 +314,6 @@ export default async function InventoryPage({
     const invoiceProductKey = key.split("|").slice(0, 2).join("|");
     provenInvoiceShippedQtyByProduct.set(invoiceProductKey, (provenInvoiceShippedQtyByProduct.get(invoiceProductKey) ?? 0) + quantity);
   }
-  const sourceInvoiceIds = [...new Set(dedupedQueueLineRows.map((line) => line.shipping_orders?.source_invoice_id).filter(Boolean))] as string[];
   const productIdByAliasKey = new Map<string, string>();
   for (const product of productRows) {
     if (product.sku) productIdByAliasKey.set(normalizeSkuKey(product.sku), product.id);
@@ -337,9 +321,7 @@ export default async function InventoryPage({
   for (const alias of productAliasRows) {
     if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
   }
-  const allQboLineRows = sourceInvoiceIds.length
-    ? await fetchRowsByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids))
-    : [];
+  const allQboLineRows = sharedCanonicalQueue.qboInvoiceLines;
   const fulfilledQtyByQboInvoiceLineId = new Map<string, number>();
   for (const line of dedupedQueueLineRows) {
     if (!line.qbo_invoice_line_id) continue;
@@ -368,12 +350,7 @@ export default async function InventoryPage({
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
   }
-  const manualMappingSkus = new Set<string>();
-  const { data: manualMappingRows } = await supabase
-    .from("manual_product_mapping_queue")
-    .select("source_sku")
-    .eq("status", "OPEN");
-  for (const row of (manualMappingRows ?? []) as unknown as Array<{ source_sku: string | null }>) manualMappingSkus.add(normalizeSkuKey(row.source_sku));
+  const manualMappingSkus = new Set(sharedCanonicalQueue.manualMappingSkus);
 
   const operationalSkuByProduct = new Map<string, string>();
   for (const alias of productAliasRows) {

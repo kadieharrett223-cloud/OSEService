@@ -15,7 +15,8 @@ read-only projections, never by omitting operational records or weakening calcul
 - Inventory reuses the canonical Customer List projection for its open order lines, fulfillment evidence,
   reviewed resolutions, QBO sibling handling, and queue placement. Its separate 60-second base dataset is
   limited to the product catalog and aliases, inventory ledger totals, incoming containers, and display
-  groups. A targeted QBO invoice-line lookup retains authoritative invoice quantities for displayed demand.
+  groups. The canonical cache also provides the QBO invoice-line quantities and open mapping SKUs that
+  Inventory needs for displayed demand, avoiding duplicate request-time reads of those tables.
   Authentication, admin-mode access, URL filtering, and the final screen projection remain request-specific.
   This avoids a second cold full-table order reconciliation without changing Customer List, coverage, or
   physical-inventory semantics.

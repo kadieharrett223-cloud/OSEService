@@ -25,14 +25,26 @@ export type CanonicalQueueLine = {
 export type CanonicalCustomerQueueLoaderResult = {
   queue: ProjectedCustomerQueueRow[];
   canonicalLines: CanonicalQueueLine[];
+  qboInvoiceLines: CanonicalQboInvoiceLine[];
+  manualMappingSkus: string[];
   queueByLineId: Map<string, ProjectedCustomerQueueRow>;
   queueByLogicalDemandKey: Map<string, ProjectedCustomerQueueRow>;
   queueByProductId: Map<string, ProjectedCustomerQueueRow[]>;
 };
 
+export type CanonicalQboInvoiceLine = {
+  id: string;
+  qbo_invoice_id: string;
+  qbo_sku: string | null;
+  product_id: string | null;
+  ordered_qty: number | null;
+};
+
 type CachedCanonicalCustomerQueue = {
   queue: ProjectedCustomerQueueRow[];
   canonicalLines: CanonicalQueueLine[];
+  qboInvoiceLines: CanonicalQboInvoiceLine[];
+  manualMappingSkus: string[];
   lineProductIdEntries: Array<[string, string]>;
 };
 
@@ -90,7 +102,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     fetchByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select("source_invoice_id,review_status,duplicate_of_order_id,cancellation_status").in("source_invoice_id", ids)),
   ]);
   const payloadByInvoiceId = new Map((qboInvoices as Array<{ id: string; raw_payload: { PrivateNote?: string | null; Line?: unknown[] } | null }>).map((invoice) => [invoice.id, invoice.raw_payload]));
-  const allQboLines = qboLines as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty: number | null }>;
+  const allQboLines = qboLines as CanonicalQboInvoiceLine[];
   const qboOrderedQtyByLineId = new Map(allQboLines.map((line) => [line.id, Math.max(0, Number(line.ordered_qty ?? 0))]));
   const activeQboParentsByNumber = new Map<string, Array<{ source_invoice_id: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>>();
   for (const parent of qboParents as unknown as Array<{ order_number: string | null; source_invoice_id: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null; customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>) {
@@ -163,6 +175,8 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   return {
     queue: projected,
     canonicalLines,
+    qboInvoiceLines: allQboLines,
+    manualMappingSkus: [...manualMappingSkus],
     lineProductIdEntries: [...lineProductIdByLineId.entries()],
   };
 }
@@ -175,7 +189,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQueueLoaderResult> {
-  const { queue, canonicalLines, lineProductIdEntries } = await getCachedCanonicalCustomerQueue();
+  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, lineProductIdEntries } = await getCachedCanonicalCustomerQueue();
   const lineProductIdByLineId = new Map(lineProductIdEntries);
   const queueByLineId = new Map(queue.map((row) => [row.lineId, row]));
   const queueByLogicalDemandKey = new Map(queue.map((row) => [row.logicalDemandKey, row]));
@@ -184,5 +198,5 @@ export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQue
     const productId = lineProductIdByLineId.get(row.lineId);
     if (productId) queueByProductId.set(productId, [...(queueByProductId.get(productId) ?? []), row]);
   }
-  return { queue, canonicalLines, queueByLineId, queueByLogicalDemandKey, queueByProductId };
+  return { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueByLineId, queueByLogicalDemandKey, queueByProductId };
 }

@@ -103,15 +103,23 @@ export function demandLineIdentity(line: DemandLineLike) {
 
 /** Removes repeated imports of one obligation without merging genuinely separate lines. */
 export function dedupeDemandLines<T extends DemandLineLike>(lines: T[]): T[] {
-  const byIdentity = new Map<string, T>();
+  const byIdentity = new Map<string, T[]>();
   for (const line of lines) {
     const key = demandLineIdentity(line);
-    const existing = byIdentity.get(key);
-    const lineIsReserved = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String((line as DemandLineLike & { warehouse_status?: string | null }).warehouse_status ?? "").toUpperCase());
-    const existingIsReserved = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String((existing as (DemandLineLike & { warehouse_status?: string | null }) | undefined)?.warehouse_status ?? "").toUpperCase());
-    if (!existing || openQtyOf(line) > openQtyOf(existing) || (openQtyOf(line) === openQtyOf(existing) && lineIsReserved && !existingIsReserved)) byIdentity.set(key, line);
+    byIdentity.set(key, [...(byIdentity.get(key) ?? []), line]);
   }
-  return Array.from(byIdentity.values());
+
+  return Array.from(byIdentity.values()).map((duplicates) => {
+    const selected = [...duplicates].sort((left, right) => openQtyOf(right) - openQtyOf(left) || left.id.localeCompare(right.id))[0];
+    const warehouseStates = new Set(duplicates.map((line) => String(line.warehouse_status ?? "").toUpperCase()));
+    const hasWarehouseState = [...warehouseStates].some((state) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(state));
+    const hasNonWarehouseState = [...warehouseStates].some((state) => !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(state));
+
+    // A remapped or accepted duplicate must not inherit a warehouse instruction from its sibling.
+    return hasWarehouseState && hasNonWarehouseState
+      ? { ...selected, warehouse_status: "APPROVED" } as T
+      : selected;
+  });
 }
 
 export function totalOpenDemand(lines: DemandLineLike[]) {

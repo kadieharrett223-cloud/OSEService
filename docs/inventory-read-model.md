@@ -63,6 +63,12 @@ Warehouse. The existing shipment action continues to enforce authentication, lin
 mapping, quantity, and fulfillment-record checks; historical review status is not a shipment
 blocker.
 
+When duplicate representations resolve to one logical customer obligation, their warehouse state
+must agree before the Customer List displays `In Warehouse`. A remapped or accepted line never
+inherits that label from a duplicate sibling with an older warehouse status; the canonical row
+remains waiting until an explicit warehouse action sets its own persisted state. This display guard
+does not change inventory quantities, reservations, or warehouse status records.
+
 Re-entering an existing QuickBooks invoice is the explicit single-order activation path. It refreshes
 the order from QBO source lines, marks the parent approved, and changes only untouched,
 unallocated `PENDING_REVIEW` lines to `ON_FLOOR` / `PENDING`. Lines already in Warehouse, picked,

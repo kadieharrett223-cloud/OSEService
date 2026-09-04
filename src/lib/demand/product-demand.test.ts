@@ -12,11 +12,23 @@ describe("shared active logical demand", () => {
     expect(totalOpenDemand(lines)).toBe(1);
   });
 
-  it("keeps the reserved representation when duplicate rows have equal demand", () => {
+  it("does not inherit In Warehouse from a conflicting duplicate representation", () => {
     const lines = [
       { id: "qbo", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "APPROVED", fulfillment_status: "PENDING" },
       { id: "old", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "IN_WAREHOUSE", fulfillment_status: "PENDING" },
     ];
+    const [canonical] = dedupeDemandLines(lines);
+
+    expect(canonical.warehouse_status).toBe("APPROVED");
+    expect(getWarehouseDemandDisplay({ openQty: openQtyOf(canonical), warehouseStatus: canonical.warehouse_status })).toMatchObject({ inWarehouse: false, waitingQty: 1 });
+  });
+
+  it("keeps the warehouse instruction when every duplicate agrees", () => {
+    const lines = [
+      { id: "accepted", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "IN_WAREHOUSE", fulfillment_status: "PENDING" },
+      { id: "remapped", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "READY_TO_SHIP", fulfillment_status: "PENDING" },
+    ];
+
     expect(dedupeDemandLines(lines)[0].warehouse_status).toBe("IN_WAREHOUSE");
   });
 

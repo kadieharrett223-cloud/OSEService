@@ -315,6 +315,16 @@ container supply by ETA in Customer List order. A persisted `FLOOR` allocation o
 even when that customer is lower in the paid-date queue, and reduces the on-floor balance available
 to earlier unreserved customers. The read model never silently moves or releases that reservation.
 
+### Fulfillment Math
+
+Fulfillment must be recorded through the quantity-based shipment, pickup, Dropship, or Other
+completion workflows. Each submission is limited to the line's remaining quantity. Warehouse and
+pickup completion writes matching fulfillment evidence and one negative `ON_FLOOR` transaction for
+the fulfilled quantity; Dropship and Other completion are inventory-neutral. A partial completion
+leaves only the remaining quantity in the canonical Customer List. Status-only fulfillment is
+intentionally rejected because it cannot prove the fulfilled quantity or maintain the inventory
+ledger.
+
 Both `/inventory` and `/orders/[id]` use this loader. `shipping_order_lines.queue_position_start`
 is retained as historical compatibility metadata only and must never be shown as the authoritative
 Customer List position. Order Detail leaves its narrower supply-coverage query unchanged and uses

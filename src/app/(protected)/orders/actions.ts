@@ -310,6 +310,8 @@ async function syncOrderSummaryState(
 }
 
 export async function updateOrderLineStatusAction(formData: FormData) {
+  await requireUser();
+
   const lineId = formData.get("lineId")?.toString();
   const orderId = formData.get("orderId")?.toString();
   const action = formData.get("action")?.toString();
@@ -340,11 +342,7 @@ export async function updateOrderLineStatusAction(formData: FormData) {
       auditDetails = { action, line_id: lineId, warehouse_status: "IN_WAREHOUSE" };
       break;
     case "fulfill":
-      payload.fulfillment_status = "FULFILLED";
-      payload.warehouse_status = "FULFILLED";
-      auditAction = "ORDER_LINE_FULFILLED";
-      auditDetails = { action, line_id: lineId, fulfillment_status: "FULFILLED" };
-      break;
+      redirect(`/orders/${orderId}?error=Use+the+quantity-based+shipment+or+pickup+workflow+to+record+fulfillment`);
     case "hold":
       payload.approval_status = "HOLD";
       payload.warehouse_status = "HOLD";

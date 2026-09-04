@@ -1,6 +1,7 @@
 export type CustomerDemandRow = {
   invoice: string;
   orderId: string;
+  sourceInvoiceId: string | null;
   openQty: number;
   warehouseQty: number;
   waitingQty: number;
@@ -14,12 +15,12 @@ export type CustomerDemandRow = {
   invoiceFullyShipped: boolean;
 };
 
-/** Produces one active Customer List row per invoice after authoritative shipment reconciliation. */
+/** Produces one active Customer List row per source invoice after authoritative shipment reconciliation. */
 export function mergeOpenCustomerDemand<T extends CustomerDemandRow>(items: T[]): T[] {
   const customerDemandByInvoice = new Map<string, T>();
   for (const item of items) {
-    const key = item.invoice && item.invoice !== "—"
-      ? `INVOICE:${item.invoice}`.toUpperCase()
+    const key = item.sourceInvoiceId
+      ? `SOURCE_INVOICE:${item.sourceInvoiceId}`.toUpperCase()
       : `ORDER:${item.orderId}`.toUpperCase();
     const existing = customerDemandByInvoice.get(key);
     if (!existing) {

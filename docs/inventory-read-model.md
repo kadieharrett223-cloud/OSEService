@@ -116,6 +116,11 @@ archived, a reviewed duplicate, or its fulfillment evidence is terminal. A histo
 cannot be suppressed by a hard-coded invoice-number exception; doing so would incorrectly hide
 real products from Customer List, coverage, and fulfillment selection.
 
+Customer List rows merge by immutable `source_invoice_id`, never by the displayed invoice number.
+Two distinct QuickBooks invoices can have the same printed number; each keeps an independent
+Customer List row and queue position. Queue ordering uses the QuickBooks first-payment date when
+stored, then the QBO invoice date and order creation date as fallbacks.
+
 The read-only production audit is:
 
 ```powershell

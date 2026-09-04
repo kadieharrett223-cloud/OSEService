@@ -4,6 +4,7 @@ import { mergeOpenCustomerDemand } from "./customer-list-demand";
 const row = (overrides = {}) => ({
   invoice: "122353",
   orderId: "f8fa9aac-a6c4-4e10-bfb5-87486e524437",
+  sourceInvoiceId: "source-invoice-122353",
   openQty: 1,
   warehouseQty: 1,
   waitingQty: 0,
@@ -45,5 +46,17 @@ describe("final Customer List demand", () => {
 
   it("retains a normal unshipped order", () => {
     expect(mergeOpenCustomerDemand([row({ invoice: "open" })])).toHaveLength(1);
+  });
+
+  it("keeps distinct QBO invoice identities separate when they share a printed number", () => {
+    const rows = mergeOpenCustomerDemand([
+      row({ invoice: "122347", orderId: "jeffrey-order", sourceInvoiceId: "qbo-38527", openQty: 1 }),
+      row({ invoice: "122347", orderId: "kevin-order", sourceInvoiceId: "qbo-38526", openQty: 2, invoiceOrderedQty: null }),
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((item) => [item.orderId, item.openQty])).toEqual([[
+      "jeffrey-order", 1,
+    ], ["kevin-order", 2]]);
   });
 });

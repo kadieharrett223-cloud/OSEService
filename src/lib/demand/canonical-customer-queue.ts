@@ -6,7 +6,7 @@ export type CanonicalCustomerQueueRow = CustomerDemandRow & {
   firstPaymentAt: string | null;
   invoiceDate: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
   orderCreatedAt: string | null;
   storedPosition: number | null;
   excludedFromQueue?: boolean;
@@ -25,6 +25,13 @@ function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCusto
   if (leftHasFirstPayment && leftFirstPayment !== rightFirstPayment) return leftFirstPayment - rightFirstPayment;
 
   if (!leftHasFirstPayment) {
+    const leftInvoiceDate = Date.parse(left.invoiceDate ?? "");
+    const rightInvoiceDate = Date.parse(right.invoiceDate ?? "");
+    const leftHasInvoiceDate = Number.isFinite(leftInvoiceDate);
+    const rightHasInvoiceDate = Number.isFinite(rightInvoiceDate);
+    if (leftHasInvoiceDate !== rightHasInvoiceDate) return leftHasInvoiceDate ? -1 : 1;
+    if (leftHasInvoiceDate && leftInvoiceDate !== rightInvoiceDate) return leftInvoiceDate - rightInvoiceDate;
+
     const leftInvoice = Number.parseInt(left.invoice, 10);
     const rightInvoice = Number.parseInt(right.invoice, 10);
     const leftHasInvoiceNumber = Number.isFinite(leftInvoice);
@@ -47,7 +54,8 @@ function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCusto
 /**
  * The display-only Customer List queue. Stored line positions remain compatibility metadata;
  * canonical open demand, merged by invoice, is the authoritative display population. Priority is
- * the actual first payment when known, otherwise the invoice number in ascending order.
+ * the actual first payment when known, otherwise the invoice creation date, then the invoice
+ * number in ascending order only when neither date is available.
  */
 export function projectCanonicalCustomerQueue<T extends CanonicalCustomerQueueRow>(rows: T[]): Array<T & { position: string }> {
   const merged = mergeOpenCustomerDemand(rows.filter((row) => !row.excludedFromQueue));

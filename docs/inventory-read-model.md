@@ -118,6 +118,14 @@ archived, a reviewed duplicate, or its fulfillment evidence is terminal. A histo
 cannot be suppressed by a hard-coded invoice-number exception; doing so would incorrectly hide
 real products from Customer List, coverage, and fulfillment selection.
 
+### Customer List priority fallback
+
+Customer List and forecast coverage sort by first payment date when it is known. When QuickBooks
+payment evidence is temporarily unavailable, the fallback is the QBO invoice creation date, oldest
+first. Invoice number is used only as a deterministic tie-breaker when both dates are unavailable.
+The fallback changes display and forecast priority only; it never changes inventory, allocations,
+or fulfillment records.
+
 Customer List rows merge by immutable `source_invoice_id`, never by the displayed invoice number.
 Two distinct QuickBooks invoices can have the same printed number; each keeps an independent
 Customer List row and queue position. Each QuickBooks sync reads the complete payment history and

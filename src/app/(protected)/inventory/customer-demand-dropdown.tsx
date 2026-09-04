@@ -24,7 +24,7 @@ type CustomerQueueItem = {
   orderId: string;
   firstPaymentAt: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_NUMBER";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
 };
 
 type CustomerDemandDropdownProps = {
@@ -81,7 +81,7 @@ export function CustomerDemandDropdown({
       String(item.openQty),
       item.priority,
       item.priorityDate ?? "",
-      item.priorityDateSource === "FIRST_PAYMENT" ? "First payment" : "Invoice number fallback",
+      item.priorityDateSource === "FIRST_PAYMENT" ? "First payment" : item.priorityDateSource === "INVOICE_DATE" ? "Invoice creation date fallback" : "Invoice number fallback",
       item.assignedTo,
       item.expectedAvailability,
       item.status,

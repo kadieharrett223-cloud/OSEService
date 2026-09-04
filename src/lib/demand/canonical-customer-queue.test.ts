@@ -59,14 +59,23 @@ describe("projectCanonicalCustomerQueue", () => {
     ]);
   });
 
-  it("uses the invoice number when first payment is not recorded", () => {
+  it("uses invoice creation date when first payment is not recorded", () => {
     const queue = projectCanonicalCustomerQueue([
-      row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: "2026-06-01", priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: "2026-01-01" }),
-      row({ invoice: "122347", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: "2026-05-01", priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: "2026-07-01" }),
+      row({ invoice: "122347", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: "2026-06-01", priorityDate: "2026-06-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-01-01" }),
+      row({ invoice: "127011", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: "2026-05-01", priorityDate: "2026-05-01", priorityDateSource: "INVOICE_DATE", orderCreatedAt: "2026-07-01" }),
       row({ invoice: "paid", sourceInvoiceId: "paid-source", lineId: "paid", logicalDemandKey: "paid", firstPaymentAt: "2026-04-01", invoiceDate: "2026-06-15", priorityDate: "2026-04-01", priorityDateSource: "FIRST_PAYMENT" }),
     ]);
 
-    expect(queue.map((item) => item.invoice)).toEqual(["paid", "122347", "127011"]);
+    expect(queue.map((item) => item.invoice)).toEqual(["paid", "127011", "122347"]);
+  });
+
+  it("uses the invoice number only when payment and creation dates are both unavailable", () => {
+    const queue = projectCanonicalCustomerQueue([
+      row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER" }),
+      row({ invoice: "122347", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER" }),
+    ]);
+
+    expect(queue.map((item) => item.invoice)).toEqual(["122347", "127011"]);
   });
 
   it("assigns separate positions to distinct invoices with the same printed number", () => {

@@ -14,6 +14,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
+import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
@@ -1025,30 +1026,44 @@ export default async function OrderDetailPage({
       productMap.set(aliasKey, product);
     }
   }
+  const aliasesByProductId = new Map<string, string[]>();
+  for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
+    if (!alias.product_id || !alias.alias) continue;
+    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
+  }
+  const canonicalProductKeyById = new Map((productRows ?? []).map((product) => [
+    product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
+  ]));
 
   const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.flatMap((item) =>
     normalizeInvoiceSkuKeys(item.sku).map((skuKey) => productMap.get(skuKey)?.id).filter(Boolean),
   ))) as string[];
+  const resolvedProductKeys = new Set(resolvedProductIds.map((productId) => canonicalProductKeyById.get(productId) ?? productId));
+  const coverageProductIds = [...canonicalProductKeyById.entries()]
+    .filter(([, productKey]) => resolvedProductKeys.has(productKey))
+    .map(([productId]) => productId);
+  const canonicalQueue = await loadCanonicalCustomerQueue();
 
   const [{ data: onFloorRows }, { data: containerLineRows }, { data: allAllocRows }, { data: openQueueRows }] = resolvedProductIds.length
     ? await Promise.all([
         supabase
           .from("inventory_transactions")
           .select("product_id, bucket, delta")
-          .in("product_id", resolvedProductIds)
+          .in("product_id", coverageProductIds)
           .eq("bucket", "ON_FLOOR"),
         supabase
           .from("container_lines")
           .select("product_id, on_order_qty, container_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
-          .in("product_id", resolvedProductIds),
+          .in("product_id", coverageProductIds),
         supabase
           .from("inventory_allocations")
           .select("product_id, container_id, quantity, source_type, allocation_status, shipping_order_line_id, containers (id, container_number, entered_date, lifecycle_status, eta_confirmed_date, eta_estimated_date)")
-          .in("product_id", resolvedProductIds),
+          .in("product_id", coverageProductIds),
         supabase
           .from("shipping_order_lines")
           .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, warehouse_status, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status, quantity, source_type)")
-          .in("product_id", resolvedProductIds)
+          .in("product_id", coverageProductIds)
           .eq("approval_status", "APPROVED")
           .neq("fulfillment_status", "FULFILLED"),
       ])
@@ -1077,7 +1092,10 @@ export default async function OrderDetailPage({
   }
 
   const floorAvailableByProduct = new Map<string, number>();
-  for (const [productId, floorTotal] of onFloorAvailableByProduct.entries()) floorAvailableByProduct.set(productId, Math.max(0, floorTotal));
+  for (const [productId, floorTotal] of onFloorAvailableByProduct.entries()) {
+    const productKey = canonicalProductKeyById.get(productId) ?? productId;
+    floorAvailableByProduct.set(productKey, (floorAvailableByProduct.get(productKey) ?? 0) + Math.max(0, floorTotal));
+  }
 
   const activeContainerStatus = new Set(["ORDERED", "PRODUCTION", "INBOUND"]);
   const containerSupplyByProduct = new Map<string, ProductContainerSupply[]>();
@@ -1091,11 +1109,12 @@ export default async function OrderDetailPage({
     const lifecycle = String(container.lifecycle_status ?? "").toUpperCase();
     if (!activeContainerStatus.has(lifecycle)) continue;
 
-    const key = `${productId}:${containerId}`;
+    const productKey = canonicalProductKeyById.get(productId) ?? productId;
+    const key = `${productKey}:${containerId}`;
     const rawQty = Math.max(0, Number(row.on_order_qty ?? 0));
     const previous = containerSupplyByProductContainer.get(key);
     if (previous) {
-      previous.available_qty += rawQty;
+      previous.available_qty = Math.max(previous.available_qty, rawQty);
     } else {
       containerSupplyByProductContainer.set(key, {
         container_id: containerId,
@@ -1124,6 +1143,10 @@ export default async function OrderDetailPage({
   const queueLineById = new Map<string, OpenQueueLine>();
   for (const row of (openQueueRows ?? []) as unknown as OpenQueueLineLookupRow[]) {
     if (!row.product_id) continue;
+    const sharedQueueRow = canonicalQueue.queueByLineId.get(row.id);
+    if (!sharedQueueRow) continue;
+    const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
+    const productKey = canonicalProductKeyById.get(row.product_id) ?? row.product_id;
     const remainingQty = Math.max(0, Number(row.approved_qty ?? 0) - Number(row.fulfilled_qty ?? 0));
     if (remainingQty <= 0) continue;
 
@@ -1134,26 +1157,26 @@ export default async function OrderDetailPage({
     const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(row.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
     const queueLine: OpenQueueLine = {
       id: row.id,
-      product_id: row.product_id,
+      product_id: productKey,
       remaining_qty: remainingQty,
         fulfillment_source: row.fulfillment_source,
       warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
       priority: row.priority,
-      queue_position_start: row.queue_position_start,
+      queue_position_start: Number.isFinite(queuePosition) ? queuePosition : null,
       approved_at: row.approved_at,
       created_at: row.created_at,
       has_live_allocation: hasLiveAllocation,
     };
 
-    const lines = queueLinesByProduct.get(row.product_id) ?? [];
+    const lines = queueLinesByProduct.get(productKey) ?? [];
     lines.push(queueLine);
-    queueLinesByProduct.set(row.product_id, lines);
+    queueLinesByProduct.set(productKey, lines);
     queueLineById.set(queueLine.id, queueLine);
   }
 
   const coverageByProduct = new Map<string, ReturnType<typeof resolveProductCoverage>>();
-  for (const productId of resolvedProductIds) {
-    coverageByProduct.set(productId, resolveProductCoverage(productId, {
+  for (const productKey of resolvedProductKeys) {
+    coverageByProduct.set(productKey, resolveProductCoverage(productKey, {
       floorAvailableByProduct,
       queueLinesByProduct,
       containerSupplyByProduct,

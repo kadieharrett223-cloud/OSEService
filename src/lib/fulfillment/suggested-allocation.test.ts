@@ -41,6 +41,20 @@ describe("shared product coverage resolver", () => {
     expect(result.lines.get("D")?.completeEtaDate).toBe("2026-09-10");
   });
 
+  it("uses canonical queue position ahead of the legacy priority label", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 1]]),
+      queueLinesByProduct: new Map([[productId, [
+        line("paid-first", 1, 1, { priority: "LOW" }),
+        line("paid-later", 1, 2, { priority: "CRITICAL" }),
+      ]]]),
+      containerSupplyByProduct: new Map(),
+    });
+
+    expect(result.lines.get("paid-first")?.warehouseQty).toBe(1);
+    expect(result.lines.get("paid-later")?.unassignedQty).toBe(1);
+  });
+
   it("exhausts an earlier reliable-ETA container before committing a later container", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 0]]),

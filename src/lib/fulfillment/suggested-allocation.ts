@@ -126,11 +126,9 @@ function getContainerEta(container: ProductContainerSupply): { etaDate: string |
   return { etaDate: null, etaType: "NONE" };
 }
 
+/** Queue positions are already the canonical customer priority; coverage must not reorder them. */
 function sortQueueLines(lines: OpenQueueLine[]) {
   return [...lines].sort((left, right) => {
-    const priorityRankDiff = normalizePriority(left.priority) - normalizePriority(right.priority);
-    if (priorityRankDiff !== 0) return priorityRankDiff;
-
     const leftQueue = left.queue_position_start ?? Number.MAX_SAFE_INTEGER;
     const rightQueue = right.queue_position_start ?? Number.MAX_SAFE_INTEGER;
     if (leftQueue !== rightQueue) return leftQueue - rightQueue;

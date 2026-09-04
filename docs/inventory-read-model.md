@@ -308,6 +308,13 @@ each product's surviving rows to `src/lib/demand/canonical-customer-queue.ts`, w
 their canonical product identity, sorts by `first_payment_at`, then by ascending invoice number when
 payment evidence is unavailable, and assigns compact quantity-aware position ranges.
 
+Inventory, Container detail, and Order Detail feed that same canonical product key and projected
+position into `src/lib/fulfillment/suggested-allocation.ts`. It consumes ON_FLOOR first and active
+container supply by ETA in Customer List order. A persisted `FLOOR` allocation or an `IN_WAREHOUSE`,
+`PICKED`, or `READY_TO_SHIP` warehouse status is an explicit physical reservation: it stays assigned
+even when that customer is lower in the paid-date queue, and reduces the on-floor balance available
+to earlier unreserved customers. The read model never silently moves or releases that reservation.
+
 Both `/inventory` and `/orders/[id]` use this loader. `shipping_order_lines.queue_position_start`
 is retained as historical compatibility metadata only and must never be shown as the authoritative
 Customer List position. Order Detail leaves its narrower supply-coverage query unchanged and uses

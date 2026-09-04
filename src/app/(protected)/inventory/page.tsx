@@ -373,6 +373,10 @@ export default async function InventoryPage({
     const preferred = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
     if (preferred) operationalSkuByProduct.set(productId, preferred);
   }
+  const canonicalInventoryKeyByProductId = new Map(productRows.map((product) => [
+    product.id,
+    canonicalSkuKey(operationalSkuByProduct.get(product.id) ?? product.sku ?? "") || product.id,
+  ]));
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -511,38 +515,55 @@ export default async function InventoryPage({
     })));
   }
 
+  const coverageFloorByProduct = new Map<string, number>();
+  for (const [productId, onFloor] of onFloorByProduct) {
+    const productKey = canonicalInventoryKeyByProductId.get(productId) ?? productId;
+    coverageFloorByProduct.set(productKey, (coverageFloorByProduct.get(productKey) ?? 0) + onFloor);
+  }
+
   const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
     if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code))) continue;
+    const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
+    if (!sharedQueueRow) continue;
+    const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
+    const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
     const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
     const floorReservedQty = (line.inventory_allocations ?? [])
       .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")
       .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
     const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
-    const rows = coverageQueueByProduct.get(line.product_id) ?? [];
+    const rows = coverageQueueByProduct.get(productKey) ?? [];
     rows.push({
       id: line.id,
-      product_id: line.product_id,
+      product_id: productKey,
       remaining_qty: remainingQty,
       priority: line.priority,
-      queue_position_start: line.queue_position_start,
+      queue_position_start: Number.isFinite(queuePosition) ? queuePosition : null,
       approved_at: null,
       created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
       fulfillment_source: line.fulfillment_source,
       warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
     });
-    coverageQueueByProduct.set(line.product_id, rows);
+    coverageQueueByProduct.set(productKey, rows);
   }
 
   const coverageContainerSupplyByProduct = new Map<string, ProductContainerSupply[]>();
+  const coverageSupplyByProductContainer = new Map<string, ProductContainerSupply>();
   for (const line of containerLineRows) {
     if (!line.product_id || !line.container_id || !isActiveIncomingContainer(line.containers?.lifecycle_status)) continue;
     const qty = Math.max(0, Number(line.on_order_qty ?? 0) - Number(line.received_qty ?? 0));
     if (qty <= 0) continue;
-    const rows = coverageContainerSupplyByProduct.get(line.product_id) ?? [];
-    rows.push({
+    const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
+    const supplyKey = `${productKey}|${line.container_id}`;
+    const existing = coverageSupplyByProductContainer.get(supplyKey);
+    if (existing) {
+      existing.available_qty = Math.max(existing.available_qty, qty);
+      continue;
+    }
+    coverageSupplyByProductContainer.set(supplyKey, {
       container_id: line.container_id,
       container_number: line.containers?.container_number ?? null,
       available_qty: qty,
@@ -550,13 +571,16 @@ export default async function InventoryPage({
       eta_estimated_date: line.containers?.eta_estimated_date ?? line.containers?.port_date ?? null,
       entered_date: line.containers?.entered_date ?? null,
     });
-    coverageContainerSupplyByProduct.set(line.product_id, rows);
+  }
+  for (const [supplyKey, supply] of coverageSupplyByProductContainer) {
+    const [productKey] = supplyKey.split("|");
+    coverageContainerSupplyByProduct.set(productKey, [...(coverageContainerSupplyByProduct.get(productKey) ?? []), supply]);
   }
 
   const coverageByLineId = new Map<string, LineCoverage>();
-  for (const productId of new Set([...coverageQueueByProduct.keys(), ...coverageContainerSupplyByProduct.keys()])) {
-    const coverage = resolveProductCoverage(productId, {
-      floorAvailableByProduct: new Map([[productId, Math.max(0, onFloorByProduct.get(productId) ?? 0)]]),
+  for (const productKey of new Set([...coverageFloorByProduct.keys(), ...coverageQueueByProduct.keys(), ...coverageContainerSupplyByProduct.keys()])) {
+    const coverage = resolveProductCoverage(productKey, {
+      floorAvailableByProduct: new Map([[productKey, Math.max(0, coverageFloorByProduct.get(productKey) ?? 0)]]),
       queueLinesByProduct: coverageQueueByProduct,
       containerSupplyByProduct: coverageContainerSupplyByProduct,
     });
@@ -658,18 +682,9 @@ export default async function InventoryPage({
       const customerQueue = group.customerQueue
         .slice()
         .sort((left, right) => {
-          const leftPaymentAt = Date.parse(left.firstPaymentAt ?? "");
-          const rightPaymentAt = Date.parse(right.firstPaymentAt ?? "");
-          const leftHasPayment = Number.isFinite(leftPaymentAt);
-          const rightHasPayment = Number.isFinite(rightPaymentAt);
-          if (leftHasPayment !== rightHasPayment) return leftHasPayment ? -1 : 1;
-          if (leftHasPayment && leftPaymentAt !== rightPaymentAt) return leftPaymentAt - rightPaymentAt;
-          const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-          const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
-          if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
           const leftPosition = left.position === "—" ? Number.MAX_SAFE_INTEGER : Number(left.position);
           const rightPosition = right.position === "—" ? Number.MAX_SAFE_INTEGER : Number(right.position);
-          return leftPosition - rightPosition;
+          return leftPosition - rightPosition || left.invoice.localeCompare(right.invoice) || left.lineId.localeCompare(right.lineId);
         })
         .map((item) => item);
 

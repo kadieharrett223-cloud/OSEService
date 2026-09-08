@@ -22,7 +22,7 @@ duplicate identities (`4PHR-9X` and `000012`) collapse into one row.
 | Product identity | `products` + `product_aliases` | Catalog only; defines which rows appear |
 | On floor | `inventory_transactions` where `bucket = 'ON_FLOOR'` | Physical warehouse stock. **Never derived from demand.** |
 | Open demand + customer list | Canonical physical QBO item plus its sibling `shipping_order_lines` | `SUM(max(0, canonical ordered - canonical legitimate fulfilled))`; one list row per order line, never per unit |
-| Incoming + ETA | `container_lines` joined to `containers` with lifecycle ORDERED/PRODUCTION/INBOUND | `SUM(on_order_qty - received_qty)`; ETA read directly from the container record |
+| Incoming + ETA | `container_lines` joined to `containers` with lifecycle ORDERED/PRODUCTION/INBOUND | `SUM(on_order_qty - received_qty)`; ETA uses confirmed date first, then a saved estimated date, then the entered-date $+75$ day fallback |
 | Packaged freight dimensions | `old_erp_source_records.raw_payload` where `source_container = 'Products'` | Read-only `lengthInches`, `widthInches`, `heightInches`, and `weightLbs`, matched by canonical SKU; assembled product-description measurements are never used |
 
 ### Container deduplication

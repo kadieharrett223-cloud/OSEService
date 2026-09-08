@@ -23,19 +23,19 @@ function getEtaDisplay(container: {
     };
   }
 
+  if (container.eta_estimated_date) {
+    return {
+      label: formatDate(container.eta_estimated_date),
+      isEstimate: true,
+    };
+  }
+
   const baseDate = container.entered_date ? new Date(container.entered_date) : null;
   if (baseDate && !Number.isNaN(baseDate.getTime())) {
     const estimated = new Date(baseDate);
     estimated.setDate(estimated.getDate() + 75);
     return {
       label: formatDate(estimated.toISOString()),
-      isEstimate: true,
-    };
-  }
-
-  if (container.eta_estimated_date) {
-    return {
-      label: formatDate(container.eta_estimated_date),
       isEstimate: true,
     };
   }

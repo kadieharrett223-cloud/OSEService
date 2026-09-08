@@ -55,6 +55,23 @@ describe("shared active logical demand", () => {
     expect(isOpenDemandLine(withProvenFulfilledQty(staleLine, 1))).toBe(true);
   });
 
+  it("returns a shipment-removed physical line to active customer demand", () => {
+    const restoredLine = {
+      id: "alicia-yzrcj-7",
+      approved_qty: 2,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      warehouse_status: "APPROVED",
+    };
+
+    const activeDemand = getCanonicalOpenDemandLines([restoredLine], new Set(), new Set());
+
+    expect(activeDemand).toEqual([restoredLine]);
+    expect(openQtyOf(activeDemand[0]!)).toBe(2);
+    expect(isOpenDemandLine(activeDemand[0]!)).toBe(true);
+  });
+
   it("shares fulfillment evidence across linked siblings while preserving a partial remainder", () => {
     const rows = [
       { id: "old", logical_demand_key: "qbo-line-1", approved_qty: 3, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" },

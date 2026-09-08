@@ -1,6 +1,4 @@
-import { unstable_cache } from "next/cache";
 import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueueRow } from "./canonical-customer-queue";
-import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
@@ -190,15 +188,9 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   };
 }
 
-const getCachedCanonicalCustomerQueue = unstable_cache(
-  loadCanonicalCustomerQueueUncached,
-  ["canonical-customer-queue"],
-  { revalidate: 60, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
-);
-
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQueueLoaderResult> {
-  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, lineProductIdEntries } = await getCachedCanonicalCustomerQueue();
+  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, lineProductIdEntries } = await loadCanonicalCustomerQueueUncached();
   const lineProductIdByLineId = new Map(lineProductIdEntries);
   const queueByLineId = new Map(queue.map((row) => [row.lineId, row]));
   const queueByLogicalDemandKey = new Map(queue.map((row) => [row.logicalDemandKey, row]));

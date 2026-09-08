@@ -284,6 +284,34 @@ describe("physical fulfillment totals", () => {
     expect(summary.items[0].line?.id).toBe("old-erp-urjt");
   });
 
+  it("keeps a compatible accessory description from consuming its host lift's fulfillment", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PHDXLA-14", 1], ["HLCJ-14", 2]]),
+      lines: [
+        line({
+          id: "center-jacks",
+          legacy_item_code: "HLCJ-14",
+          products: { sku: "000065", canonical_name: "HLCJ-14 (HL-4PHDXLA-14 Center Jack)" },
+          approved_qty: 2,
+          fulfilled_qty: 2,
+          fulfillment_status: "FULFILLED",
+        }),
+        line({
+          id: "alignment-lift",
+          legacy_item_code: "4PHDXLA-14",
+          products: { sku: "000021", canonical_name: "HL-4PHDXLA-14" },
+          approved_qty: 1,
+          fulfilled_qty: 1,
+          fulfillment_status: "FULFILLED",
+        }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 3, fulfilled: 3, remaining: 0, isComplete: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["alignment-lift", "center-jacks"]);
+    expectInvariant(summary);
+  });
+
   it("keeps same-number 11982 customer obligations separate for John Sweeney and Bryant Bray", () => {
     const john = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["Misc Charge", 1], ["Note", 1], ["Discount-1", 1]], { descriptions: { "Misc Charge": "4032-6 Three level lift", Note: "220 volt motor", "Discount-1": "-- Discount" } }),

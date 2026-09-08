@@ -138,17 +138,25 @@ function parseInvoicePhysicalItems(rawPayload: unknown) {
 }
 
 export function matchesPhysicalLineToInvoiceSku(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
+  return physicalLineInvoiceSkuMatchRank(line, invoiceSku) !== null;
+}
+
+function physicalLineInvoiceSkuMatchRank(line: PhysicalFulfillmentLine, invoiceSku: string | null) {
   const invoiceKeys = qboSkuCandidates(invoiceSku).map(canonicalSkuKey).filter(Boolean);
-  if (invoiceKeys.length === 0) return false;
+  if (invoiceKeys.length === 0) return null;
+  const directLineKeys = [line.legacy_item_code, line.legacy_matched_item_code, line.products?.sku]
+    .map(canonicalSkuKey)
+    .filter(Boolean);
+  if (invoiceKeys.some((invoiceKey) => directLineKeys.includes(invoiceKey))) return 0;
   const canonicalTokens = String(line.products?.canonical_name ?? "")
     .split(/[^A-Za-z0-9-]+/)
     .map(canonicalSkuKey)
     .filter((token) => Boolean(token) && /\d/.test(token));
-  const lineKeys = [line.legacy_item_code, line.legacy_matched_item_code, line.products?.sku, line.products?.canonical_name]
+  const descriptiveLineKeys = [line.products?.canonical_name]
     .map(canonicalSkuKey)
     .filter(Boolean)
     .concat(canonicalTokens);
-  return invoiceKeys.some((invoiceKey) => lineKeys.includes(invoiceKey));
+  return invoiceKeys.some((invoiceKey) => descriptiveLineKeys.includes(invoiceKey)) ? 1 : null;
 }
 
 /** Matches a meaningful stored operational code explicitly named in a QBO item description. */
@@ -221,7 +229,14 @@ export function getCanonicalPhysicalOrderSummary({
         if (candidate.id && usedLineIds.has(candidate.id)) return false;
         return matchesPhysicalLineToInvoiceSku(candidate, item.sku);
       })
-      .sort((left, right) => prioritizePhysicalFulfillmentLine(left, right));
+      .sort((left, right) => {
+        const leftCompleted = upper(left.fulfillment_status) === "FULFILLED" ? 1 : 0;
+        const rightCompleted = upper(right.fulfillment_status) === "FULFILLED" ? 1 : 0;
+        if (leftCompleted !== rightCompleted) return rightCompleted - leftCompleted;
+        const leftRank = physicalLineInvoiceSkuMatchRank(left, item.sku) ?? Number.MAX_SAFE_INTEGER;
+        const rightRank = physicalLineInvoiceSkuMatchRank(right, item.sku) ?? Number.MAX_SAFE_INTEGER;
+        return leftRank - rightRank || prioritizePhysicalFulfillmentLine(left, right);
+      });
     const line = matches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));

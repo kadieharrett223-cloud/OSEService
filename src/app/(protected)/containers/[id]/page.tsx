@@ -264,7 +264,7 @@ export default async function ContainerDetailPage({
         </div>
 
         <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[980px] w-full divide-y divide-[#e5e7eb] text-sm">
+          <table className="min-w-[840px] w-full divide-y divide-[#e5e7eb] text-sm">
             <thead className="bg-[#f9fafb] text-left text-[#6b7280]">
               <tr>
                 <th className="px-3 py-3 font-semibold">Queue</th>
@@ -273,7 +273,6 @@ export default async function ContainerDetailPage({
                 <th className="px-3 py-3 font-semibold">SKU</th>
                 <th className="px-3 py-3 font-semibold">Covered by Container</th>
                 <th className="px-3 py-3 font-semibold">Qty Remaining</th>
-                <th className="px-3 py-3 font-semibold">Current Warehouse</th>
                 <th className="px-3 py-3 font-semibold">Stock Covered</th>
                 <th className="px-3 py-3 font-semibold">Open</th>
               </tr>
@@ -281,7 +280,7 @@ export default async function ContainerDetailPage({
             <tbody className="divide-y divide-[#e5e7eb] bg-white">
               {customerRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-[#6b7280]">
+                  <td colSpan={8} className="px-3 py-8 text-center text-[#6b7280]">
                     No open customer orders are waiting on the products in this container.
                   </td>
                 </tr>
@@ -299,7 +298,6 @@ export default async function ContainerDetailPage({
                     <td className="px-3 py-3">{row.sku}</td>
                     <td className="px-3 py-3">{row.containerQty}</td>
                     <td className="px-3 py-3">{row.remainingQty}</td>
-                    <td className="px-3 py-3">{row.currentWarehouse}</td>
                     <td className="px-3 py-3">
                       {row.stockCovered ? (
                         <span className="rounded-full bg-[#e7f7ed] px-2.5 py-1 text-xs font-semibold text-[#1b7a43]">Yes</span>

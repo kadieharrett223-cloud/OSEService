@@ -53,6 +53,10 @@ Before receipt, Container Product Lines show `Forecast Allocated` and `Forecast 
 that same canonical projection. After receipt, their labels and values revert to actual received
 quantity coverage.
 
+The incoming-container customer table presents only queue, customer, SKU, and container coverage
+information. A customer's separate warehouse state is not a property of an incoming container and
+is intentionally excluded so forecast coverage cannot be mistaken for physical warehouse stock.
+
 Orders detail resolves QuickBooks labels such as `4PML-9 (deleted-1)` through the same deleted-SKU
 candidate sequence used during QuickBooks intake before loading Warehouse and incoming supply. A
 deleted invoice label therefore cannot bypass an active product alias and incorrectly render an

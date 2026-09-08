@@ -500,6 +500,7 @@ export default async function InventoryPage({
       provenInvoiceShippedQty,
       invoiceFullyShipped,
       storedPosition: line.queue_position_start,
+      manuallyMoved: Number(sharedQueueRow.manualPosition ?? 0) > 0,
       excludedFromQueue: false,
     };
 

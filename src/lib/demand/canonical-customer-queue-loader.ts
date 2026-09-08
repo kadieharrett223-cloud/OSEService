@@ -1,5 +1,5 @@
 import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueueRow } from "./canonical-customer-queue";
-import { demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, withProvenFulfilledQty } from "./product-demand";
+import { demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, netRecordedFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
@@ -10,7 +10,7 @@ export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
   canonical_obligation_qty?: number | null;
   approval_status: string | null; fulfillment_status: string | null; queue_position_start: number | null;
-  queue_position_count: number | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
+  queue_position_count: number | null; queue_position_override?: number | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
   source_record_id: string | null; logical_demand_key?: string | null;
   shipping_orders?: { id: string; source_invoice_id?: string | null; source_type?: string | null; order_number?: string | null;
     duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null;
@@ -78,7 +78,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku").range(from, to)),
     fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").range(from, to)),
-    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,legacy_item_code,qbo_invoice_line_id,source_record_id,shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
+    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,legacy_item_code,qbo_invoice_line_id,source_record_id,shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
     fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
     fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").range(from, to)),
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
@@ -95,8 +95,11 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   const productQueueKeyById = new Map((products as Array<{ id: string; sku: string | null }>).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id))]));
   const manualMappingSkus = new Set(((mappingRows.data ?? []) as unknown as Array<{ source_sku: string | null }>).map((row) => normalizeSku(row.source_sku)));
 
-  const fulfilledByLineId = new Map<string, number>();
-  for (const fulfillment of fulfillmentRows as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null }>) fulfilledByLineId.set(fulfillment.shipping_order_line_id, (fulfilledByLineId.get(fulfillment.shipping_order_line_id) ?? 0) + Math.max(0, Number(fulfillment.fulfilled_qty ?? 0)));
+  const fulfillmentEventsByLineId = new Map<string, Array<{ fulfilled_qty: number | null }>>();
+  for (const fulfillment of fulfillmentRows as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null }>) {
+    fulfillmentEventsByLineId.set(fulfillment.shipping_order_line_id, [...(fulfillmentEventsByLineId.get(fulfillment.shipping_order_line_id) ?? []), fulfillment]);
+  }
+  const fulfilledByLineId = new Map([...fulfillmentEventsByLineId].map(([lineId, events]) => [lineId, netRecordedFulfilledQty(events)]));
   const queueLines = (rawLines as unknown as CanonicalQueueLine[]).map((line) => withProvenFulfilledQty(line, fulfilledByLineId.get(line.id) ?? 0));
   const sourceInvoiceIds = [...new Set(queueLines.map((line) => line.shipping_orders?.source_invoice_id).filter((value): value is string => Boolean(value)))];
   const orderNumbers = [...new Set(queueLines.map((line) => line.shipping_orders?.order_number).filter((value): value is string => Boolean(value)))];
@@ -162,7 +165,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     const invoiceDate = parent?.qbo_invoices?.invoice_date ?? null;
     const priorityDate = firstPaymentAt ?? invoiceDate;
     const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER" = firstPaymentAt ? "FIRST_PAYMENT" : invoiceDate ? "INVOICE_DATE" : "INVOICE_NUMBER";
-    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) };
+    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, manualPosition: line.queue_position_override ?? null, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) };
   }
   for (const line of canonicalLines) {
     if (!line.product_id || !isOpenDemandLine(line)) continue;

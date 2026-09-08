@@ -54,6 +54,34 @@ export function isActiveQueueLine(line: QueueLine) {
   );
 }
 
+export function calculateQueuePositions(lines: QueueLine[]) {
+  const manuallyPositioned = lines
+    .filter((line) => Number.isInteger(line.queue_position_override) && Number(line.queue_position_override) > 0)
+    .sort((left, right) => Number(left.queue_position_override) - Number(right.queue_position_override) || compareQueueLines(left, right));
+  const automatic = lines.filter((line) => !manuallyPositioned.includes(line)).sort(compareQueueLines);
+  const positioned: Array<{ line: QueueLine; start: number; units: number }> = [];
+  let position = 1;
+  const place = (line: QueueLine, start: number) => {
+    const units = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    if (units <= 0) return;
+    positioned.push({ line, start, units });
+    position = start + units;
+  };
+
+  for (const manual of manuallyPositioned) {
+    const target = Number(manual.queue_position_override);
+    while (automatic.length > 0) {
+      const candidate = automatic[0]!;
+      const units = Math.max(0, Number(candidate.approved_qty ?? 0) - Number(candidate.fulfilled_qty ?? 0));
+      if (position + units - 1 >= target) break;
+      place(automatic.shift()!, position);
+    }
+    place(manual, Math.max(position, target));
+  }
+  for (const line of automatic) place(line, position);
+  return positioned;
+}
+
 /**
  * Renumbers queue positions only. Warehouse state is a separate, operator-driven decision, so
  * queue repair must never write warehouse_status or any fulfilment field.
@@ -95,22 +123,18 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
 
   let linesUpdated = 0;
   for (const productId of uniqueProductIds) {
-    const lines = (linesByProduct.get(productId) ?? []).sort(compareQueueLines);
+    const lines = linesByProduct.get(productId) ?? [];
+    const positioned = calculateQueuePositions(lines);
 
-    let position = 1;
     const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
-    for (const line of lines) {
-      const units = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
-      if (units <= 0) continue;
-
-      if (Number(line.queue_position_start ?? 0) !== position || Number(line.queue_position_count ?? 0) !== units) {
+    for (const { line, start, units } of positioned) {
+      if (Number(line.queue_position_start ?? 0) !== start || Number(line.queue_position_count ?? 0) !== units) {
         updates.push(supabase
           .from("shipping_order_lines")
-          .update({ queue_position_start: position, queue_position_count: units })
+          .update({ queue_position_start: start, queue_position_count: units })
           .eq("id", line.id));
         linesUpdated += 1;
       }
-      position += units;
     }
 
     const results = await Promise.all(updates);

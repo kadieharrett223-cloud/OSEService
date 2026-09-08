@@ -25,6 +25,7 @@ type CustomerQueueItem = {
   firstPaymentAt: string | null;
   priorityDate: string | null;
   priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
+  manuallyMoved?: boolean;
 };
 
 type CustomerDemandDropdownProps = {
@@ -200,6 +201,7 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                     <div className="mt-1 text-[#64748b]">{priorityDateLabel(item)}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
+                      {item.manuallyMoved ? <span className="rounded-full bg-[#ede9fe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#6d28d9]">MOVED</span> : null}
                       {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}
                       {item.willCall ? <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#92400e]">WILL CALL</span> : null}
                     </div>

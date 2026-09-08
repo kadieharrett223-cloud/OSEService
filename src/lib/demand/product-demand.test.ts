@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getWarehouseDemandDisplay } from "./display-status";
-import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenDemandLine, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
+import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenDemandLine, netRecordedFulfilledQty, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
@@ -70,6 +70,18 @@ describe("shared active logical demand", () => {
     expect(activeDemand).toEqual([restoredLine]);
     expect(openQtyOf(activeDemand[0]!)).toBe(2);
     expect(isOpenDemandLine(activeDemand[0]!)).toBe(true);
+  });
+
+  it("nets shipment reversal events before deciding whether demand remains open", () => {
+    const restoredFulfillmentQty = netRecordedFulfilledQty([
+      { fulfilled_qty: 2 },
+      { fulfilled_qty: -2 },
+    ]);
+    const restoredLine = withProvenFulfilledQty({ id: "alicia-yzrcj-7", approved_qty: 2, fulfilled_qty: 0, fulfillment_status: "PENDING" }, restoredFulfillmentQty);
+
+    expect(restoredFulfillmentQty).toBe(0);
+    expect(openQtyOf(restoredLine)).toBe(2);
+    expect(isOpenDemandLine(restoredLine)).toBe(true);
   });
 
   it("shares fulfillment evidence across linked siblings while preserving a partial remainder", () => {

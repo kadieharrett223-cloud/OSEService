@@ -69,6 +69,20 @@ describe("projectCanonicalCustomerQueue", () => {
     expect(queue.map((item) => item.invoice)).toEqual(["paid", "127011", "122347"]);
   });
 
+  it("keeps an admin-moved customer at its explicit queue position", () => {
+    const queue = projectCanonicalCustomerQueue([
+      row({ invoice: "early", lineId: "early", logicalDemandKey: "early", sourceInvoiceId: "early", openQty: 2, firstPaymentAt: "2026-01-01T00:00:00Z" }),
+      row({ invoice: "moved", lineId: "moved", logicalDemandKey: "moved", sourceInvoiceId: "moved", firstPaymentAt: "2026-01-02T00:00:00Z", manualPosition: 5 }),
+      row({ invoice: "later", lineId: "later", logicalDemandKey: "later", sourceInvoiceId: "later", firstPaymentAt: "2026-01-03T00:00:00Z" }),
+    ]);
+
+    expect(queue.map((item) => [item.invoice, item.position])).toEqual([
+      ["early", "1-2"],
+      ["later", "3"],
+      ["moved", "5"],
+    ]);
+  });
+
   it("uses the invoice number only when payment and creation dates are both unavailable", () => {
     const queue = projectCanonicalCustomerQueue([
       row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER" }),

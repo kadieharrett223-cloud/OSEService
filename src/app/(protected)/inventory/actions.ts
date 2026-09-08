@@ -332,8 +332,11 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
     redirect(`/inventory?mapError=${direction === "up" ? "This+customer+is+already+first" : "This+customer+is+already+last"}`);
   }
 
-  const currentStart = Number(line.queue_position_start ?? 0);
+  const current = activeLines[currentIndex]!;
+  const currentStart = Number(current.queue_position_start ?? 0);
+  const currentUnits = Math.max(0, Number(current.approved_qty ?? 0) - Number(current.fulfilled_qty ?? 0));
   const neighborStart = Number(neighbor.queue_position_start ?? 0);
+  const neighborTarget = direction === "up" ? neighborStart + currentUnits : currentStart;
   const now = new Date().toISOString();
   const updates = await Promise.all([
     supabase.from("shipping_order_lines").update({
@@ -342,7 +345,7 @@ export async function moveCustomerQueuePositionAction(formData: FormData) {
       queue_position_override_at: now,
     } as never).eq("id", lineId),
     supabase.from("shipping_order_lines").update({
-      queue_position_override: currentStart,
+      queue_position_override: neighborTarget,
       queue_position_override_reason: reason,
       queue_position_override_at: now,
     } as never).eq("id", neighbor.id),

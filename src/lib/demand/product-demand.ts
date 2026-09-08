@@ -45,6 +45,11 @@ export function withProvenFulfilledQty<T extends DemandLineLike>(line: T, proven
   };
 }
 
+/** Shipment edits record compensating negative events, so fulfillment evidence must be netted. */
+export function netRecordedFulfilledQty(events: Array<{ fulfilled_qty: number | null | undefined }>) {
+  return Math.max(0, events.reduce((total, event) => total + Number(event.fulfilled_qty ?? 0), 0));
+}
+
 /** Shares proven shipment quantity across duplicate representations of one physical obligation. */
 export function withLogicalFulfilledQty<T extends DemandLineLike>(lines: T[]): T[] {
   const fulfilledQtyByIdentity = new Map<string, number>();

@@ -9,6 +9,7 @@ export type CanonicalCustomerQueueRow = CustomerDemandRow & {
   priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
   orderCreatedAt: string | null;
   storedPosition: number | null;
+  manualPosition?: number | null;
   excludedFromQueue?: boolean;
 };
 
@@ -58,17 +59,34 @@ function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCusto
  * number in ascending order only when neither date is available.
  */
 export function projectCanonicalCustomerQueue<T extends CanonicalCustomerQueueRow>(rows: T[]): Array<T & { position: string }> {
-  const merged = mergeOpenCustomerDemand(rows.filter((row) => !row.excludedFromQueue));
+  const merged = mergeOpenCustomerDemand(rows.filter((row) => !row.excludedFromQueue)).sort(compareQueueRows);
+  const manuallyPositioned = merged
+    .filter((row) => Number.isInteger(row.manualPosition) && Number(row.manualPosition) > 0)
+    .sort((left, right) => Number(left.manualPosition) - Number(right.manualPosition) || compareQueueRows(left, right));
+  const automatic = merged.filter((row) => !manuallyPositioned.includes(row));
+  const projected: Array<T & { position: string }> = [];
   let nextPosition = 1;
 
-  return merged
-    .sort(compareQueueRows)
-    .map((row) => {
-      const quantity = Math.max(1, Number(row.openQty ?? 0));
-      const position = quantity > 1 ? `${nextPosition}-${nextPosition + quantity - 1}` : String(nextPosition);
-      nextPosition += quantity;
-      return { ...row, position };
-    });
+  function add(row: T, start: number) {
+    const quantity = Math.max(1, Number(row.openQty ?? 0));
+    const position = quantity > 1 ? `${start}-${start + quantity - 1}` : String(start);
+    projected.push({ ...row, position });
+    nextPosition = start + quantity;
+  }
+
+  for (const manual of manuallyPositioned) {
+    const target = Number(manual.manualPosition);
+    while (automatic.length > 0) {
+      const candidate = automatic[0]!;
+      const candidateQty = Math.max(1, Number(candidate.openQty ?? 0));
+      if (nextPosition + candidateQty - 1 >= target) break;
+      add(automatic.shift()!, nextPosition);
+    }
+    add(manual, Math.max(nextPosition, target));
+  }
+
+  for (const row of automatic) add(row, nextPosition);
+  return projected;
 }
 
 /** Assigns one queue sequence to all raw product records with the same operational product key. */

@@ -57,6 +57,12 @@ The incoming-container customer table presents only queue, customer, SKU, and co
 information. A customer's separate warehouse state is not a property of an incoming container and
 is intentionally excluded so forecast coverage cannot be mistaken for physical warehouse stock.
 
+Shipment edits record signed fulfillment events. A removed shipment line creates a compensating
+negative event, so canonical customer demand uses the net fulfillment quantity and immediately
+returns the restored remainder to the Customer List. An admin queue move records a durable target
+position and reason; the Customer List shows the row as `MOVED` and keeps that target position until
+the line is fulfilled or an admin moves it again.
+
 Orders detail resolves QuickBooks labels such as `4PML-9 (deleted-1)` through the same deleted-SKU
 candidate sequence used during QuickBooks intake before loading Warehouse and incoming supply. A
 deleted invoice label therefore cannot bypass an active product alias and incorrectly render an

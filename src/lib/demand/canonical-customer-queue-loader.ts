@@ -136,7 +136,16 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
   });
 
   const completedInvoiceIds = new Set<string>();
-  for (const order of sourceOrders as unknown as Array<{ source_invoice_id: string | null; review_status: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null }>) if (order.source_invoice_id && (order.duplicate_of_order_id || String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED" || ["ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(order.review_status ?? "").toUpperCase()))) completedInvoiceIds.add(order.source_invoice_id);
+  for (const order of sourceOrders as unknown as Array<{ source_invoice_id: string | null; review_status: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null }>) {
+    // A retired duplicate is not proof that the underlying QBO invoice was completed. Only the
+    // canonical parent may suppress that invoice's remaining demand from the customer queue.
+    if (order.source_invoice_id
+      && !order.duplicate_of_order_id
+      && (String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED"
+        || ["ARCHIVED", "FULFILLED", "SHIPPED"].includes(String(order.review_status ?? "").toUpperCase()))) {
+      completedInvoiceIds.add(order.source_invoice_id);
+    }
+  }
   const completedLineIds = new Set<string>();
   const byOrderId = new Map<string, typeof bridged>();
   const byInvoiceId = new Map<string, typeof bridged>();

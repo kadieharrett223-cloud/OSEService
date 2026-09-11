@@ -13,15 +13,26 @@ type QueueLine = {
   fulfillment_status: string | null;
   priority: string | null;
   queue_position_override: number | null;
+  queue_position_override_reason?: string | null;
+  queue_position_override_at?: string | null;
+  queue_position_override_by?: string | null;
   shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null } | null;
 };
+
+/** Legacy imports populated sequential positions without recording a real admin move. */
+function hasAuditedManualPosition(line: QueueLine) {
+  const position = Number(line.queue_position_override);
+  return Number.isInteger(position)
+    && position > 0
+    && Boolean(line.queue_position_override_reason || line.queue_position_override_at || line.queue_position_override_by);
+}
 
 /** Manual overrides win, then earliest payment, then order age. */
 function compareQueueLines(left: QueueLine, right: QueueLine) {
   const leftOverride = Number(left.queue_position_override);
   const rightOverride = Number(right.queue_position_override);
-  const hasLeftOverride = Number.isFinite(leftOverride) && leftOverride > 0;
-  const hasRightOverride = Number.isFinite(rightOverride) && rightOverride > 0;
+  const hasLeftOverride = hasAuditedManualPosition(left);
+  const hasRightOverride = hasAuditedManualPosition(right);
   if (hasLeftOverride || hasRightOverride) {
     if (!hasLeftOverride) return 1;
     if (!hasRightOverride) return -1;
@@ -56,7 +67,7 @@ export function isActiveQueueLine(line: QueueLine) {
 
 export function calculateQueuePositions(lines: QueueLine[]) {
   const manuallyPositioned = lines
-    .filter((line) => Number.isInteger(line.queue_position_override) && Number(line.queue_position_override) > 0)
+    .filter(hasAuditedManualPosition)
     .sort((left, right) => Number(left.queue_position_override) - Number(right.queue_position_override) || compareQueueLines(left, right));
   const automatic = lines.filter((line) => !manuallyPositioned.includes(line)).sort(compareQueueLines);
   const positioned: Array<{ line: QueueLine; start: number; units: number }> = [];
@@ -101,7 +112,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status)`)
+      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status)`)
       .in("product_id", uniqueProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);

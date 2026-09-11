@@ -29,8 +29,8 @@ describe("stored product queue eligibility", () => {
       shipping_orders: { created_at: "2026-01-01T00:00:00Z", review_status: "APPROVED" },
     };
     const positions = calculateQueuePositions([
-      { ...base, id: "two-units", approved_qty: 2, queue_position_start: 5, queue_position_override: 4 },
-      { ...base, id: "one-unit", approved_qty: 1, queue_position_start: 4, queue_position_override: 6 },
+      { ...base, id: "two-units", approved_qty: 2, queue_position_start: 5, queue_position_override: 4, queue_position_override_at: "2026-09-10T00:00:00Z" },
+      { ...base, id: "one-unit", approved_qty: 1, queue_position_start: 4, queue_position_override: 6, queue_position_override_at: "2026-09-10T00:00:00Z" },
       { ...base, id: "first", approved_qty: 3, queue_position_start: 1, queue_position_override: null },
     ]);
 
@@ -38,6 +38,28 @@ describe("stored product queue eligibility", () => {
       ["first", 1, 3],
       ["two-units", 4, 2],
       ["one-unit", 6, 1],
+    ]);
+  });
+
+  it("ignores unaudited legacy positions and sorts them by first payment", () => {
+    const base = {
+      product_id: "product-1",
+      approved_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      warehouse_status: "APPROVED",
+      priority: "NORMAL",
+      queue_position_start: null,
+    };
+    const positions = calculateQueuePositions([
+      { ...base, id: "legacy-first", queue_position_override: 1, shipping_orders: { created_at: "2026-01-01T00:00:00Z", first_payment_at: "2026-07-01T00:00:00Z", review_status: "APPROVED" } },
+      { ...base, id: "paid-first", queue_position_override: null, shipping_orders: { created_at: "2026-01-02T00:00:00Z", first_payment_at: "2026-06-01T00:00:00Z", review_status: "APPROVED" } },
+    ]);
+
+    expect(positions.map(({ line, start }) => [line.id, start])).toEqual([
+      ["paid-first", 1],
+      ["legacy-first", 2],
     ]);
   });
 });

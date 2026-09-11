@@ -161,6 +161,7 @@ type QboInvoice = {
   invoice_number: string | null;
   customer_id: string | null;
   payment_status: string | null;
+  invoice_date: string | null;
   customers?: { company_name: string | null; full_name: string | null } | null;
 };
 type QboInvoiceLine = {
@@ -225,7 +226,7 @@ export async function importQualifiedQboBacklogAction() {
   try {
     const firstPaymentByQboInvoiceId = await getQuickbooksFirstPaymentDates();
     const [invoiceResult, invoiceLineResult, orderResult, orderLineResult, productResult, aliasResult, resolutionResult, inventoryResult] = await Promise.all([
-      supabase.from("qbo_invoices").select("id,qbo_invoice_id,invoice_number,customer_id,payment_status,customers(company_name,full_name)"),
+      supabase.from("qbo_invoices").select("id,qbo_invoice_id,invoice_number,customer_id,payment_status,invoice_date,customers(company_name,full_name)"),
       supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,source_description,ordered_qty,product_id"),
       supabase.from("shipping_orders").select("id,source_invoice_id,duplicate_of_order_id,order_number,customer_id,legacy_customer_name,customers(company_name,full_name)"),
       supabase.from("shipping_order_lines").select("id,shipping_order_id,qbo_invoice_line_id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status"),
@@ -276,7 +277,7 @@ export async function importQualifiedQboBacklogAction() {
 
     for (const invoice of invoices) {
       const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-      if (!PAID_QBO_STATUSES.has(invoice.payment_status ?? "") || !isWithinAutomaticQboIntake(firstPaymentAt)) continue;
+      if (!PAID_QBO_STATUSES.has(invoice.payment_status ?? "") || !isWithinAutomaticQboIntake(firstPaymentAt, invoice.invoice_date)) continue;
 
       let order = orderByInvoice.get(invoice.id) ?? null;
       for (const line of (linesByInvoice.get(invoice.id) ?? []).filter(isPhysicalQboLine)) {

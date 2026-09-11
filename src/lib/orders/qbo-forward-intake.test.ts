@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { selectAutomaticForwardIntakeCandidates, selectForwardIntakeReviewCandidates, summarizeQboInvoiceIntake } from "./qbo-forward-intake-service";
 import { canApproveHistoricalQboIntakeLine, classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
+import { isWithinAutomaticQboIntake, qboIntakePriorityDate } from "./qbo-intake-policy";
 
 const cleanMappedPhysicalLine = {
   isPaymentEligible: true,
@@ -13,6 +14,12 @@ const cleanMappedPhysicalLine = {
 };
 
 describe("QBO forward intake classifier", () => {
+  it("uses invoice date when paid status exists but the payment date was not detected", () => {
+    expect(qboIntakePriorityDate(null, "2026-06-08")).toBe("2026-06-08");
+    expect(isWithinAutomaticQboIntake(null, "2026-06-08")).toBe(true);
+    expect(isWithinAutomaticQboIntake(null, "2026-05-31")).toBe(false);
+  });
+
   it("auto-imports a clean paid mapped physical line", () => {
     expect(classifyQboForwardIntakeLine(cleanMappedPhysicalLine)).toBe("AUTO_IMPORT");
   });

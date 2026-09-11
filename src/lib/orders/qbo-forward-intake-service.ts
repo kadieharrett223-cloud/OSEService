@@ -3,7 +3,7 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { qboSkuCandidates } from "./quickbooks-refresh";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
-import { isWithinAutomaticQboIntake } from "./qbo-intake-policy";
+import { isWithinAutomaticQboIntake, qboIntakePriorityDate } from "./qbo-intake-policy";
 
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
 const CLOSED_STATUSES = new Set(["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"]);
@@ -14,7 +14,7 @@ type Order = { id: string; source_invoice_id: string | null; duplicate_of_order_
 type OrderLine = { shipping_order_id: string; qbo_invoice_line_id: string | null; product_id: string | null; ordered_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null };
 
 export type QboForwardIntakePreviewLine = { qboInvoiceLineId: string; sku: string | null; quantity: number; productId: string | null; decision: QboForwardIntakeDecision };
-export type QboForwardIntakePreviewInvoice = { qboInvoiceId: string; invoiceNumber: string | null; customerName: string | null; firstPaymentAt: string; invoiceDate: string | null; decision: QboForwardIntakeDecision; lines: QboForwardIntakePreviewLine[] };
+export type QboForwardIntakePreviewInvoice = { qboInvoiceId: string; invoiceNumber: string | null; customerName: string | null; firstPaymentAt: string | null; invoiceDate: string | null; priorityDate?: string | null; priorityDateSource?: "FIRST_PAYMENT" | "INVOICE_DATE"; decision: QboForwardIntakeDecision; lines: QboForwardIntakePreviewLine[] };
 
 function normalized(value: string | null | undefined) { return String(value ?? "").trim().toUpperCase().replace(/\s+/g, " "); }
 function customerName(row: { customers?: { company_name: string | null; full_name: string | null } | null; legacy_customer_name?: string | null }) { return row.customers?.company_name ?? row.customers?.full_name ?? row.legacy_customer_name ?? null; }
@@ -69,11 +69,12 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
   const activeResolutionIds = new Set(resolutions.filter((row) => normalized(row.status) === "ACTIVE" && row.qbo_invoice_line_id).map((row) => String(row.qbo_invoice_line_id)));
   const eligibleInvoices = invoices.filter((invoice) => {
     const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-    return PAID_STATUSES.has(invoice.payment_status ?? "") && isWithinAutomaticQboIntake(firstPaymentAt);
+    return PAID_STATUSES.has(invoice.payment_status ?? "") && isWithinAutomaticQboIntake(firstPaymentAt, invoice.invoice_date);
   });
 
   return eligibleInvoices.map((invoice) => {
-    const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id)!;
+    const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id) ?? null;
+    const priorityDate = qboIntakePriorityDate(firstPaymentAt, invoice.invoice_date);
     const lines = (linesByInvoice.get(invoice.id) ?? []).map((line) => {
       const productId = line.product_id ?? qboSkuCandidates(line.qbo_sku).map((sku) => productIdBySku.get(normalized(sku))).find(Boolean) ?? null;
       const canonicalParent = orders.find((candidate) => candidate.source_invoice_id === invoice.id && !candidate.duplicate_of_order_id);
@@ -88,8 +89,8 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
       return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine(line), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch || Boolean(unmatchedParentLine), hasConflictingSkuIdentity: Boolean(unmatchedParentLine && productId && unmatchedParentLine.product_id !== productId) }) };
     });
     const decision = summarizeQboInvoiceIntake(lines.map((line) => line.decision));
-    return { qboInvoiceId: invoice.id, invoiceNumber: invoice.invoice_number, customerName: customerName(invoice), firstPaymentAt, invoiceDate: invoice.invoice_date, decision, lines };
-  }).sort((left, right) => left.firstPaymentAt.localeCompare(right.firstPaymentAt) || String(left.invoiceNumber).localeCompare(String(right.invoiceNumber)));
+    return { qboInvoiceId: invoice.id, invoiceNumber: invoice.invoice_number, customerName: customerName(invoice), firstPaymentAt, invoiceDate: invoice.invoice_date, priorityDate, priorityDateSource: firstPaymentAt ? "FIRST_PAYMENT" as const : "INVOICE_DATE" as const, decision, lines };
+  }).sort((left, right) => String(left.priorityDate).localeCompare(String(right.priorityDate)) || String(left.invoiceNumber).localeCompare(String(right.invoiceNumber)));
 }
 
 /** Writes demand only for globally enabled, clean QBO candidates. It never creates fulfillment, allocation, or inventory records. */

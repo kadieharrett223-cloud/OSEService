@@ -149,10 +149,11 @@ export default async function ImportAssignOrdersPage() {
       const mappedCount = physicalItems.filter((item) => item.mapped).length;
       const mappingStatus = physicalItems.length === 0 ? "No physical items" : mappedCount === physicalItems.length ? "All mapped" : mappedCount === 0 ? "Assignment required" : "Partially mapped";
       const existingOrder = canonicalOrderByInvoice.get(invoice.id) ?? null;
-      const paymentEligible = isWithinAutomaticQboIntake(firstPaymentDate) && PAID_STATUSES.has(invoice.payment_status);
+      const paymentEligible = isWithinAutomaticQboIntake(firstPaymentDate, invoice.invoice_date) && PAID_STATUSES.has(invoice.payment_status);
       return {
         invoice,
         firstPaymentDate,
+        priorityDate: firstPaymentDate ?? invoice.invoice_date,
         physicalItems,
         mappingStatus,
         existingOrder,
@@ -160,11 +161,11 @@ export default async function ImportAssignOrdersPage() {
       };
     })
     .filter((row) => row.eligible)
-    .sort((left, right) => String(left.firstPaymentDate).localeCompare(String(right.firstPaymentDate)) || String(left.invoice.invoice_number).localeCompare(String(right.invoice.invoice_number)));
+    .sort((left, right) => String(left.priorityDate).localeCompare(String(right.priorityDate)) || String(left.invoice.invoice_number).localeCompare(String(right.invoice.invoice_number)));
   const rows = eligibleRows.filter((row) => !row.existingOrder);
   const voidedExcluded = invoiceRows.filter((invoice) => {
     const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-    return isWithinAutomaticQboIntake(firstPaymentDate) && isVoided(invoice);
+    return isWithinAutomaticQboIntake(firstPaymentDate, invoice.invoice_date) && isVoided(invoice);
   }).length;
   const fullyMapped = rows.filter((row) => row.mappingStatus === "All mapped").length;
   const partiallyMapped = rows.filter((row) => row.mappingStatus === "Partially mapped").length;
@@ -219,7 +220,7 @@ export default async function ImportAssignOrdersPage() {
             <tr>
               <th className="px-4 py-3">Invoice / Customer</th>
               <th className="px-4 py-3">Payment</th>
-              <th className="px-4 py-3">First Payment</th>
+              <th className="px-4 py-3">Queue Date</th>
               <th className="px-4 py-3">Physical Products / Qty</th>
               <th className="px-4 py-3">Forward Decision</th>
               <th className="px-4 py-3">Existing ERP Order?</th>
@@ -239,7 +240,7 @@ export default async function ImportAssignOrdersPage() {
                   <p className="mt-1 text-xs text-[#64748b]">{customerNameById.get(row.invoice.customer_id ?? "") ?? "Customer pending"} · Invoice {formatDate(row.invoice.invoice_date)}</p>
                 </td>
                 <td className="px-4 py-4 font-medium text-[#334155]">{row.invoice.payment_status}</td>
-                <td className="px-4 py-4 text-[#334155]">{formatDate(row.firstPaymentDate)}</td>
+                <td className="px-4 py-4 text-[#334155]">{formatDate(row.priorityDate)}<p className="mt-1 text-xs text-[#64748b]">{row.firstPaymentDate ? "First payment" : "Invoice-date fallback"}</p></td>
                 <td className="px-4 py-4 text-[#334155]">
                   {row.physicalItems.length > 0 ? row.physicalItems.map((item) => <div key={`${item.sku}-${item.quantity}`}>{item.quantity} × {item.sku}</div>) : "No physical items"}
                 </td>

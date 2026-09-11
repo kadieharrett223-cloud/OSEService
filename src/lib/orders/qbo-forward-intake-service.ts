@@ -29,13 +29,14 @@ async function fetchAllRows<T>(fetchPage: (from: number, to: number) => PromiseL
   }
 }
 
-function invoiceDecision(decisions: QboForwardIntakeDecision[]) {
-  if (decisions.length === 0 || decisions.every((decision) => decision === "NO_INVENTORY_DEMAND")) return "NO_INVENTORY_DEMAND" as const;
-  if (decisions.some((decision) => decision === "MANUAL_DUPLICATE_REVIEW")) return "MANUAL_DUPLICATE_REVIEW" as const;
-  if (decisions.some((decision) => decision === "MAPPING_REVIEW")) return "MAPPING_REVIEW" as const;
-  if (decisions.every((decision) => decision === "ALREADY_REPRESENTED")) return "ALREADY_REPRESENTED" as const;
-  if (decisions.every((decision) => decision === "CLOSED")) return "CLOSED" as const;
-  return "AUTO_IMPORT" as const;
+export function summarizeQboInvoiceIntake(decisions: QboForwardIntakeDecision[]) {
+  const inventoryDecisions = decisions.filter((decision) => decision !== "NO_INVENTORY_DEMAND");
+  if (inventoryDecisions.length === 0) return "NO_INVENTORY_DEMAND" as const;
+  if (inventoryDecisions.some((decision) => decision === "MANUAL_DUPLICATE_REVIEW")) return "MANUAL_DUPLICATE_REVIEW" as const;
+  if (inventoryDecisions.some((decision) => decision === "MAPPING_REVIEW")) return "MAPPING_REVIEW" as const;
+  if (inventoryDecisions.some((decision) => decision === "AUTO_IMPORT")) return "AUTO_IMPORT" as const;
+  if (inventoryDecisions.every((decision) => decision === "ALREADY_REPRESENTED")) return "ALREADY_REPRESENTED" as const;
+  return "CLOSED" as const;
 }
 
 export function selectAutomaticForwardIntakeCandidates(preview: QboForwardIntakePreviewInvoice[]) {
@@ -66,8 +67,6 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
   for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);
   const exactOrderLineIds = new Set(orderLines.flatMap((line) => line.qbo_invoice_line_id ? [line.qbo_invoice_line_id] : []));
   const activeResolutionIds = new Set(resolutions.filter((row) => normalized(row.status) === "ACTIVE" && row.qbo_invoice_line_id).map((row) => String(row.qbo_invoice_line_id)));
-  const ordersByInvoice = new Map(orders.filter((order) => order.source_invoice_id && !order.duplicate_of_order_id).map((order) => [order.source_invoice_id!, order]));
-
   const eligibleInvoices = invoices.filter((invoice) => {
     const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
     return PAID_STATUSES.has(invoice.payment_status ?? "") && isWithinAutomaticQboIntake(firstPaymentAt);
@@ -81,8 +80,7 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
       const terminal = activeResolutionIds.has(line.id) || orderLines.some((orderLine) => orderLine.qbo_invoice_line_id === line.id && (CLOSED_STATUSES.has(normalized(orderLine.fulfillment_status)) || Number(orderLine.fulfilled_qty ?? 0) >= Number(orderLine.ordered_qty ?? 0)));
       return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine(line), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch, hasConflictingSkuIdentity: false }) };
     });
-    const parent = ordersByInvoice.get(invoice.id);
-    const decision = parent ? "ALREADY_REPRESENTED" as const : invoiceDecision(lines.map((line) => line.decision));
+    const decision = summarizeQboInvoiceIntake(lines.map((line) => line.decision));
     return { qboInvoiceId: invoice.id, invoiceNumber: invoice.invoice_number, customerName: customerName(invoice), firstPaymentAt, invoiceDate: invoice.invoice_date, decision, lines };
   }).sort((left, right) => left.firstPaymentAt.localeCompare(right.firstPaymentAt) || String(left.invoiceNumber).localeCompare(String(right.invoiceNumber)));
 }
@@ -143,26 +141,28 @@ export async function executeQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
 
     const { data: existingOrder, error: orderLookupError } = await supabase
       .from("shipping_orders")
-      .select("id,duplicate_of_order_id")
+      .select("id")
       .eq("source_invoice_id", invoice.id)
       .is("duplicate_of_order_id", null)
       .maybeSingle();
     if (orderLookupError) throw new Error(orderLookupError.message);
-    if (existingOrder) continue;
-
-    const customer = invoice.customers as unknown as { company_name: string | null; full_name: string | null } | null;
-    const { data: order, error: orderError } = await supabase.from("shipping_orders").insert({
-      customer_id: invoice.customer_id,
-      source_invoice_id: invoice.id,
-      order_number: invoice.invoice_number,
-      source_type: "QBO_INVOICE",
-      review_status: "APPROVED",
-      legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
-      first_payment_at: candidate.firstPaymentAt,
-    } as never).select("id").single();
-    if (orderError || !order) {
-      if (orderError?.code === "23505") continue;
-      throw new Error(orderError?.message ?? "Could not create forward-intake order.");
+    let order: { id: string } | null = existingOrder;
+    if (!order) {
+      const customer = invoice.customers as unknown as { company_name: string | null; full_name: string | null } | null;
+      const { data: createdOrder, error: orderError } = await supabase.from("shipping_orders").insert({
+        customer_id: invoice.customer_id,
+        source_invoice_id: invoice.id,
+        order_number: invoice.invoice_number,
+        source_type: "QBO_INVOICE",
+        review_status: "APPROVED",
+        legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
+        first_payment_at: candidate.firstPaymentAt,
+      } as never).select("id").single();
+      if (orderError || !createdOrder) {
+        if (orderError?.code === "23505") continue;
+        throw new Error(orderError?.message ?? "Could not create forward-intake order.");
+      }
+      order = createdOrder;
     }
 
     for (const previewLine of candidate.lines.filter((line): line is typeof line & { productId: string } => line.decision === "AUTO_IMPORT" && Boolean(line.productId))) {

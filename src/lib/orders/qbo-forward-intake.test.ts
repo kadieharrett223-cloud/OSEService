@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectAutomaticForwardIntakeCandidates, selectForwardIntakeReviewCandidates } from "./qbo-forward-intake-service";
+import { selectAutomaticForwardIntakeCandidates, selectForwardIntakeReviewCandidates, summarizeQboInvoiceIntake } from "./qbo-forward-intake-service";
 import { canApproveHistoricalQboIntakeLine, classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine } from "./qbo-forward-intake";
 
 const cleanMappedPhysicalLine = {
@@ -25,6 +25,12 @@ describe("QBO forward intake classifier", () => {
 
   it("never duplicates an exact QBO line", () => {
     expect(classifyQboForwardIntakeLine({ ...cleanMappedPhysicalLine, hasExactExistingLine: true })).toBe("ALREADY_REPRESENTED");
+  });
+
+  it("does not let an existing invoice parent hide a missing QBO line", () => {
+    expect(summarizeQboInvoiceIntake(["ALREADY_REPRESENTED", "AUTO_IMPORT", "NO_INVENTORY_DEMAND"])).toBe("AUTO_IMPORT");
+    expect(summarizeQboInvoiceIntake(["ALREADY_REPRESENTED", "MAPPING_REVIEW"])).toBe("MAPPING_REVIEW");
+    expect(summarizeQboInvoiceIntake(["ALREADY_REPRESENTED", "NO_INVENTORY_DEMAND"])).toBe("ALREADY_REPRESENTED");
   });
 
   it("quarantines unmapped and ambiguous physical demand", () => {

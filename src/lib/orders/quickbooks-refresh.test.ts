@@ -145,6 +145,17 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.skippedUnmapped).toHaveLength(0);
   });
 
+  it("treats an inspection invoice line as service rather than shippable inventory", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inspection-line", product_id: null, qbo_sku: "inspection", source_description: "Measure the site and verify the concrete." })],
+      [],
+      aliases,
+    );
+
+    expect(plan.inserts).toHaveLength(0);
+    expect(plan.skippedUnmapped).toHaveLength(0);
+  });
+
   it("allows mapped misc charge lines to refresh as physical demand", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "misc-line", qbo_sku: "Misc Charge", source_description: "4032-6 Three level lift", product_id: "product-lift" })],

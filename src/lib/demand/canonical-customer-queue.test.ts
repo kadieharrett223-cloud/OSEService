@@ -69,6 +69,15 @@ describe("projectCanonicalCustomerQueue", () => {
     expect(queue.map((item) => item.invoice)).toEqual(["paid", "127011", "122347"]);
   });
 
+  it("places an earlier invoice-date fallback ahead of a later detected payment", () => {
+    const queue = projectCanonicalCustomerQueue([
+      row({ invoice: "paid-later", sourceInvoiceId: "paid-later", lineId: "paid-later", logicalDemandKey: "paid-later", firstPaymentAt: "2026-04-23", invoiceDate: "2026-04-20", priorityDate: "2026-04-23", priorityDateSource: "FIRST_PAYMENT" }),
+      row({ invoice: "fallback-first", sourceInvoiceId: "fallback-first", lineId: "fallback-first", logicalDemandKey: "fallback-first", firstPaymentAt: null, invoiceDate: "2026-04-11", priorityDate: "2026-04-11", priorityDateSource: "INVOICE_DATE" }),
+    ]);
+
+    expect(queue.map((item) => item.invoice)).toEqual(["fallback-first", "paid-later"]);
+  });
+
   it("keeps an admin-moved customer at its explicit queue position", () => {
     const queue = projectCanonicalCustomerQueue([
       row({ invoice: "early", lineId: "early", logicalDemandKey: "early", sourceInvoiceId: "early", openQty: 2, firstPaymentAt: "2026-01-01T00:00:00Z" }),

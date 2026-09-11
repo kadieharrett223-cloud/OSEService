@@ -16,7 +16,7 @@ type QueueLine = {
   queue_position_override_reason?: string | null;
   queue_position_override_at?: string | null;
   queue_position_override_by?: string | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null } | null } | null;
 };
 
 /** Legacy imports populated sequential positions without recording a real admin move. */
@@ -39,12 +39,12 @@ function compareQueueLines(left: QueueLine, right: QueueLine) {
     if (leftOverride !== rightOverride) return leftOverride - rightOverride;
   }
 
-  const leftPaymentDate = Date.parse(String(left.shipping_orders?.first_payment_at ?? ""));
-  const rightPaymentDate = Date.parse(String(right.shipping_orders?.first_payment_at ?? ""));
-  const leftHasPayment = Number.isFinite(leftPaymentDate);
-  const rightHasPayment = Number.isFinite(rightPaymentDate);
-  if (leftHasPayment !== rightHasPayment) return leftHasPayment ? -1 : 1;
-  if (leftHasPayment && leftPaymentDate !== rightPaymentDate) return leftPaymentDate - rightPaymentDate;
+  const leftPriorityDate = Date.parse(String(left.shipping_orders?.first_payment_at ?? left.shipping_orders?.qbo_invoices?.invoice_date ?? ""));
+  const rightPriorityDate = Date.parse(String(right.shipping_orders?.first_payment_at ?? right.shipping_orders?.qbo_invoices?.invoice_date ?? ""));
+  const leftHasPriorityDate = Number.isFinite(leftPriorityDate);
+  const rightHasPriorityDate = Number.isFinite(rightPriorityDate);
+  if (leftHasPriorityDate !== rightHasPriorityDate) return leftHasPriorityDate ? -1 : 1;
+  if (leftHasPriorityDate && leftPriorityDate !== rightPriorityDate) return leftPriorityDate - rightPriorityDate;
 
   const leftDate = Date.parse(String(left.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
   const rightDate = Date.parse(String(right.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
@@ -112,7 +112,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status)`)
+      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status, qbo_invoices(invoice_date))`)
       .in("product_id", uniqueProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);

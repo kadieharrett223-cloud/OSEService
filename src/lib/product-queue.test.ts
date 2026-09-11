@@ -62,4 +62,27 @@ describe("stored product queue eligibility", () => {
       ["legacy-first", 2],
     ]);
   });
+
+  it("places an invoice-date fallback on the same timeline as detected payments", () => {
+    const base = {
+      product_id: "product-1",
+      approved_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      warehouse_status: "APPROVED",
+      priority: "NORMAL",
+      queue_position_start: null,
+      queue_position_override: null,
+    };
+    const positions = calculateQueuePositions([
+      { ...base, id: "paid-later", shipping_orders: { created_at: "2026-09-01", first_payment_at: "2026-04-23", review_status: "APPROVED", qbo_invoices: { invoice_date: "2026-04-20" } } },
+      { ...base, id: "fallback-first", shipping_orders: { created_at: "2026-09-02", first_payment_at: null, review_status: "APPROVED", qbo_invoices: { invoice_date: "2026-04-11" } } },
+    ]);
+
+    expect(positions.map(({ line, start }) => [line.id, start])).toEqual([
+      ["fallback-first", 1],
+      ["paid-later", 2],
+    ]);
+  });
 });

@@ -18,31 +18,22 @@ export type ProjectedCustomerQueueRow = CanonicalCustomerQueueRow & {
 };
 
 function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCustomerQueueRow) {
-  const leftFirstPayment = Date.parse(left.firstPaymentAt ?? "");
-  const rightFirstPayment = Date.parse(right.firstPaymentAt ?? "");
-  const leftHasFirstPayment = Number.isFinite(leftFirstPayment);
-  const rightHasFirstPayment = Number.isFinite(rightFirstPayment);
-  if (leftHasFirstPayment !== rightHasFirstPayment) return leftHasFirstPayment ? -1 : 1;
-  if (leftHasFirstPayment && leftFirstPayment !== rightFirstPayment) return leftFirstPayment - rightFirstPayment;
+  const leftPriorityDate = Date.parse(left.priorityDate ?? left.firstPaymentAt ?? left.invoiceDate ?? "");
+  const rightPriorityDate = Date.parse(right.priorityDate ?? right.firstPaymentAt ?? right.invoiceDate ?? "");
+  const leftHasPriorityDate = Number.isFinite(leftPriorityDate);
+  const rightHasPriorityDate = Number.isFinite(rightPriorityDate);
+  if (leftHasPriorityDate !== rightHasPriorityDate) return leftHasPriorityDate ? -1 : 1;
+  if (leftHasPriorityDate && leftPriorityDate !== rightPriorityDate) return leftPriorityDate - rightPriorityDate;
 
-  if (!leftHasFirstPayment) {
-    const leftInvoiceDate = Date.parse(left.invoiceDate ?? "");
-    const rightInvoiceDate = Date.parse(right.invoiceDate ?? "");
-    const leftHasInvoiceDate = Number.isFinite(leftInvoiceDate);
-    const rightHasInvoiceDate = Number.isFinite(rightInvoiceDate);
-    if (leftHasInvoiceDate !== rightHasInvoiceDate) return leftHasInvoiceDate ? -1 : 1;
-    if (leftHasInvoiceDate && leftInvoiceDate !== rightInvoiceDate) return leftInvoiceDate - rightInvoiceDate;
+  const leftInvoice = Number.parseInt(left.invoice, 10);
+  const rightInvoice = Number.parseInt(right.invoice, 10);
+  const leftHasInvoiceNumber = Number.isFinite(leftInvoice);
+  const rightHasInvoiceNumber = Number.isFinite(rightInvoice);
+  if (leftHasInvoiceNumber !== rightHasInvoiceNumber) return leftHasInvoiceNumber ? -1 : 1;
+  if (leftHasInvoiceNumber && leftInvoice !== rightInvoice) return leftInvoice - rightInvoice;
+  if (left.invoice !== right.invoice) return left.invoice.localeCompare(right.invoice);
 
-    const leftInvoice = Number.parseInt(left.invoice, 10);
-    const rightInvoice = Number.parseInt(right.invoice, 10);
-    const leftHasInvoiceNumber = Number.isFinite(leftInvoice);
-    const rightHasInvoiceNumber = Number.isFinite(rightInvoice);
-    if (leftHasInvoiceNumber !== rightHasInvoiceNumber) return leftHasInvoiceNumber ? -1 : 1;
-    if (leftHasInvoiceNumber && leftInvoice !== rightInvoice) return leftInvoice - rightInvoice;
-    if (left.invoice !== right.invoice) return left.invoice.localeCompare(right.invoice);
-  }
-
-  if (leftHasFirstPayment) {
+  if (left.firstPaymentAt && right.firstPaymentAt) {
     const leftCreatedAt = Date.parse(left.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
     const rightCreatedAt = Date.parse(right.orderCreatedAt ?? "") || Number.MAX_SAFE_INTEGER;
     if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;

@@ -8,12 +8,17 @@ export type PhysicalFulfillmentLine = {
   id?: string | null;
   product_id?: string | null;
   qbo_invoice_line_id?: string | null;
+  qbo_invoice_lines?: { qbo_line_id?: string | null; qbo_sku?: string | null } | null;
   approval_status?: string | null;
   warehouse_status?: string | null;
   fulfillment_status?: string | null;
   fulfillment_source?: string | null;
+  priority?: string | null;
   queue_position_start?: number | null;
+  queue_position_override?: number | null;
   queue_position_count?: number | null;
+  approved_at?: string | null;
+  created_at?: string | null;
   ordered_qty?: number | null;
   approved_qty?: number | null;
   fulfilled_qty?: number | null;
@@ -223,7 +228,14 @@ export function getCanonicalPhysicalOrderSummary({
 
   const usedLineIds = new Set<string>();
   const items = invoiceItems.map((item) => {
-    const matches = sourceLines
+    const explicitMatches = sourceLines
+      .filter((candidate) => {
+        if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
+        if (candidate.id && usedLineIds.has(candidate.id)) return false;
+        return String(candidate.qbo_invoice_lines?.qbo_line_id ?? "").trim() === item.key;
+      })
+      .sort(prioritizePhysicalFulfillmentLine);
+    const skuMatches = sourceLines
       .filter((candidate) => {
         if (!isPhysicalFulfillmentLine(candidate, { manualMappingSkus })) return false;
         if (candidate.id && usedLineIds.has(candidate.id)) return false;
@@ -237,7 +249,9 @@ export function getCanonicalPhysicalOrderSummary({
         const rightRank = physicalLineInvoiceSkuMatchRank(right, item.sku) ?? Number.MAX_SAFE_INTEGER;
         return leftRank - rightRank || prioritizePhysicalFulfillmentLine(left, right);
       });
-    const line = matches[0] ?? null;
+    // The QBO line relationship is the authoritative identity. SKU matching is only a fallback
+    // for historical rows that predate qbo_invoice_line_id.
+    const line = explicitMatches[0] ?? skuMatches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));
     return {

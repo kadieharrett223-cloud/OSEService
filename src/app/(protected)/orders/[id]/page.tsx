@@ -92,6 +92,7 @@ type OrderDetailRow = {
     fulfillment_tracking?: string | null;
     fulfillment_notes?: string | null;
     qbo_invoice_line_id?: string | null;
+    qbo_invoice_lines?: { qbo_line_id: string | null; qbo_sku: string | null } | null;
     source_record_id?: string | null;
     products?: { sku: string | null; canonical_name: string | null } | null;
     inventory_allocations?: Array<{
@@ -652,6 +653,7 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
     "qbo_invoices (id, invoice_number, payment_status, invoice_date, total_amount, raw_payload)",
     `shipping_order_lines (
       ${lineColumns.join(",\n      ")},
+      qbo_invoice_lines (qbo_line_id, qbo_sku),
       products (sku, canonical_name),
       inventory_allocations (
         quantity,
@@ -918,7 +920,7 @@ export default async function OrderDetailPage({
   const { data: siblingLineRows } = siblingOrderIds.length > 1
     ? await supabase
         .from("shipping_order_lines")
-        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,legacy_matched_item_code,products(sku,canonical_name)")
+        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,legacy_matched_item_code,qbo_invoice_lines(qbo_line_id,qbo_sku),products(sku,canonical_name)")
         .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
     : { data: [] };
   const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<

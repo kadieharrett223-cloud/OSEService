@@ -100,6 +100,31 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("uses the linked QuickBooks line when the internal product SKU differs", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["YZRCJ-35HP", 1], ["4PCA", 1]]),
+      lines: [
+        line({
+          id: "bridge-jack",
+          qbo_invoice_lines: { qbo_line_id: "1", qbo_sku: "YZRCJ-35HP" },
+          products: { sku: "100000004", canonical_name: "3,500 Lb. Rolling Bridge Jack Hand pump" },
+          fulfilled_qty: 1,
+          fulfillment_status: "FULFILLED",
+        }),
+        line({
+          id: "casters",
+          qbo_invoice_lines: { qbo_line_id: "2", qbo_sku: "4PCA" },
+          products: { sku: "000107", canonical_name: "HK-4PCA Caster Arm Set (4 pcs.)" },
+          fulfilled_qty: 0,
+        }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 2, fulfilled: 1, remaining: 1, isPartiallyFulfilled: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["bridge-jack", "casters"]);
+    expectInvariant(summary);
+  });
+
   it("counts fulfilled manufacturer-prefixed legacy identities against their QBO operational SKU", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PHR-9X", 1], ["HPU1103", 1], ["HLCJ-6", 2]]),

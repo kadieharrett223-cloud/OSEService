@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { qboSkuCandidates } from "./quickbooks-refresh";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
+import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 
 const CUTOFF = Date.parse("2026-08-07T00:00:00.000Z");
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
@@ -60,7 +61,7 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
   ]);
   const productIdBySku = new Map<string, string>();
   for (const product of products) if (product.sku) productIdBySku.set(normalized(product.sku), product.id);
-  for (const alias of aliases) if (alias.alias) productIdBySku.set(normalized(alias.alias), alias.product_id);
+  for (const alias of aliases) if (alias.alias && !isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(normalized(alias.alias), alias.product_id);
   const linesByInvoice = new Map<string, InvoiceLine[]>();
   for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);
   const exactOrderLineIds = new Set(orderLines.flatMap((line) => line.qbo_invoice_line_id ? [line.qbo_invoice_line_id] : []));

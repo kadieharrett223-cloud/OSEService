@@ -15,6 +15,8 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { classifyQboBacklogLine } from "@/lib/orders/qbo-backlog-classifier";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
+import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
+import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 import {
   disconnectQuickbooksConnection,
   getQuickbooksFirstPaymentDates,
@@ -201,10 +203,7 @@ function customerName(row: { customers?: { company_name: string | null; full_nam
 }
 
 function isPhysicalQboLine(line: QboInvoiceLine) {
-  const text = `${line.qbo_sku ?? ""} ${line.source_description ?? ""}`.toLowerCase();
-  return Number(line.ordered_qty ?? 0) > 0
-    && !/^note\b/.test(text)
-    && !/discount|shipping|freight|delivery|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(text);
+  return isInventoryDemandQuickbooksLine(line);
 }
 
 function isClosedOrderLine(line: BacklogOrderLine) {
@@ -246,7 +245,7 @@ export async function importQualifiedQboBacklogAction() {
     const inventoryTransactions = (inventoryResult.data ?? []) as unknown as InventoryTransaction[];
     const productIdBySku = new Map<string, string>();
     for (const product of productResult.data ?? []) productIdBySku.set(normalizedText(product.sku), product.id);
-    for (const alias of aliasResult.data ?? []) productIdBySku.set(normalizedText(alias.alias), alias.product_id);
+    for (const alias of aliasResult.data ?? []) if (!isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(normalizedText(alias.alias), alias.product_id);
 
     const linesByInvoice = new Map<string, QboInvoiceLine[]>();
     for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);

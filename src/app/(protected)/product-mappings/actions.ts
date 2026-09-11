@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
+import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 
 type MappingQueueEntry = {
   id: string;
@@ -22,7 +23,7 @@ function value(formData: FormData, key: string) {
 function aliasCandidates(sourceSku: string, sourceDescription: string) {
   const candidates = new Set<string>();
   const sku = sourceSku.trim().toUpperCase();
-  if (sku) candidates.add(sku);
+  if (sku && !isUnsafeGlobalProductAlias(sku)) candidates.add(sku);
 
   const description = sourceDescription.trim().toUpperCase();
   const skuLikeMatches = description.match(/\b[A-Z0-9]+(?:-[A-Z0-9]+)+\b/g) ?? [];
@@ -75,15 +76,23 @@ export async function resolveManualProductMappingAction(formData: FormData) {
     redirect(`/product-mappings?error=${encodeURIComponent(entryError?.message ?? "Mapping queue entry not found")}`);
   }
 
-  const { error: aliasError } = await supabase.from("product_aliases").upsert({
-    product_id: productId,
-    alias: entry.source_sku,
-    source_type: "manual",
-    source_ref: `${entry.source_system}:${entry.source_record_id ?? entry.id}`,
-  }, { onConflict: "product_id,alias,source_type" });
+  if (!isUnsafeGlobalProductAlias(entry.source_sku)) {
+    const { error: aliasError } = await supabase.from("product_aliases").upsert({
+      product_id: productId,
+      alias: entry.source_sku,
+      source_type: "manual",
+      source_ref: `${entry.source_system}:${entry.source_record_id ?? entry.id}`,
+    }, { onConflict: "product_id,alias,source_type" });
 
-  if (aliasError) {
-    redirect(`/product-mappings?error=${encodeURIComponent(aliasError.message)}`);
+    if (aliasError) {
+      redirect(`/product-mappings?error=${encodeURIComponent(aliasError.message)}`);
+    }
+  } else if (entry.source_system === "QBO_INVOICE" && entry.source_record_id) {
+    const { error: sourceLineError } = await supabase
+      .from("qbo_invoice_lines")
+      .update({ product_id: productId })
+      .eq("id", entry.source_record_id);
+    if (sourceLineError) redirect(`/product-mappings?error=${encodeURIComponent(sourceLineError.message)}`);
   }
 
   const { error: updateError } = await queueTable
@@ -206,6 +215,9 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
 
   if (!sourceSku || !productId) {
     redirect("/product-mappings?error=Select+a+canonical+product");
+  }
+  if (isUnsafeGlobalProductAlias(sourceSku)) {
+    redirect("/product-mappings?error=Generic+QuickBooks+labels+must+be+mapped+from+the+specific+invoice+line");
   }
 
   try {

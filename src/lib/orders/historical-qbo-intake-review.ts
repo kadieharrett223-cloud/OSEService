@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
 import { qboSkuCandidates } from "./quickbooks-refresh";
+import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 
 export type HistoricalQboIntakeReviewRow = {
   invoice: string | null; customer: string | null; qboInvoiceLineId: string; sku: string | null; quantity: number;
@@ -32,7 +33,7 @@ export async function loadHistoricalQboIntakeReview(): Promise<HistoricalQboInta
   const productBySku = new Map<string, string>();
   for (const row of [...products as Array<{ id: string; sku: string | null }>, ...aliases as Array<{ product_id: string; alias: string | null }>]) {
     const sku = "sku" in row ? row.sku : row.alias; const id = "id" in row ? row.id : row.product_id;
-    if (sku) productBySku.set(upper(sku), id);
+    if (sku && (!("alias" in row) || !isUnsafeGlobalProductAlias(sku))) productBySku.set(upper(sku), id);
   }
   const invoiceById = new Map((invoices as Array<{ id: string; invoice_number: string | null; payment_status: string | null; customers?: { company_name: string | null; full_name: string | null } | null }>).map((invoice) => [invoice.id, invoice]));
   type Representation = { shipping_order_id: string; qbo_invoice_line_id: string | null; approved_qty: number | null; fulfilled_qty: number | null; approval_status: string | null; fulfillment_status: string | null };

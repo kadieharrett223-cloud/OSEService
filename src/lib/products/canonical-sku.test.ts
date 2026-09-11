@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalProductSkuKey, canonicalSkuKey, preferredOperationalSku } from "./canonical-sku";
+import { canonicalProductSkuKey, canonicalSkuKey, isUnsafeGlobalProductAlias, preferredOperationalSku } from "./canonical-sku";
 
 describe("canonicalSkuKey", () => {
   it("groups recycled identities under the shared operational SKU", () => {
@@ -19,5 +19,12 @@ describe("canonicalSkuKey", () => {
   it("never uses generic aliases to merge distinct product models", () => {
     expect(canonicalProductSkuKey("000245", ["220V", "220V3HP", "HPU2203"])).toBe("HPU2203");
     expect(canonicalProductSkuKey("000246", ["220V", "HPU2204"])).toBe("HPU2204");
+  });
+
+  it("rejects accounting labels as reusable product aliases", () => {
+    expect(isUnsafeGlobalProductAlias("Note")).toBe(true);
+    expect(isUnsafeGlobalProductAlias("Misc Charge")).toBe(true);
+    expect(isUnsafeGlobalProductAlias("Shipping")).toBe(true);
+    expect(isUnsafeGlobalProductAlias("4PML-9")).toBe(false);
   });
 });

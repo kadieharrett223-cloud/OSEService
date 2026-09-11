@@ -16,6 +16,7 @@ import { classifyQboBacklogLine } from "@/lib/orders/qbo-backlog-classifier";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
+import { isWithinAutomaticQboIntake } from "@/lib/orders/qbo-intake-policy";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 import {
   disconnectQuickbooksConnection,
@@ -151,7 +152,6 @@ export async function setQboForwardIntakeEnabledAction(formData: FormData) {
   redirect(`/settings?message=${encodeURIComponent(`Continuous QBO forward intake ${isEnabled ? "enabled" : "disabled"}.`)}`);
 }
 
-const QBO_BACKLOG_CUTOFF = Date.parse("2026-08-07T00:00:00.000Z");
 const PAID_QBO_STATUSES = new Set(["Paid", "Partially Paid"]);
 const CLOSED_LINE_STATUSES = new Set(["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"]);
 
@@ -276,7 +276,7 @@ export async function importQualifiedQboBacklogAction() {
 
     for (const invoice of invoices) {
       const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-      if (!PAID_QBO_STATUSES.has(invoice.payment_status ?? "") || !firstPaymentAt || Date.parse(firstPaymentAt) < QBO_BACKLOG_CUTOFF) continue;
+      if (!PAID_QBO_STATUSES.has(invoice.payment_status ?? "") || !isWithinAutomaticQboIntake(firstPaymentAt)) continue;
 
       let order = orderByInvoice.get(invoice.id) ?? null;
       for (const line of (linesByInvoice.get(invoice.id) ?? []).filter(isPhysicalQboLine)) {

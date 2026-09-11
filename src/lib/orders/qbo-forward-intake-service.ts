@@ -3,8 +3,8 @@ import { recalculateProductQueues } from "@/lib/product-queue";
 import { qboSkuCandidates } from "./quickbooks-refresh";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
+import { isWithinAutomaticQboIntake } from "./qbo-intake-policy";
 
-const CUTOFF = Date.parse("2026-08-07T00:00:00.000Z");
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
 const CLOSED_STATUSES = new Set(["FULFILLED", "CANCELLED", "DENIED", "REMOVED", "REPLACED"]);
 
@@ -70,7 +70,7 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
 
   const eligibleInvoices = invoices.filter((invoice) => {
     const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-    return PAID_STATUSES.has(invoice.payment_status ?? "") && Boolean(firstPaymentAt) && Date.parse(firstPaymentAt!) >= CUTOFF;
+    return PAID_STATUSES.has(invoice.payment_status ?? "") && isWithinAutomaticQboIntake(firstPaymentAt);
   });
 
   return eligibleInvoices.map((invoice) => {

@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { isNonInventoryQuickbooksLine, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
+import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
+import { isWithinAutomaticQboIntake, QBO_AUTOMATIC_INTAKE_START_ISO } from "@/lib/orders/qbo-intake-policy";
+import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CUTOFF = "2026-08-07T00:00:00.000Z";
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
 
 type InvoiceRow = {
@@ -119,7 +121,7 @@ export default async function ImportAssignOrdersPage() {
     if (product.sku) productIdBySku.set(product.sku.trim().toUpperCase(), product.id);
   }
   for (const alias of aliasResult.data ?? []) {
-    if (alias.alias) productIdBySku.set(alias.alias.trim().toUpperCase(), alias.product_id);
+    if (alias.alias && !isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(alias.alias.trim().toUpperCase(), alias.product_id);
   }
   const linesByInvoice = new Map<string, InvoiceLine[]>();
   for (const line of invoiceLineRows) {
@@ -137,7 +139,7 @@ export default async function ImportAssignOrdersPage() {
     .map((invoice) => {
       const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id) ?? null;
       const physicalItems = (linesByInvoice.get(invoice.id) ?? [])
-        .filter((line) => Number(line.ordered_qty ?? 0) > 0 && !isNonInventoryQuickbooksLine(line))
+        .filter(isInventoryDemandQuickbooksLine)
         .map((line) => {
           const productId = line.product_id
             ?? qboSkuCandidates(line.qbo_sku).map((sku) => productIdBySku.get(sku)).find(Boolean)
@@ -147,7 +149,7 @@ export default async function ImportAssignOrdersPage() {
       const mappedCount = physicalItems.filter((item) => item.mapped).length;
       const mappingStatus = physicalItems.length === 0 ? "No physical items" : mappedCount === physicalItems.length ? "All mapped" : mappedCount === 0 ? "Assignment required" : "Partially mapped";
       const existingOrder = canonicalOrderByInvoice.get(invoice.id) ?? null;
-      const paymentEligible = firstPaymentDate !== null && Date.parse(firstPaymentDate) >= Date.parse(CUTOFF) && PAID_STATUSES.has(invoice.payment_status);
+      const paymentEligible = isWithinAutomaticQboIntake(firstPaymentDate) && PAID_STATUSES.has(invoice.payment_status);
       return {
         invoice,
         firstPaymentDate,
@@ -162,7 +164,7 @@ export default async function ImportAssignOrdersPage() {
   const rows = eligibleRows.filter((row) => !row.existingOrder);
   const voidedExcluded = invoiceRows.filter((invoice) => {
     const firstPaymentDate = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id);
-    return firstPaymentDate && Date.parse(firstPaymentDate) >= Date.parse(CUTOFF) && isVoided(invoice);
+    return isWithinAutomaticQboIntake(firstPaymentDate) && isVoided(invoice);
   }).length;
   const fullyMapped = rows.filter((row) => row.mappingStatus === "All mapped").length;
   const partiallyMapped = rows.filter((row) => row.mappingStatus === "Partially mapped").length;
@@ -178,7 +180,7 @@ export default async function ImportAssignOrdersPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#d50917]">Orders & Shipping</p>
             <h1 className="mt-2 text-3xl font-semibold text-[#111827]">Import / Assign New Orders</h1>
-            <p className="mt-2 max-w-3xl text-sm text-[#5a5a5a]">Read-only forward-intake preflight for QuickBooks invoices first paid on or after August 7, 2026. No order, demand, queue, inventory, fulfillment, or allocation data is changed here.</p>
+            <p className="mt-2 max-w-3xl text-sm text-[#5a5a5a]">Read-only forward-intake preflight for QuickBooks invoices first paid on or after {formatDate(QBO_AUTOMATIC_INTAKE_START_ISO)}. No order, demand, queue, inventory, fulfillment, or allocation data is changed here.</p>
           </div>
           <Link href="/orders" className="btn-secondary inline-flex">Back to Orders</Link>
         </div>

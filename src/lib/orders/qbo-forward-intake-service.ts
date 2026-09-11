@@ -76,9 +76,16 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
     const firstPaymentAt = firstPaymentByQboInvoiceId.get(invoice.qbo_invoice_id)!;
     const lines = (linesByInvoice.get(invoice.id) ?? []).map((line) => {
       const productId = line.product_id ?? qboSkuCandidates(line.qbo_sku).map((sku) => productIdBySku.get(normalized(sku))).find(Boolean) ?? null;
+      const canonicalParent = orders.find((candidate) => candidate.source_invoice_id === invoice.id && !candidate.duplicate_of_order_id);
+      const unmatchedParentLine = canonicalParent
+        ? orderLines.find((orderLine) => orderLine.shipping_order_id === canonicalParent.id
+          && !orderLine.qbo_invoice_line_id
+          && Number(orderLine.ordered_qty ?? 0) === Number(line.ordered_qty ?? 0)
+          && !CLOSED_STATUSES.has(normalized(orderLine.fulfillment_status)))
+        : null;
       const manualMatch = Boolean(productId) && orders.some((candidate) => candidate.source_invoice_id !== invoice.id && !candidate.duplicate_of_order_id && candidate.order_number && normalized(candidate.order_number) === normalized(invoice.invoice_number) && (candidate.customer_id === invoice.customer_id || normalized(customerName(candidate)) === normalized(customerName(invoice))) && orderLines.some((orderLine) => orderLine.shipping_order_id === candidate.id && orderLine.product_id === productId && Number(orderLine.ordered_qty ?? 0) === Number(line.ordered_qty ?? 0)));
       const terminal = activeResolutionIds.has(line.id) || orderLines.some((orderLine) => orderLine.qbo_invoice_line_id === line.id && (CLOSED_STATUSES.has(normalized(orderLine.fulfillment_status)) || Number(orderLine.fulfilled_qty ?? 0) >= Number(orderLine.ordered_qty ?? 0)));
-      return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine(line), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch, hasConflictingSkuIdentity: false }) };
+      return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine(line), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch || Boolean(unmatchedParentLine), hasConflictingSkuIdentity: Boolean(unmatchedParentLine && productId && unmatchedParentLine.product_id !== productId) }) };
     });
     const decision = summarizeQboInvoiceIntake(lines.map((line) => line.decision));
     return { qboInvoiceId: invoice.id, invoiceNumber: invoice.invoice_number, customerName: customerName(invoice), firstPaymentAt, invoiceDate: invoice.invoice_date, decision, lines };

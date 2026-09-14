@@ -781,28 +781,28 @@ export default async function OrderDetailPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const user = await requireUser();
-  const adminUnlocked = await isAdminUnlockedForUser(user.id);
   const supabase = getSupabaseAdmin();
-  const { id } = await params;
-  const { error, message } = await searchParams;
+  const [adminUnlocked, { id }, { error, message }] = await Promise.all([
+    isAdminUnlockedForUser(user.id),
+    params,
+    searchParams,
+  ]);
   const normalizedError = String(error ?? "").replace(/\+/g, " ").toLowerCase();
 
-  const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
-    "fulfillment_method",
-    "cancellation_status",
-    "cancellation_reason",
+  const [shippingOrderColumnSet, shippingOrderLineColumnSet, attachmentColumns, shipmentColumns, fulfillmentColumns] = await Promise.all([
+    loadTableColumnSet(supabase, "shipping_orders", ["fulfillment_method", "cancellation_status", "cancellation_reason"]),
+    loadTableColumnSet(supabase, "shipping_order_lines", [
+      "ordered_qty", "approved_qty", "fulfilled_qty", "approval_status", "warehouse_status", "fulfillment_status",
+      "allocation_status", "priority", "queue_position_start", "queue_position_count", "queue_position_override",
+      "queue_position_override_reason", "legacy_item_code", "legacy_matched_item_code", "legacy_container_assignment",
+      "suggested_assignment_source", "suggested_container_id", "fulfillment_source", "fulfillment_supplier",
+      "fulfillment_reference", "fulfillment_tracking", "fulfillment_notes",
+    ]),
+    loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]),
+    loadTableColumnSet(supabase, "order_shipments", ["id", "created_by", "created_at", "idempotency_key"]),
+    loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]),
   ]);
-  const shippingOrderLineColumnSet = await loadTableColumnSet(supabase, "shipping_order_lines", [
-    "ordered_qty", "approved_qty", "fulfilled_qty", "approval_status", "warehouse_status", "fulfillment_status",
-    "allocation_status", "priority", "queue_position_start", "queue_position_count", "queue_position_override",
-    "queue_position_override_reason", "legacy_item_code", "legacy_matched_item_code", "legacy_container_assignment",
-    "suggested_assignment_source", "suggested_container_id", "fulfillment_source", "fulfillment_supplier",
-    "fulfillment_reference", "fulfillment_tracking", "fulfillment_notes",
-  ]);
-  const attachmentColumns = await loadTableColumnSet(supabase, "order_attachments", ["id", "document_type", "note", "is_restricted"]);
-  const shipmentColumns = await loadTableColumnSet(supabase, "order_shipments", ["id", "created_by", "created_at", "idempotency_key"]);
   const hasOrderShipmentsTables = shipmentColumns.has("id");
-  const fulfillmentColumns = await loadTableColumnSet(supabase, "fulfillments", ["fulfillment_type"]);
   const hasOrderAttachmentsTable = attachmentColumns.has("id");
   const shippingOrderSelect = buildShippingOrderSelect(shippingOrderColumnSet, shippingOrderLineColumnSet);
   const attachmentSelect = ["id", "file_name", "file_path", "file_size", "mime_type", "created_at", ...["document_type", "note", "is_restricted", "shipment_id"].filter((column) => attachmentColumns.has(column))].join(", ");

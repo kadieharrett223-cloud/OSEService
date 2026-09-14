@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 const SESSION_COOKIE = "app_access_session";
 const ONE_DAY_SECONDS = 60 * 60 * 24;
@@ -77,7 +78,7 @@ function parseSessionValue(value: string | undefined): SessionPayload | null {
   }
 }
 
-export async function getCurrentAccessUser() {
+const readCurrentAccessUser = async () => {
   const cookieStore = await cookies();
   const sessionCookie = cookieStore.get(SESSION_COOKIE)?.value;
   const session = parseSessionValue(sessionCookie);
@@ -90,7 +91,10 @@ export async function getCurrentAccessUser() {
     id: session.userId,
     fullName: session.fullName,
   };
-}
+};
+
+// Deduplicate the layout, header, sidebar, and page session lookup within one render.
+export const getCurrentAccessUser = cache(readCurrentAccessUser);
 
 export async function requireAccessUser() {
   const user = await getCurrentAccessUser();

@@ -151,3 +151,18 @@ h6 {
   border-color: #86efac;
   background: #ecfdf3;
 }
+
+@keyframes occ-navigation-progress {
+  0% { transform: translateX(-110%); }
+  55% { transform: translateX(115vw); }
+  100% { transform: translateX(300vw); }
+}
+
+.occ-navigation-progress {
+  animation: occ-navigation-progress 1.15s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .occ-navigation-progress { animation-duration: 2.4s; }
+}

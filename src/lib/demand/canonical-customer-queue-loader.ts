@@ -5,6 +5,7 @@ import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillm
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { cache } from "react";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -74,7 +75,7 @@ async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseL
 }
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
-async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCustomerQueue> {
+const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonicalCustomerQueue> => {
   const supabase = getSupabaseAdmin();
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku").range(from, to)),
@@ -204,7 +205,7 @@ async function loadCanonicalCustomerQueueUncached(): Promise<CachedCanonicalCust
     manualMappingSkus: [...manualMappingSkus],
     lineProductIdEntries: [...lineProductIdByLineId.entries()],
   };
-}
+});
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQueueLoaderResult> {

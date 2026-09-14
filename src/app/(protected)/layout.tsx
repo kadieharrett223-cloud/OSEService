@@ -9,6 +9,7 @@ import Link from "next/link";
 import { getQuickbooksConnectionStatus } from "@/lib/quickbooks/integration";
 import { unstable_cache } from "next/cache";
 import { Suspense } from "react";
+import { NavigationFeedback } from "@/app/(protected)/navigation-feedback";
 
 const getCachedQuickbooksIndicator = unstable_cache(
   async () => {
@@ -16,21 +17,14 @@ const getCachedQuickbooksIndicator = unstable_cache(
     let quickbooksStatus = { connection: null, error: null } as Awaited<ReturnType<typeof getQuickbooksConnectionStatus>>;
     let quickbooksSnapshotCount = 0;
 
-    try {
-      quickbooksStatus = await getQuickbooksConnectionStatus();
-    } catch {
-      quickbooksStatus = { connection: null, error: null };
-    }
-
-    try {
-      const { count } = await supabase
+    const [statusResult, snapshotResult] = await Promise.allSettled([
+      getQuickbooksConnectionStatus(),
+      supabase
         .from("quickbooks_invoices")
-        .select("id", { count: "exact", head: true });
-
-      quickbooksSnapshotCount = count ?? 0;
-    } catch {
-      quickbooksSnapshotCount = 0;
-    }
+        .select("id", { count: "exact", head: true }),
+    ]);
+    if (statusResult.status === "fulfilled") quickbooksStatus = statusResult.value;
+    if (snapshotResult.status === "fulfilled") quickbooksSnapshotCount = snapshotResult.value.count ?? 0;
 
     const quickbooksTableMissing = quickbooksStatus.error?.code === "42P01";
     return quickbooksTableMissing
@@ -95,5 +89,5 @@ function HeaderFallback() {
 }
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
-  return <div className="flex min-h-screen flex-col bg-[#f5f7fa]"><div className="h-1 w-full bg-[#d50917]" /><div className="grid w-full flex-1 md:grid-cols-[264px_1fr]"><Suspense fallback={<SidebarFallback />}><ProtectedSidebar /></Suspense><div className="flex min-w-0 flex-col"><Suspense fallback={<HeaderFallback />}><ProtectedHeader /></Suspense><main className="px-4 py-3 md:px-6 md:py-4">{children}</main></div></div></div>;
+  return <div className="flex min-h-screen flex-col bg-[#f5f7fa]"><Suspense fallback={null}><NavigationFeedback /></Suspense><div className="h-1 w-full bg-[#d50917]" /><div className="grid w-full flex-1 md:grid-cols-[264px_1fr]"><Suspense fallback={<SidebarFallback />}><ProtectedSidebar /></Suspense><div className="flex min-w-0 flex-col"><Suspense fallback={<HeaderFallback />}><ProtectedHeader /></Suspense><main className="px-4 py-3 md:px-6 md:py-4">{children}</main></div></div></div>;
 }

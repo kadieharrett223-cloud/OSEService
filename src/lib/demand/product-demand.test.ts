@@ -180,6 +180,15 @@ describe("shared active logical demand", () => {
     expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-fulfilled"]), new Set()).map((line) => line.id)).toEqual(["paid-qbo-only"]);
   });
 
+  it("does not let fulfillment on a retired duplicate parent remove the live customer line", () => {
+    const rows = [
+      { id: "live", product_id: "product-1", qbo_invoice_line_id: "qbo-line", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "retired", product_id: "product-1", logical_demand_key: "qbo-line", approved_qty: 1, fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "FULFILLED", parent_duplicate_of_order_id: "live-order" },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set()).map((line) => line.id)).toEqual(["live"]);
+  });
+
   it("keeps reviewed SKU corrections visible while excluding reviewed replacements and duplicates", () => {
     const rows = [
       { id: "11601-old", source_record_id: "da25408f-149b-4387-92e9-1591e56c5afb", logical_demand_key: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },

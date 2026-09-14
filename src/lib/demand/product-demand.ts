@@ -89,8 +89,15 @@ export function withLogicalFulfilledQty<T extends DemandLineLike>(lines: T[]): T
 /** Customer List demand includes every remaining physical obligation that has not been cancelled, voided, duplicated, or shipped. */
 export function isOpenDemandLine(line: DemandLineLike) {
   if (openQtyOf(line) <= 0) return false;
-  if (line.parent_duplicate_of_order_id || String(line.parent_cancellation_status ?? "").toUpperCase() === "CANCELLED" || line.parent_qbo_voided) return false;
+  if (!hasActiveDemandParent(line)) return false;
   return !["FULFILLED", "SHIPPED", "CANCELLED", "REPLACED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
+}
+
+/** A retired parent must not contribute fulfillment or demand to its surviving active sibling. */
+export function hasActiveDemandParent(line: DemandLineLike) {
+  return !line.parent_duplicate_of_order_id
+    && String(line.parent_cancellation_status ?? "").toUpperCase() !== "CANCELLED"
+    && !line.parent_qbo_voided;
 }
 
 /** Keeps a completed QBO order from being resurrected by its bridged OLD_ERP sibling. */
@@ -114,7 +121,7 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   void completedQboInvoiceIds;
   const terminalResolutions = reviewedResolutions.filter((resolution) => ["DUPLICATE", "REPLACED", "HISTORICAL_FULFILLMENT"].includes(resolution.resolution_type));
   return dedupeDemandLines(withLogicalFulfilledQty(
-    excludeReviewedObligationResolutions(lines, terminalResolutions),
+    excludeReviewedObligationResolutions(lines.filter(hasActiveDemandParent), terminalResolutions),
   )).filter(isOpenDemandLine);
 }
 

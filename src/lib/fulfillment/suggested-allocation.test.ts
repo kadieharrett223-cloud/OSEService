@@ -133,6 +133,21 @@ describe("shared product coverage resolver", () => {
     expect(result.allocations.filter((allocation) => allocation.sourceType === "WAREHOUSE").reduce((sum, allocation) => sum + allocation.quantity, 0)).toBe(2);
   });
 
+  it("consumes a live container reservation once before forecasting later customer demand", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 0]]),
+      queueLinesByProduct: new Map([[productId, [
+        line("Reserved", 1, 10, { container_reserved_quantities: [{ container_id: "c249", quantity: 1 }] }),
+        line("Later", 1, 20),
+      ]]]),
+      containerSupplyByProduct: new Map([[productId, [container("c249", "249", 1, "2026-08-25")]]]),
+    });
+
+    expect(result.lines.get("Reserved")?.incomingQty).toBe(1);
+    expect(result.lines.get("Later")?.unassignedQty).toBe(1);
+    expect(result.allocations.filter((allocation) => allocation.sourceId === "c249").reduce((sum, allocation) => sum + allocation.quantity, 0)).toBe(1);
+  });
+
   it("moves incoming coverage to warehouse after container receipt increases ON_FLOOR", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 4]]),

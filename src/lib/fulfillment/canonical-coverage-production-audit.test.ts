@@ -78,8 +78,11 @@ describe.skipIf(!enabled)("canonical coverage production audit", () => {
         if (!line) continue;
         const allocationsForLine = allocationsByLine.get(row.lineId) ?? [];
         const floorReservedQty = allocationsForLine.filter((allocation) => allocation.source_type === "FLOOR").reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
+        const containerReservedQuantities = allocationsForLine
+          .filter((allocation) => allocation.source_type === "CONTAINER" && allocation.container_id)
+          .map((allocation) => ({ container_id: allocation.container_id as string, quantity: Number(allocation.quantity ?? 0) }));
         const start = Number.parseInt(row.position.split("-")[0] ?? "", 10);
-        demandByKey.set(key, [...(demandByKey.get(key) ?? []), { id: row.lineId, product_id: key, remaining_qty: row.openQty, priority: line.priority ?? "NORMAL", queue_position_start: Number.isFinite(start) ? start : null, approved_at: null, created_at: row.orderCreatedAt ?? new Date(0).toISOString(), has_live_allocation: allocationsForLine.length > 0, fulfillment_source: line.fulfillment_source, warehouse_reserved_qty: floorReservedQty }]);
+        demandByKey.set(key, [...(demandByKey.get(key) ?? []), { id: row.lineId, product_id: key, remaining_qty: row.openQty, priority: line.priority ?? "NORMAL", queue_position_start: Number.isFinite(start) ? start : null, approved_at: null, created_at: row.orderCreatedAt ?? new Date(0).toISOString(), has_live_allocation: allocationsForLine.length > 0, fulfillment_source: line.fulfillment_source, warehouse_reserved_qty: floorReservedQty, container_reserved_quantities: containerReservedQuantities }]);
         const persistedQty = allocationsForLine.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
         if (persistedQty > row.openQty) issues.push({ code: "PERSISTED_ALLOCATION_EXCEEDS_OPEN_DEMAND", lineId: row.lineId, expected: row.openQty, actual: persistedQty });
       }
@@ -95,8 +98,7 @@ describe.skipIf(!enabled)("canonical coverage production audit", () => {
       if (demand !== warehouse + container + waiting) issues.push({ code: "DEMAND_CONSERVATION_FAILURE", sku: key, expected: demand, actual: warehouse + container + waiting });
       for (const supply of resolution.incomingSupply) {
         const forecastQty = resolution.allocations.filter((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === supply.container_id).reduce((sum, allocation) => sum + allocation.quantity, 0);
-        const persistedQty = liveAllocations.filter((allocation) => allocation.source_type === "CONTAINER" && allocation.container_id === supply.container_id && keyByProduct.get(allocation.product_id ?? "") === key).reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
-        if (forecastQty + persistedQty > supply.available_qty) issues.push({ code: "PERSISTED_CONTAINER_RESERVATION_DOUBLE_COUNTED", sku: key, containerId: supply.container_id, containerNumber: supply.container_number, expected: supply.available_qty, forecastQty, persistedQty, actual: forecastQty + persistedQty });
+        if (forecastQty > supply.available_qty) issues.push({ code: "PERSISTED_CONTAINER_RESERVATION_DOUBLE_COUNTED", sku: key, containerId: supply.container_id, containerNumber: supply.container_number, expected: supply.available_qty, forecastQty, actual: forecastQty });
       }
       skuReports.push({ sku: key, openDemand: demand, onFloor: resolution.currentSupply, incoming: resolution.incomingSupply.reduce((sum, supply) => sum + supply.available_qty, 0), warehouseCovered: warehouse, containerCovered: container, waiting });
     }

@@ -22,6 +22,8 @@ export type OpenQueueLine = {
   has_live_allocation: boolean;
   fulfillment_source?: string | null;
   warehouse_reserved_qty?: number | null;
+  /** Live container reservations are physical commitments, not future suggestions. */
+  container_reserved_quantities?: Array<{ container_id: string; quantity: number }>;
 };
 
 export type ProductContainerSupply = {
@@ -211,6 +213,39 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
       return { sourceType: "CONTAINER" as const, sourceId: container.container_id, sourceLabel: container.container_number ?? "Container", qty: container.available_qty, etaDate: eta.etaDate, etaType: eta.etaType };
     }),
   ];
+  const incomingSupplyById = new Map(supply
+    .filter((source) => source.sourceType === "CONTAINER" && source.sourceId)
+    .map((source) => [source.sourceId as string, source]));
+  const pinnedContainerByLine = new Map<string, CoverageAllocation[]>();
+  for (const line of demand) {
+    let remaining = Math.max(0, line.remaining_qty - (pinnedWarehouseByLine.get(line.id) ?? 0));
+    let offset = pinnedWarehouseByLine.get(line.id) ?? 0;
+    for (const reservation of line.container_reserved_quantities ?? []) {
+      if (remaining <= 0) break;
+      const source = incomingSupplyById.get(reservation.container_id);
+      if (!source || source.qty <= 0) continue;
+      const quantity = Math.min(remaining, Math.max(0, Number(reservation.quantity ?? 0)), source.qty);
+      if (quantity <= 0) continue;
+      const range = queueRange(line, offset, quantity);
+      const rows = pinnedContainerByLine.get(line.id) ?? [];
+      rows.push({
+        orderLineId: line.id,
+        productId,
+        quantity,
+        queueStart: range.queueStart,
+        queueEnd: range.queueEnd,
+        sourceType: "CONTAINER",
+        sourceId: source.sourceId,
+        sourceLabel: source.sourceLabel,
+        etaDate: source.etaDate,
+        etaType: source.etaType,
+      });
+      pinnedContainerByLine.set(line.id, rows);
+      source.qty -= quantity;
+      remaining -= quantity;
+      offset += quantity;
+    }
+  }
   let supplyIndex = 0;
   const allocations: CoverageAllocation[] = [];
   const lineAllocationsById = new Map<string, CoverageAllocation[]>();
@@ -233,11 +268,17 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
       etaType: "AVAILABLE_NOW",
     });
   }
+  for (const line of demand) {
+    for (const allocation of pinnedContainerByLine.get(line.id) ?? []) {
+      addAllocation(allocations, lineAllocationsById, allocation);
+    }
+  }
 
   for (const line of demand) {
     const pinned = pinnedWarehouseByLine.get(line.id) ?? 0;
-    let remaining = Math.max(0, line.remaining_qty - pinned);
-    let offset = pinned;
+    const pinnedContainerQty = (pinnedContainerByLine.get(line.id) ?? []).reduce((sum, allocation) => sum + allocation.quantity, 0);
+    let remaining = Math.max(0, line.remaining_qty - pinned - pinnedContainerQty);
+    let offset = pinned + pinnedContainerQty;
 
     while (remaining > 0) {
       while (supplyIndex < supply.length && supply[supplyIndex].qty <= 0) supplyIndex += 1;

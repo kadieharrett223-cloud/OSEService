@@ -531,6 +531,9 @@ export default async function InventoryPage({
     const floorReservedQty = (line.inventory_allocations ?? [])
       .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")
       .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
+    const containerReservedQuantities = (line.inventory_allocations ?? [])
+      .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "CONTAINER" && allocation.container_id)
+      .map((allocation) => ({ container_id: allocation.container_id as string, quantity: Number(allocation.quantity ?? 0) }));
     const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
     const rows = coverageQueueByProduct.get(productKey) ?? [];
     rows.push({
@@ -544,6 +547,7 @@ export default async function InventoryPage({
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
       fulfillment_source: line.fulfillment_source,
       warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
+      container_reserved_quantities: containerReservedQuantities,
     });
     coverageQueueByProduct.set(productKey, rows);
   }

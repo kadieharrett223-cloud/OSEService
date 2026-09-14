@@ -961,7 +961,18 @@ export default async function OrderDetailPage({
   });
   const isPendingReview = String(orderRecord.review_status ?? "").toUpperCase() === "PENDING_REVIEW";
   const canonicalCustomerQueue = await loadCanonicalCustomerQueue();
-  const canonicalQueuePositionByLineId = new Map(orderLines.map((line) => {
+  const { data: siblingLineRows } = siblingOrderIds.length > 1
+    ? await supabase
+        .from("shipping_order_lines")
+        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,warehouse_status,queue_position_start,queue_position_count,source_record_id,qbo_invoice_line_id,legacy_item_code,legacy_matched_item_code,qbo_invoice_lines(qbo_line_id,qbo_sku),products(sku,canonical_name)")
+        .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
+    : { data: [] };
+  const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<
+    NonNullable<OrderDetailRow["shipping_order_lines"]>[number] & { shipping_order_id: string }
+  >;
+  const operationalLines = [...orderLines, ...siblingPhysicalLines]
+    .sort(prioritizePhysicalFulfillmentLine);
+  const canonicalQueuePositionByLineId = new Map(operationalLines.map((line) => {
     const logicalKey = line.qbo_invoice_line_id ? `QBO_LINE:${line.qbo_invoice_line_id}` : line.source_record_id ? `SOURCE:${line.source_record_id}` : null;
     const queueRow = canonicalCustomerQueue.queueByLineId.get(line.id) ?? (logicalKey ? canonicalCustomerQueue.queueByLogicalDemandKey.get(logicalKey) : undefined);
     // The canonical queue is the source of truth.  Keep the persisted
@@ -975,18 +986,6 @@ export default async function OrderDetailPage({
       : null;
     return [line.id, queueRow?.position ?? storedPosition] as const;
   }));
-
-  const { data: siblingLineRows } = siblingOrderIds.length > 1
-    ? await supabase
-        .from("shipping_order_lines")
-        .select("id,shipping_order_id,product_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_status,fulfillment_source,warehouse_status,legacy_item_code,legacy_matched_item_code,qbo_invoice_lines(qbo_line_id,qbo_sku),products(sku,canonical_name)")
-        .in("shipping_order_id", siblingOrderIds.filter((siblingOrderId) => siblingOrderId !== orderRecord.id))
-    : { data: [] };
-  const siblingPhysicalLines = (siblingLineRows ?? []) as unknown as Array<
-    NonNullable<OrderDetailRow["shipping_order_lines"]>[number] & { shipping_order_id: string }
-  >;
-  const operationalLines = [...orderLines, ...siblingPhysicalLines]
-    .sort(prioritizePhysicalFulfillmentLine);
 
   const lineIds = orderLines.map((line) => line.id);
   const { data: fulfillmentRows } = lineIds.length

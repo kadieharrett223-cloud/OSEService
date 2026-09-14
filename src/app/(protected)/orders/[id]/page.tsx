@@ -755,8 +755,8 @@ function ManualOrderCancellation({
     return <p className="mt-6 text-xs text-[#64748b]">This order is cancelled{cancellationReason ? ` · ${cancellationReason}` : ""}.</p>;
   }
   return (
-    <details className="mt-6 w-full border-t border-[#e5e7eb] pt-3 text-xs text-[#64748b]">
-      <summary className="w-fit cursor-pointer text-[#94a3b8] underline decoration-dotted underline-offset-4 hover:text-[#b91c1c]">Cancel this order</summary>
+    <details className="mt-6 w-full border-t border-[#e5e7eb] pt-4 text-xs text-[#64748b]">
+      <summary className="inline-flex cursor-pointer list-none rounded-md border border-[#f3b8bd] bg-white px-3 py-1.5 font-semibold text-[#a1121c] hover:bg-[#fff4f5]">Cancel this order</summary>
       {!adminUnlocked ? (
         <div className="mt-3 max-w-xl rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-3">
           Admin mode is required. <Link href="/settings" className="font-semibold text-[#334155] underline">Enable it in Settings</Link>.
@@ -1973,7 +1973,6 @@ export default async function OrderDetailPage({
               </div>
             </section>
           </div>
-          <ManualOrderCancellation orderId={orderRecord.id} adminUnlocked={adminUnlocked} cancellationStatus={orderRecord.cancellation_status} cancellationReason={orderRecord.cancellation_reason} />
         </div>
 
         <aside className="space-y-6">
@@ -2023,6 +2022,7 @@ export default async function OrderDetailPage({
           </section>
         </aside>
       </div>
+      <ManualOrderCancellation orderId={orderRecord.id} adminUnlocked={adminUnlocked} cancellationStatus={orderRecord.cancellation_status} cancellationReason={orderRecord.cancellation_reason} />
       </ShipmentSelectionProvider>
     </div>
   );

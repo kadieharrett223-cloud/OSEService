@@ -675,8 +675,8 @@ async function activateExistingQuickbooksOrder(
     const { error } = await adminClient.from("shipping_order_lines").update({
       approved_qty: 0,
       allocation_status: "UNALLOCATED",
-      warehouse_status: "REMOVED",
-      fulfillment_status: "REMOVED",
+      warehouse_status: "HOLD",
+      fulfillment_status: "CANCELLED",
     }).eq("id", removal.lineId);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   }

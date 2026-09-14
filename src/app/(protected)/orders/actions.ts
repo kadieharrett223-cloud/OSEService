@@ -687,9 +687,16 @@ async function activateExistingQuickbooksOrder(
       const { error: allocationError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", update.lineId);
       if (allocationError) redirect(`/orders/${orderId}?error=${encodeURIComponent(allocationError.message)}`);
     }
-    const shouldMoveFromPendingReview = String(existing?.warehouse_status ?? "").toUpperCase() === "PENDING_REVIEW"
-      && String(existing?.fulfillment_status ?? "").toUpperCase() === "PENDING"
-      && ["", "UNALLOCATED"].includes(String(existing?.allocation_status ?? "").toUpperCase());
+    // If a previous refresh incorrectly retired an unshipped line because its
+    // QBO product mapping was temporarily unavailable, the live QBO line is
+    // authoritative proof that the obligation remains active. Restore it to
+    // the operational queue without touching fulfillment history.
+    const shouldRestoreActiveLine = Number(existing?.fulfilled_qty ?? 0) <= 0
+      && (
+        String(existing?.fulfillment_status ?? "").toUpperCase() === "CANCELLED"
+        || String(existing?.warehouse_status ?? "").toUpperCase() === "HOLD"
+        || String(existing?.warehouse_status ?? "").toUpperCase() === "PENDING_REVIEW"
+      );
     const { error } = await adminClient
       .from("shipping_order_lines")
       .update({
@@ -698,7 +705,7 @@ async function activateExistingQuickbooksOrder(
         approval_status: update.approval_status,
         product_id: update.product_id ?? undefined,
         ...(productChanged ? { allocation_status: "UNALLOCATED", fulfillment_source: null } : {}),
-        ...(shouldMoveFromPendingReview ? { warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" } : {}),
+        ...(shouldRestoreActiveLine ? { warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" } : {}),
       })
       .eq("id", update.lineId);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
@@ -738,7 +745,20 @@ async function activateExistingQuickbooksOrder(
     message: `Order refreshed from QuickBooks invoice ${invoice.invoice_number ?? ""} and activated`,
   });
 
-  if (plan.productIds.length > 0) await recalculateProductQueues(plan.productIds);
+  // Always rebuild every product touched by this active order. A QBO refresh
+  // must leave every mapped, unfulfilled line on its Customer List, including
+  // unchanged siblings that were not otherwise part of the refresh plan.
+  const { data: activeOrderLines, error: activeOrderLinesError } = await adminClient
+    .from("shipping_order_lines")
+    .select("product_id")
+    .eq("shipping_order_id", orderId)
+    .not("product_id", "is", null);
+  if (activeOrderLinesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(activeOrderLinesError.message)}`);
+  const queueProductIds = Array.from(new Set([
+    ...plan.productIds,
+    ...(activeOrderLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)),
+  ]));
+  if (queueProductIds.length > 0) await recalculateProductQueues(queueProductIds);
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");

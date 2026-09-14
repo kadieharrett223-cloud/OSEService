@@ -99,10 +99,12 @@ export function planQuickbooksOrderRefresh(
         continue;
       }
       const resolvedProductId = productId ?? existing.product_id ?? null;
-      if (!productId) {
+      // A missing mapping on a refreshed QBO row is not evidence that the
+      // customer stopped buying the item. Preserve an existing product link
+      // (and therefore its Customer List obligation) until the QBO line is
+      // actually removed from the invoice or a user deliberately remaps it.
+      if (!productId && !existing.product_id) {
         plan.skippedUnmapped.push(invoiceLine.id);
-        plan.removals.push({ lineId: existing.id, productId: existing.product_id ?? null });
-        if (existing.product_id) productIds.add(existing.product_id);
         continue;
       }
       plan.updates.push({

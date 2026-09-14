@@ -146,6 +146,33 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.skippedUnmapped).toHaveLength(0);
   });
 
+  it("keeps an existing mapped line active when QBO temporarily omits its mapping", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ product_id: null, qbo_sku: "UNMAPPED-TEMPORARILY" })],
+      [orderLine({ product_id: "product-existing", approved_qty: 1 })],
+      new Map(),
+    );
+
+    expect(plan.removals).toEqual([]);
+    expect(plan.skippedUnmapped).toEqual([]);
+    expect(plan.updates).toEqual([
+      { lineId: "order-line-1", ordered_qty: 2, approved_qty: 2, approval_status: "APPROVED", product_id: "product-existing" },
+    ]);
+    expect(plan.productIds).toEqual(["product-existing"]);
+  });
+
+  it("leaves an existing unmapped line for mapping review instead of deleting it", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ product_id: null, qbo_sku: "UNMAPPED-TEMPORARILY" })],
+      [orderLine({ product_id: null })],
+      new Map(),
+    );
+
+    expect(plan.removals).toEqual([]);
+    expect(plan.updates).toEqual([]);
+    expect(plan.skippedUnmapped).toEqual(["inv-line-1"]);
+  });
+
   it("treats an inspection invoice line as service rather than shippable inventory", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inspection-line", product_id: null, qbo_sku: "inspection", source_description: "Measure the site and verify the concrete." })],

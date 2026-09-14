@@ -163,8 +163,15 @@ export function dedupeDemandLines<T extends DemandLineLike>(lines: T[]): T[] {
 
   return Array.from(byIdentity.values()).map((duplicates) => {
     const selected = [...duplicates].sort((left, right) => {
-      const leftIsLiveQbo = left.parent_source_type === "QBO_INVOICE" && Boolean(left.qbo_invoice_line_id);
-      const rightIsLiveQbo = right.parent_source_type === "QBO_INVOICE" && Boolean(right.qbo_invoice_line_id);
+      // A QBO refresh can create a current sibling that still awaits mapping approval. That
+      // unapproved copy is not yet a customer-list obligation and must never hide the prior
+      // approved bridged line. Prefer QBO only once it is an open, approved queue line.
+      const leftIsLiveQbo = left.parent_source_type === "QBO_INVOICE"
+        && Boolean(left.qbo_invoice_line_id)
+        && isOpenCustomerQueueLine(left);
+      const rightIsLiveQbo = right.parent_source_type === "QBO_INVOICE"
+        && Boolean(right.qbo_invoice_line_id)
+        && isOpenCustomerQueueLine(right);
       if (leftIsLiveQbo !== rightIsLiveQbo) return leftIsLiveQbo ? -1 : 1;
       return openQtyOf(right) - openQtyOf(left) || left.id.localeCompare(right.id);
     })[0];

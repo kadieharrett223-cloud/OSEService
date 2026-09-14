@@ -121,6 +121,33 @@ describe("shared active logical demand", () => {
     expect(openQtyOf(overcounted[0])).toBe(6);
   });
 
+  it("keeps an approved bridged obligation on the Customer List while its QBO sibling awaits mapping", () => {
+    const activeDemand = getCanonicalOpenDemandLines([
+      {
+        id: "larry-bridged-4phr",
+        product_id: "4phr-product",
+        logical_demand_key: "larry-qbo-4phr",
+        approved_qty: 1,
+        fulfillment_status: "PENDING",
+        approval_status: "APPROVED",
+        parent_source_type: "INTERNAL",
+      },
+      {
+        id: "larry-qbo-4phr",
+        product_id: "4phr-product",
+        qbo_invoice_line_id: "larry-qbo-4phr",
+        approved_qty: 0,
+        ordered_qty: 1,
+        fulfillment_status: "PENDING",
+        approval_status: "PENDING_REVIEW",
+        parent_source_type: "QBO_INVOICE",
+      },
+    ], new Set(), new Set());
+
+    expect(activeDemand).toMatchObject([{ id: "larry-bridged-4phr" }]);
+    expect(openQtyOf(activeDemand[0]!)).toBe(1);
+  });
+
   it("removes Joshua 122353 from every active-demand surface when its QBO sibling shipped", () => {
     const projected = withLogicalFulfilledQty([
       { id: "59b6d8d1-2134-406f-8444-63e99f5856c7", logical_demand_key: "e03613c6-f085-471a-945c-de86f59ff99e", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "IN_WAREHOUSE" },

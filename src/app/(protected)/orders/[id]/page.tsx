@@ -964,7 +964,16 @@ export default async function OrderDetailPage({
   const canonicalQueuePositionByLineId = new Map(orderLines.map((line) => {
     const logicalKey = line.qbo_invoice_line_id ? `QBO_LINE:${line.qbo_invoice_line_id}` : line.source_record_id ? `SOURCE:${line.source_record_id}` : null;
     const queueRow = canonicalCustomerQueue.queueByLineId.get(line.id) ?? (logicalKey ? canonicalCustomerQueue.queueByLogicalDemandKey.get(logicalKey) : undefined);
-    return [line.id, queueRow?.position ?? null] as const;
+    // The canonical queue is the source of truth.  Keep the persisted
+    // position as a safe display fallback while a bridged old-ERP line and
+    // its current QBO representation are being reconciled.  Both values are
+    // maintained by the same active-order queue invariant.
+    const storedStart = Number(line.queue_position_start ?? 0);
+    const storedCount = Math.max(1, Number(line.queue_position_count ?? 1));
+    const storedPosition = Number.isInteger(storedStart) && storedStart > 0
+      ? (storedCount > 1 ? `${storedStart}-${storedStart + storedCount - 1}` : String(storedStart))
+      : null;
+    return [line.id, queueRow?.position ?? storedPosition] as const;
   }));
 
   const { data: siblingLineRows } = siblingOrderIds.length > 1

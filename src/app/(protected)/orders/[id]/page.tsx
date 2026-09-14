@@ -2022,12 +2022,19 @@ export default async function OrderDetailPage({
               }).map((item, index) => {
                 const queueLine = item.shippingLine;
                 const queueSku = item.sku ?? queueLine?.products?.sku ?? "Line item";
+                const queuePosition = queueLine ? canonicalQueuePositionByLineId.get(queueLine.id) : null;
+                const requiresQueueApproval = queueLine
+                  && !["APPROVED", "PARTIAL"].includes(String(queueLine.approval_status ?? "").toUpperCase());
                 return (
                   <div key={`${item.key}-queue`} className="border-b border-[#eef2f7] pb-3 last:border-0 last:pb-0">
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
                     <p className="mt-1 text-xs text-[#64748b]">{truncateText(item.description, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
-                      Customer list position: {queueLine && canonicalQueuePositionByLineId.get(queueLine.id) ? `#${canonicalQueuePositionByLineId.get(queueLine.id)}` : "Not in active Customer List"}
+                      {queuePosition
+                        ? `Customer list position: #${queuePosition}`
+                        : requiresQueueApproval
+                          ? "Customer list: Needs mapping approval"
+                          : "Customer list: Queue assignment pending"}
                     </p>
                   </div>
                 );

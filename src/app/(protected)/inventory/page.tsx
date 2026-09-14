@@ -13,7 +13,7 @@ import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { projectCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { mergeOpenCustomerDemand } from "@/lib/demand/customer-list-demand";
-import { demandLineIdentity, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { customerQueueObligationQty, demandLineIdentity, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
@@ -66,6 +66,7 @@ type QueueLine = {
   id: string;
   product_id: string | null;
   approved_qty: number | null;
+  ordered_qty?: number | null;
   fulfilled_qty: number | null;
   approval_status: string | null;
   fulfillment_status: string | null;
@@ -216,7 +217,7 @@ const UNSORTED_GROUP_SORT = 9990;
 
 /** Open demand is who still needs the product, not everyone who ever ordered it. */
 function isOpenQueueLine(line: QueueLine) {
-  return isOpenDemandLine(line);
+  return isOpenCustomerQueueLine(line);
 }
 
 function isActiveIncomingContainer(status: string | null | undefined) {
@@ -350,8 +351,6 @@ export default async function InventoryPage({
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
   }
-  const manualMappingSkus = new Set(sharedCanonicalQueue.manualMappingSkus);
-
   const operationalSkuByProduct = new Map<string, string>();
   for (const alias of productAliasRows) {
     if (!alias.product_id || !alias.alias) continue;
@@ -435,11 +434,10 @@ export default async function InventoryPage({
 
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
-    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code))) continue;
     const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
     if (!sharedQueueRow) continue;
 
-    const operationalOpenQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const operationalOpenQty = Math.max(0, customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0));
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id ?? null;
     const invoiceOrderedQty = sourceInvoiceId && line.product_id
       ? invoiceQtyByInvoiceProduct.get(`${sourceInvoiceId}|${line.product_id}`) ?? null
@@ -449,7 +447,7 @@ export default async function InventoryPage({
       : 0;
     const invoiceFullyShipped = Boolean(sourceInvoiceId && qboInvoiceFullyShippedIds.has(sourceInvoiceId));
     const shippedQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
-    const approvedQty = invoiceOrderedQty ?? Math.max(0, Number(line.approved_qty ?? 0));
+    const approvedQty = invoiceOrderedQty ?? customerQueueObligationQty(line);
     const normalizedShippedQty = Math.min(approvedQty, shippedQty);
     const openQty = Math.max(0, approvedQty - normalizedShippedQty);
     const qty = approvedQty;
@@ -525,12 +523,11 @@ export default async function InventoryPage({
   const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();
   for (const line of dedupedQueueLineRows) {
     if (!line.product_id || !isOpenQueueLine(line)) continue;
-    if (manualMappingSkus.has(normalizeSkuKey(line.products?.sku)) || manualMappingSkus.has(normalizeSkuKey(line.legacy_item_code))) continue;
     const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
     if (!sharedQueueRow) continue;
     const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
     const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
-    const remainingQty = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const remainingQty = Math.max(0, customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0));
     const floorReservedQty = (line.inventory_allocations ?? [])
       .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")
       .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);

@@ -68,10 +68,10 @@ export function isPhysicalFulfillmentLine(
   line: PhysicalFulfillmentLine,
   options: { manualMappingSkus?: Set<string> } = {},
 ) {
-  const manualMappingSkus = options.manualMappingSkus ?? new Set<string>();
+  // Mapping-review rows are advisory. Once a line has a real product_id, a stale review record
+  // must never hide that line from fulfillment or from the Customer List.
+  void options;
   return Boolean(line.product_id)
-    && !manualMappingSkus.has(upper(line.products?.sku))
-    && !manualMappingSkus.has(upper(line.legacy_item_code))
     && !isNonInventoryPhysicalLine(line)
     && !EXCLUDED_PHYSICAL_STATES.has(upper(line.fulfillment_status));
 }

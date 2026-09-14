@@ -1,5 +1,5 @@
 import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueueRow } from "./canonical-customer-queue";
-import { demandLineIdentity, getCanonicalOpenDemandLines, isOpenDemandLine, netRecordedFulfilledQty, withProvenFulfilledQty } from "./product-demand";
+import { customerQueueObligationQty, demandLineIdentity, getCanonicalOpenDemandLines, isOpenCustomerQueueLine, netRecordedFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
@@ -152,25 +152,25 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
   const byOrderId = new Map<string, typeof bridged>();
   const byInvoiceId = new Map<string, typeof bridged>();
   for (const line of bridged) { if (line.shipping_orders?.id) byOrderId.set(line.shipping_orders.id, [...(byOrderId.get(line.shipping_orders.id) ?? []), line]); if (line.parent_source_invoice_id) byInvoiceId.set(line.parent_source_invoice_id, [...(byInvoiceId.get(line.parent_source_invoice_id) ?? []), line]); }
-  const canonicalLineIds = new Map<string, Set<string> | null>();
-  for (const [orderId, lines] of byOrderId) {
+  for (const lines of byOrderId.values()) {
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload: payloadByInvoiceId.get(lines[0]?.parent_source_invoice_id ?? ""), lines });
-    canonicalLineIds.set(orderId, new Set(summary.items.map((item) => item.line?.id).filter((id): id is string => Boolean(id))));
     if (summary.isComplete) for (const item of summary.items) if (item.line?.qbo_invoice_line_id) completedLineIds.add(item.line.qbo_invoice_line_id);
   }
   for (const [invoiceId, lines] of byInvoiceId) {
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload: payloadByInvoiceId.get(invoiceId), lines });
     if (summary.isComplete) completedInvoiceIds.add(invoiceId);
   }
-  const canonicalLines = getCanonicalOpenDemandLines(bridged.filter((line) => {
-    const ids = line.shipping_orders?.id ? canonicalLineIds.get(line.shipping_orders.id) : null;
-    return !ids || ids.has(line.id);
-  }), completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
+  // Never use a second matching pass to hide an accepted mapped line. Incorrect or duplicate
+  // obligations must be explicitly resolved; every remaining operational line belongs in queue.
+  const bridgedWithQueueObligation = bridged.map((line) => isOpenCustomerQueueLine(line)
+    ? { ...line, canonical_obligation_qty: customerQueueObligationQty(line) }
+    : line);
+  const canonicalLines = getCanonicalOpenDemandLines(bridgedWithQueueObligation, completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
   const queueRows: Array<ReturnType<typeof toCustomerQueueRow>> = [];
   const lineProductIdByLineId = new Map<string, string>();
   function toCustomerQueueRow(line: typeof canonicalLines[number]) {
     const parent = line.shipping_orders;
-    const approvedQty = Math.max(0, Number(line.approved_qty ?? 0));
+    const approvedQty = customerQueueObligationQty(line);
     const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
     const firstPaymentAt = parent?.first_payment_at ?? null;
     const invoiceDate = parent?.qbo_invoices?.invoice_date ?? null;
@@ -181,23 +181,16 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
       || line.queue_position_override_at
       || line.queue_position_override_by,
     );
-    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: manualMappingSkus.has(normalizeSku(line.products?.sku)) || manualMappingSkus.has(normalizeSku(line.legacy_item_code)) };
+    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: false };
   }
   for (const line of canonicalLines) {
-    if (!line.product_id || !isOpenDemandLine(line)) continue;
+    if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;
     queueRows.push(toCustomerQueueRow(line));
     lineProductIdByLineId.set(line.id, line.product_id);
   }
   const projected = projectCanonicalCustomerQueuesByProductKey(queueRows, (row) => (
     productQueueKeyById.get(lineProductIdByLineId.get(row.lineId) ?? "") || lineProductIdByLineId.get(row.lineId) || row.lineId
   ));
-  const queueByLineId = new Map(projected.map((row) => [row.lineId, row]));
-  const queueByLogicalDemandKey = new Map(projected.map((row) => [row.logicalDemandKey, row]));
-  const queueByProductId = new Map<string, ProjectedCustomerQueueRow[]>();
-  for (const row of projected) {
-    const productId = lineProductIdByLineId.get(row.lineId);
-    if (productId) queueByProductId.set(productId, [...(queueByProductId.get(productId) ?? []), row]);
-  }
   return {
     queue: projected,
     canonicalLines,

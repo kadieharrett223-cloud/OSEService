@@ -100,6 +100,14 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("keeps a mapped physical line eligible despite a stale mapping-review row", () => {
+    expect(isRemainingPhysicalFulfillmentLine(line({
+      product_id: "real-product",
+      legacy_item_code: "JVCJ-6",
+      products: { sku: "YZRCJ-7", canonical_name: "Rolling jack" },
+    }), { manualMappingSkus: new Set(["JVCJ-6", "YZRCJ-7"]) })).toBe(true);
+  });
+
   it("uses the linked QuickBooks line when the internal product SKU differs", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["YZRCJ-35HP", 1], ["4PCA", 1]]),

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { calculateQueuePositions, isActiveQueueLine } from "./product-queue";
 
 describe("stored product queue eligibility", () => {
-  it("excludes a mapped pending-review parent even when its line has approved quantity", () => {
+  it("includes an approved mapped line even when its parent still says pending review", () => {
     expect(isActiveQueueLine({
       id: "pending-review-line",
       product_id: "product-1",
@@ -15,7 +15,28 @@ describe("stored product queue eligibility", () => {
       queue_position_override: null,
       queue_position_start: 3,
       shipping_orders: { created_at: "2026-01-01T00:00:00Z", review_status: "PENDING_REVIEW" },
-    })).toBe(false);
+    })).toBe(true);
+  });
+
+  it("uses the real ordered quantity when approved quantity is stale", () => {
+    const positions = calculateQueuePositions([{
+      id: "ordered-line",
+      product_id: "product-1",
+      ordered_qty: 2,
+      approved_qty: 0,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      warehouse_status: "APPROVED",
+      priority: "NORMAL",
+      queue_position_override: null,
+      queue_position_start: null,
+      shipping_orders: { created_at: "2026-01-01T00:00:00Z", review_status: "APPROVED" },
+    }]);
+
+    expect(positions.map(({ line, start, units }) => [line.id, start, units])).toEqual([
+      ["ordered-line", 1, 2],
+    ]);
   });
 
   it("preserves non-overlapping manual positions when moving a multi-unit customer", () => {

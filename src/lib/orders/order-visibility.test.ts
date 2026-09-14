@@ -115,13 +115,13 @@ describe("orders visibility and activation", () => {
     expect(partial.isPartiallyShippedOrder).toBe(true);
   });
 
-  it("excludes lines whose SKU is awaiting manual mapping from operational demand", () => {    const result = classifyOrder(
+  it("keeps an already mapped line operational despite a stale mapping-review row", () => {    const result = classifyOrder(
       order({ review_status: "PENDING_REVIEW", shipping_order_lines: [line({ products: { sku: "JVCJ-6" } })] }),
       { manualMappingSkus: new Set(["JVCJ-6"]) },
     );
 
-    expect(result.operationalLines).toHaveLength(0);
-    expect(result.isVisibleOperationalOrder).toBe(false);
+    expect(result.operationalLines).toHaveLength(1);
+    expect(result.isVisibleOperationalOrder).toBe(true);
   });
 
   it("classifies a part-shipped order as Partially Shipped and never New", () => {

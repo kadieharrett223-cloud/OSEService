@@ -16,6 +16,7 @@ export type DemandLineLike = {
   id: string;
   product_id?: string | null;
   approved_qty?: number | null;
+  ordered_qty?: number | null;
   canonical_obligation_qty?: number | null;
   fulfilled_qty?: number | null;
   approval_status?: string | null;
@@ -35,6 +36,28 @@ export type DemandLineLike = {
 export function openQtyOf(line: DemandLineLike) {
   const obligationQty = line.canonical_obligation_qty ?? line.approved_qty ?? 0;
   return Math.max(0, Number(obligationQty) - Number(line.fulfilled_qty ?? 0));
+}
+
+/**
+ * The one eligibility rule for the Customer List. A real mapped line that has been accepted as
+ * operational demand remains in the list until its full ordered obligation is shipped or closed.
+ */
+export function customerQueueObligationQty(line: DemandLineLike) {
+  return Math.max(
+    0,
+    Number(line.canonical_obligation_qty ?? 0),
+    Number(line.approved_qty ?? 0),
+    Number(line.ordered_qty ?? 0),
+  );
+}
+
+export function isOpenCustomerQueueLine(line: DemandLineLike) {
+  const approvalStatus = String(line.approval_status ?? "").toUpperCase();
+  if (!line.product_id || !["APPROVED", "PARTIAL"].includes(approvalStatus)) return false;
+  return isOpenDemandLine({
+    ...line,
+    canonical_obligation_qty: customerQueueObligationQty(line),
+  });
 }
 
 /** Uses recorded fulfillment evidence without mutating the historical queue line. */

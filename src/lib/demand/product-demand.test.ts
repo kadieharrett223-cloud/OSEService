@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { getWarehouseDemandDisplay } from "./display-status";
-import { dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenDemandLine, netRecordedFulfilledQty, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
+import { customerQueueObligationQty, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenCustomerQueueLine, isOpenDemandLine, netRecordedFulfilledQty, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
+  it("assigns every approved mapped open line using its largest real obligation quantity", () => {
+    const line = { id: "open-mapped", product_id: "product-1", ordered_qty: 4, approved_qty: 0, fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "PENDING" };
+    expect(customerQueueObligationQty(line)).toBe(4);
+    expect(isOpenCustomerQueueLine(line)).toBe(true);
+    expect(isOpenCustomerQueueLine({ ...line, product_id: null })).toBe(false);
+    expect(isOpenCustomerQueueLine({ ...line, approval_status: "PENDING_REVIEW" })).toBe(false);
+  });
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
     const lines = [
       { id: "old", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },

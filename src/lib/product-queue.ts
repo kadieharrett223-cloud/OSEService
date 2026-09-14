@@ -1,10 +1,11 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { isOpenDemandLine } from "@/lib/demand/product-demand";
+import { customerQueueObligationQty, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
 
 type QueueLine = {
   id: string;
   product_id: string | null;
   approved_qty: number | null;
+  ordered_qty?: number | null;
   fulfilled_qty: number | null;
   queue_position_start: number | null;
   queue_position_count?: number | null;
@@ -16,7 +17,7 @@ type QueueLine = {
   queue_position_override_reason?: string | null;
   queue_position_override_at?: string | null;
   queue_position_override_by?: string | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null } | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null } | null;
 };
 
 /** Legacy imports populated sequential positions without recording a real admin move. */
@@ -53,16 +54,13 @@ function compareQueueLines(left: QueueLine, right: QueueLine) {
 }
 
 export function isActiveQueueLine(line: QueueLine) {
-  return Boolean(
-    line.product_id
-      && String(line.shipping_orders?.review_status ?? "").toUpperCase() !== "PENDING_REVIEW"
-      && isOpenDemandLine({
-        ...line,
-        parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
-        parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
-        parent_review_status: line.shipping_orders?.review_status ?? null,
-      }),
-  );
+  return isOpenCustomerQueueLine({
+    ...line,
+    parent_duplicate_of_order_id: line.shipping_orders?.duplicate_of_order_id ?? null,
+    parent_cancellation_status: line.shipping_orders?.cancellation_status ?? null,
+    parent_review_status: line.shipping_orders?.review_status ?? null,
+    parent_qbo_voided: String(line.shipping_orders?.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() === "VOIDED",
+  });
 }
 
 export function calculateQueuePositions(lines: QueueLine[]) {
@@ -73,7 +71,7 @@ export function calculateQueuePositions(lines: QueueLine[]) {
   const positioned: Array<{ line: QueueLine; start: number; units: number }> = [];
   let position = 1;
   const place = (line: QueueLine, start: number) => {
-    const units = Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0));
+    const units = Math.max(0, customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0));
     if (units <= 0) return;
     positioned.push({ line, start, units });
     position = start + units;
@@ -83,7 +81,7 @@ export function calculateQueuePositions(lines: QueueLine[]) {
     const target = Number(manual.queue_position_override);
     while (automatic.length > 0) {
       const candidate = automatic[0]!;
-      const units = Math.max(0, Number(candidate.approved_qty ?? 0) - Number(candidate.fulfilled_qty ?? 0));
+      const units = Math.max(0, customerQueueObligationQty(candidate) - Number(candidate.fulfilled_qty ?? 0));
       if (position + units - 1 >= target) break;
       place(automatic.shift()!, position);
     }
@@ -112,7 +110,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status, qbo_invoices(invoice_date))`)
+      .select(`id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status, qbo_invoices(invoice_date,raw_payload))`)
       .in("product_id", uniqueProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);

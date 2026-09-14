@@ -752,19 +752,21 @@ function ManualOrderCancellation({
   if (isCancelled) {
     return <p className="mt-6 text-xs text-[#64748b]">This order is cancelled{cancellationReason ? ` · ${cancellationReason}` : ""}.</p>;
   }
-  if (!adminUnlocked) return null;
-
   return (
     <details className="mt-6 w-full border-t border-[#e5e7eb] pt-3 text-xs text-[#64748b]">
       <summary className="w-fit cursor-pointer text-[#94a3b8] underline decoration-dotted underline-offset-4 hover:text-[#b91c1c]">Cancel this order</summary>
-      <form action={cancelOrderManuallyAction} className="mt-3 max-w-xl rounded-lg border border-[#fecaca] bg-[#fff7f7] p-3">
+      {!adminUnlocked ? (
+        <div className="mt-3 max-w-xl rounded-lg border border-[#e5e7eb] bg-[#f8fafc] p-3">
+          Admin mode is required. <Link href="/settings" className="font-semibold text-[#334155] underline">Enable it in Settings</Link>.
+        </div>
+      ) : <form action={cancelOrderManuallyAction} className="mt-3 max-w-xl rounded-lg border border-[#fecaca] bg-[#fff7f7] p-3">
         <input type="hidden" name="orderId" value={orderId} />
         <p className="font-semibold text-[#991b1b]">Manual order cancellation</p>
         <p className="mt-1 text-[#7f1d1d]">Open allocations and customer-list demand will be removed. Existing shipment history and shipped quantities will be preserved.</p>
         <label className="mt-3 block font-semibold text-[#7f1d1d]">Reason<input name="reason" className="input mt-1 bg-white" placeholder="Required cancellation reason" minLength={3} required /></label>
         <label className="mt-3 flex items-start gap-2 text-[#7f1d1d]"><input type="checkbox" name="confirmation" value="CONFIRM_CANCEL_ORDER" className="mt-0.5" required /><span>I confirm this order should be moved to Cancelled and removed from active customer lists.</span></label>
         <button type="submit" className="mt-3 rounded-md border border-[#dc2626] px-3 py-1.5 font-semibold text-[#b91c1c] hover:bg-[#fee2e2]">Confirm cancellation</button>
-      </form>
+      </form>}
     </details>
   );
 }

@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { customerQueueObligationQty, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
+import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 
 type QueueLine = {
@@ -155,81 +156,32 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
     if ((page ?? []).length < 1000) break;
   }
 
-  const activeLines = (data ?? [])
-    .map((row) => row as unknown as QueueLine)
-    .filter((line) => !line.shipping_orders?.duplicate_of_order_id && Boolean(line.product_id) && isActiveQueueLine(line));
-
-  // A refreshed QBO row and its legacy bridge are one obligation. The live QBO line wins when
-  // it is approved; both rows receive the same persisted position so no later queue rebuild can
-  // count one customer twice or disagree with the Inventory Customer List.
-  const qboLinesByInvoiceProduct = new Map<string, QueueLine[]>();
-  for (const line of activeLines) {
-    if (!line.qbo_invoice_line_id || !line.product_id) continue;
-    const key = `${line.shipping_orders?.source_invoice_id ?? ""}|${line.product_id}`;
-    qboLinesByInvoiceProduct.set(key, [...(qboLinesByInvoiceProduct.get(key) ?? []), line]);
-  }
-  const logicalKeyForLine = (line: QueueLine) => {
-    if (line.qbo_invoice_line_id) return `QBO:${line.qbo_invoice_line_id}`;
-    const matchKey = `${line.shipping_orders?.source_invoice_id ?? ""}|${line.product_id ?? ""}`;
-    const matches = qboLinesByInvoiceProduct.get(matchKey) ?? [];
-    return matches.length === 1 ? `QBO:${matches[0]!.qbo_invoice_line_id}` : `LINE:${line.id}`;
-  };
-  const linesByCanonicalProduct = new Map<string, Map<string, QueueLine[]>>();
-  for (const line of activeLines) {
-    if (!line.product_id) continue;
-    const productKey = productKeyById.get(line.product_id) ?? line.product_id;
-    const byLogicalKey = linesByCanonicalProduct.get(productKey) ?? new Map<string, QueueLine[]>();
-    const logicalKey = logicalKeyForLine(line);
-    byLogicalKey.set(logicalKey, [...(byLogicalKey.get(logicalKey) ?? []), line]);
-    linesByCanonicalProduct.set(productKey, byLogicalKey);
-  }
-
+  // Persist exactly the queue the Inventory page and order sidebar render. This preserves one
+  // customer obligation across QBO refresh copies, legacy bridges, and merged product aliases.
+  const canonicalQueue = await loadCanonicalCustomerQueue();
   let linesUpdated = 0;
-  for (const productKey of targetProductKeys) {
-    const logicalGroups = linesByCanonicalProduct.get(productKey) ?? new Map<string, QueueLine[]>();
-    const membersByRepresentativeId = new Map<string, QueueLine[]>();
-    const representatives = [...logicalGroups.values()].map((members) => {
-      const representative = [...members].sort((left, right) => {
-        const leftManual = hasAuditedManualPosition(left);
-        const rightManual = hasAuditedManualPosition(right);
-        if (leftManual !== rightManual) return leftManual ? -1 : 1;
-        const leftLiveQbo = Boolean(left.qbo_invoice_line_id);
-        const rightLiveQbo = Boolean(right.qbo_invoice_line_id);
-        if (leftLiveQbo !== rightLiveQbo) return leftLiveQbo ? -1 : 1;
-        return compareQueueLines(left, right);
-      })[0]!;
-      membersByRepresentativeId.set(representative.id, members);
-      return representative;
-    });
-    const positioned = calculateQueuePositions(representatives);
-
-    const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
-    for (const { line, start, units } of positioned) {
-      for (const member of membersByRepresentativeId.get(line.id) ?? [line]) {
-        if (Number(member.queue_position_start ?? 0) !== start || Number(member.queue_position_count ?? 0) !== units) {
-          updates.push(supabase
-            .from("shipping_order_lines")
-            .update({ queue_position_start: start, queue_position_count: units })
-            .eq("id", member.id));
-          linesUpdated += 1;
-        }
-      }
-    }
-
-    const results = await Promise.all(updates);
-    const updateError = results.find((result) => result.error)?.error;
-    if (updateError) throw new Error(updateError.message);
-
-    const inactiveLines = (data ?? [])
-      .map((row) => row as unknown as QueueLine)
-      .filter((line) => (productKeyById.get(line.product_id ?? "") ?? line.product_id) === productKey && !isActiveQueueLine(line) && line.queue_position_start != null);
-    const inactiveResults = await Promise.all(inactiveLines.map((line) => supabase
+  const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
+  for (const rawLine of data ?? []) {
+    const line = rawLine as unknown as QueueLine;
+    const productKey = productKeyById.get(line.product_id ?? "") ?? line.product_id;
+    if (!productKey || !targetProductKeys.has(productKey)) continue;
+    const projected = canonicalQueue.queueByLineId.get(line.id);
+    const start = Number.parseInt(projected?.position.split("-")[0] ?? "", 10);
+    const end = Number.parseInt(projected?.position.split("-").at(-1) ?? "", 10);
+    const count = Number.isFinite(start) && Number.isFinite(end) ? Math.max(1, end - start + 1) : null;
+    const nextStart = Number.isFinite(start) ? start : null;
+    if (Number(line.queue_position_start ?? 0) === Number(nextStart ?? 0)
+      && Number(line.queue_position_count ?? 0) === Number(count ?? 0)) continue;
+    updates.push(supabase
       .from("shipping_order_lines")
-      .update({ queue_position_start: null, queue_position_count: null })
-      .eq("id", line.id)));
-    const inactiveError = inactiveResults.find((result) => result.error)?.error;
-    if (inactiveError) throw new Error(inactiveError.message);
+      .update({ queue_position_start: nextStart, queue_position_count: count })
+      .eq("id", line.id));
+    linesUpdated += 1;
   }
+
+  const results = await Promise.all(updates);
+  const updateError = results.find((result) => result.error)?.error;
+  if (updateError) throw new Error(updateError.message);
 
   return { productsUpdated: canonicalProductIds.length, linesUpdated };
 }

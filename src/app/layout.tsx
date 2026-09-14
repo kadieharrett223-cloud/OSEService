@@ -14,8 +14,12 @@ const bodyFont = Source_Sans_3({
 });
 
 export const metadata: Metadata = {
-  title: APP_NAME,
-  description: "Internal customer service case tracking for Olympic Equipment.",
+  title: {
+    default: APP_NAME,
+    template: `%s | ${APP_NAME}`,
+  },
+  applicationName: APP_NAME,
+  description: "Internal operations command center for Olympic Equipment.",
 };
 
 export default function RootLayout({

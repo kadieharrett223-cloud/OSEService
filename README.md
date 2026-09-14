@@ -1,4 +1,4 @@
-# Olympic Equipment Customer Service Tracking App
+# Olympic Command Center (OCC)
 
 Simple internal web app for customer service case tracking.
 

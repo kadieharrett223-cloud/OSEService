@@ -20,5 +20,6 @@ export type CaseStatus = (typeof CASE_STATUSES)[number];
 export type CasePriority = (typeof PRIORITIES)[number];
 export type CaseType = (typeof CASE_TYPES)[number];
 
-export const APP_NAME = "Olympic Equipment Service";
-export const APP_SHORT_NAME = "OES Service Tracker";
+export const APP_NAME = "Olympic Command Center";
+export const APP_SHORT_NAME = "Olympic Command Center";
+export const APP_ACRONYM = "OCC";

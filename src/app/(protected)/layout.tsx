@@ -1,5 +1,5 @@
 import { requireUser } from "@/lib/auth";
-import { APP_SHORT_NAME } from "@/lib/constants";
+import { APP_ACRONYM, APP_SHORT_NAME } from "@/lib/constants";
 import { signOutAction } from "@/app/(protected)/actions";
 import { SidebarNav } from "@/app/(protected)/sidebar-nav";
 import { TopbarTools } from "@/app/(protected)/topbar-tools";
@@ -49,7 +49,10 @@ async function ProtectedSidebar() {
     <aside className="border-r border-[#232833] bg-gradient-to-b from-[#10141b] to-[#141c27] px-3 py-4 text-white">
       <div className="mb-4 px-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#9aa7bc]">Olympic Equipment</p>
-        <p className="mt-1 text-xl leading-none text-white">{APP_SHORT_NAME}</p>
+        <div className="mt-1 flex items-start justify-between gap-3">
+          <p className="text-xl leading-tight text-white">{APP_SHORT_NAME}</p>
+          <span className="mt-0.5 rounded border border-[#718096] px-2 py-0.5 text-[10px] font-semibold tracking-[0.08em] text-[#dbe4f0]">{APP_ACRONYM}</span>
+        </div>
       </div>
       <p className="px-2 pb-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#9aa7bc]">Workflow Menu</p>
       <SidebarNav role={userRole} />

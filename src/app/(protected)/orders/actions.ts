@@ -70,6 +70,24 @@ function getPositiveNumber(formData: FormData, key: string) {
   return raw;
 }
 
+async function assertOrderIsOperational(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+) {
+  const { data, error } = await supabase
+    .from("shipping_orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  if (!data) redirect("/orders?error=Order+not+found");
+  const order = data as unknown as { cancellation_status?: string | null };
+  if (String(order.cancellation_status ?? "").trim().toUpperCase() === "CANCELLED") {
+    redirect(`/orders/${orderId}?error=Cancelled+orders+are+closed+and+cannot+be+changed+or+fulfilled`);
+  }
+}
+
 async function safeAccessUserId(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   userId: string | null | undefined,
@@ -137,11 +155,33 @@ async function resolveCanonicalSiblingOrderId(
   return canonical.id;
 }
 
+async function getLogicalOrderIds(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+) {
+  const { data: order, error } = await supabase
+    .from("shipping_orders")
+    .select("id,source_invoice_id")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!order) return [];
+  if (!order.source_invoice_id) return [order.id];
+
+  const { data: siblings, error: siblingError } = await supabase
+    .from("shipping_orders")
+    .select("id")
+    .eq("source_invoice_id", order.source_invoice_id);
+  if (siblingError) throw new Error(siblingError.message);
+  return Array.from(new Set((siblings ?? []).map((sibling) => sibling.id).concat(order.id)));
+}
+
 export async function completeServiceOnlyOrderAction(formData: FormData) {
   await requireUser();
   const orderId = getString(formData, "orderId");
   const adminClient = getSupabaseAdmin();
   if (!orderId) redirect("/orders?error=Missing+order+reference");
+  await assertOrderIsOperational(adminClient, orderId);
   const { data: order } = await adminClient.from("shipping_orders").select("id,source_invoice_id").eq("id", orderId).maybeSingle();
   if (!order?.source_invoice_id) redirect(`/orders/${orderId}?error=Order+not+found`);
   const [{ data: operationalLines }, { data: invoiceLines }] = await Promise.all([
@@ -175,7 +215,8 @@ export async function cancelVoidedOrderAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
   if (!orderId || confirmation !== "CONFIRM_CANCEL_VOIDED") redirect(`/exceptions?error=Cancellation+confirmation+required`);
   if (!(await isVoidedQuickBooksOrder(adminClient, orderId))) redirect(`/exceptions?error=Only+voided+QuickBooks+orders+can+be+cancelled+from+ERP+Health`);
-  const { data: affectedLines } = await adminClient.from("shipping_order_lines").select("product_id").eq("shipping_order_id", orderId).not("product_id", "is", null);
+  const logicalOrderIds = await getLogicalOrderIds(adminClient, orderId);
+  const { data: affectedLines } = await adminClient.from("shipping_order_lines").select("product_id").in("shipping_order_id", logicalOrderIds).not("product_id", "is", null);
   const { error } = await adminClient.rpc("cancel_voided_order", { p_order_id: orderId, p_reason: "Voided in QuickBooks" } as never);
   if (error) redirect(`/exceptions?error=${encodeURIComponent(error.message)}`);
   await recalculateProductQueues((affectedLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
@@ -208,17 +249,24 @@ export async function cancelOrderManuallyAction(formData: FormData) {
     .select("*")
     .eq("id", orderId)
     .maybeSingle();
-  const order = orderData as { id: string; cancellation_status?: string | null } | null;
+  const order = orderData as { id: string; source_invoice_id?: string | null; cancellation_status?: string | null } | null;
   if (orderError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderError.message)}`);
   if (!order) redirect("/orders?error=Order+not+found");
-  if (String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED") {
+  const logicalOrderIds = await getLogicalOrderIds(adminClient, orderId);
+  const { data: logicalParents, error: logicalParentsError } = await adminClient
+    .from("shipping_orders")
+    .select("*")
+    .in("id", logicalOrderIds);
+  if (logicalParentsError) redirect(`/orders/${orderId}?error=${encodeURIComponent(logicalParentsError.message)}`);
+  const typedLogicalParents = (logicalParents ?? []) as unknown as Array<{ id: string; cancellation_status?: string | null }>;
+  if (typedLogicalParents.length > 0 && typedLogicalParents.every((parent) => String(parent.cancellation_status ?? "").toUpperCase() === "CANCELLED")) {
     redirect(`/orders/${orderId}?message=Order+is+already+cancelled`);
   }
 
   const { data: affectedLines } = await adminClient
     .from("shipping_order_lines")
     .select("product_id")
-    .eq("shipping_order_id", orderId)
+    .in("shipping_order_id", logicalOrderIds)
     .not("product_id", "is", null);
   const { error } = await adminClient.rpc("cancel_voided_order", {
     p_order_id: orderId,
@@ -227,19 +275,25 @@ export async function cancelOrderManuallyAction(formData: FormData) {
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
 
   const [{ data: verifiedOrderData }, { data: verifiedLineData, error: verificationQueryError }] = await Promise.all([
-    adminClient.from("shipping_orders").select("*").eq("id", orderId).maybeSingle(),
+    adminClient.from("shipping_orders").select("*").in("id", logicalOrderIds),
     adminClient
       .from("shipping_order_lines")
-      .select("id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,inventory_allocations(allocation_status)")
-      .eq("shipping_order_id", orderId),
+      .select("id,shipping_order_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,inventory_allocations(allocation_status)")
+      .in("shipping_order_id", logicalOrderIds),
   ]);
-  const verifiedOrder = verifiedOrderData as { cancellation_status?: string | null } | null;
+  const verifiedOrders = (verifiedOrderData ?? []) as unknown as Array<{ id: string; cancellation_status?: string | null; review_status?: string | null }>;
   const verificationErrors = verificationQueryError
     ? [`verification_query_failed:${verificationQueryError.message}`]
-    : getOrderCancellationPostconditionErrors(
-        verifiedOrder?.cancellation_status,
-        (verifiedLineData ?? []) as unknown as CancellationLineState[],
-      );
+    : [
+        ...verifiedOrders.flatMap((verifiedOrder) => [
+          ...getOrderCancellationPostconditionErrors(
+            verifiedOrder.cancellation_status,
+            (verifiedLineData ?? []).filter((line) => (line as { shipping_order_id?: string }).shipping_order_id === verifiedOrder.id) as unknown as CancellationLineState[],
+          ),
+          ...(String(verifiedOrder.review_status ?? "").toUpperCase() === "CANCELLED" ? [] : [`parent_review_not_cancelled:${verifiedOrder.id}`]),
+        ]),
+        ...(verifiedOrders.length === logicalOrderIds.length ? [] : ["logical_parent_verification_incomplete"]),
+      ];
   if (verificationErrors.length > 0) {
     await writeOrderActivity(adminClient, orderId, "ORDER_CANCELLATION_VERIFICATION_FAILED", {
       message: verificationErrors.join(", "),
@@ -400,6 +454,7 @@ export async function updateOrderLineStatusAction(formData: FormData) {
   if (!lineId || !orderId || !action) {
     redirect(`/orders/${orderId ?? ""}`);
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   const payload: {
     approval_status?: "APPROVED" | "HOLD";
@@ -452,6 +507,7 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
   const orderId = getString(formData, "orderId");
   const adminClient = getSupabaseAdmin();
   if (!orderId) redirect("/orders?error=Missing+order+reference");
+  await assertOrderIsOperational(adminClient, orderId);
 
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
@@ -503,6 +559,7 @@ export async function moveOrderLineBackToOrdersAction(formData: FormData) {
   const lineId = getString(formData, "lineId");
   const adminClient = getSupabaseAdmin();
   if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+order+line+reference`);
+  await assertOrderIsOperational(adminClient, orderId);
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
@@ -544,6 +601,7 @@ export async function moveOrderBackToOrdersAction(formData: FormData) {
   const orderId = getString(formData, "orderId");
   const adminClient = getSupabaseAdmin();
   if (!orderId) redirect("/orders?error=Missing+order+reference");
+  await assertOrderIsOperational(adminClient, orderId);
 
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
@@ -583,6 +641,7 @@ async function activateExistingQuickbooksOrder(
   orderId: string,
   invoice: { id: string; qbo_invoice_id: string | null; invoice_number: string | null },
 ) {
+  await assertOrderIsOperational(adminClient, orderId);
   const { data: invoiceLines } = await adminClient
     .from("qbo_invoice_lines")
     .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku, source_description")
@@ -797,6 +856,7 @@ export async function updateOrderScheduleAction(formData: FormData) {
   if (!orderId) {
     redirect("/orders?error=Missing+order+reference");
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   const payload: {
     promised_ship_date?: string | null;
@@ -845,6 +905,7 @@ export async function updateOrderFulfillmentMethodAction(formData: FormData) {
   const method = getString(formData, "fulfillment_method");
   if (!orderId || !["SHIP", "WILL_CALL"].includes(method ?? "")) redirect(`/orders/${orderId ?? ""}?error=Invalid+fulfillment+method`);
   const adminClient = getSupabaseAdmin();
+  await assertOrderIsOperational(adminClient, orderId);
   const { error } = await adminClient.from("shipping_orders").update({ fulfillment_method: method } as never).eq("id", orderId);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_FULFILLMENT_METHOD_UPDATED", { fulfillment_method: method });
@@ -861,6 +922,7 @@ export async function updateOrderOperationsAction(formData: FormData) {
   if (!orderId || !["ORDERS", "IN_WAREHOUSE"].includes(warehouseState ?? "") || !["SHIP", "WILL_CALL"].includes(fulfillmentMethod ?? "")) {
     redirect(`/orders/${orderId ?? ""}?error=Invalid+order+operations+selection`);
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
@@ -942,6 +1004,7 @@ export async function remapOrderLineProductAction(formData: FormData) {
   if (!orderId || !lineId || !productId) {
     redirect(`/orders/${orderId ?? ""}?error=Select+a+product+to+map`);
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
@@ -1017,6 +1080,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   if (!orderId || !lineId) {
     redirect(`/orders/${orderId ?? ""}`);
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   const normalizedSource = normalizeFulfillmentSource(source);
   const isContainerAssignment = source === "CONTAINER";
@@ -1131,6 +1195,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   const actorId = await safeAccessUserId(adminClient, user.id);
 
   if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
+  await assertOrderIsOperational(adminClient, orderId);
   if (!fulfilledDate) redirect(`/orders/${orderId}?error=Completion+date+is+required`);
   if (quantity <= 0) redirect(`/orders/${orderId}?error=Fulfillment+quantity+must+be+greater+than+zero`);
 
@@ -1244,6 +1309,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
   if (!orderId || !lineId) {
     redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
   }
+  await assertOrderIsOperational(adminClient, orderId);
 
   if (!trackingNumber) {
     redirect(`/orders/${orderId}?error=Tracking+number+is+required+to+mark+as+shipped`);
@@ -1369,6 +1435,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   }
   const actorId = await safeAccessUserId(adminClient, user.id);
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
+  await assertOrderIsOperational(adminClient, orderId);
 
   const documentColumns = await loadTableColumnSet(adminClient, "order_attachments", ["document_type", "is_restricted"]);
   if (!documentColumns.has("document_type") || !documentColumns.has("is_restricted")) redirect(`/orders/${orderId}?error=Pickup+document+schema+is+not+available+yet`);
@@ -1424,6 +1491,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   }
 
   if (!orderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
+  await assertOrderIsOperational(adminClient, orderId);
   if (selectedIds.length === 0) {
     const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
     if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
@@ -1523,6 +1591,7 @@ export async function completeOrderShipmentAction(formData: FormData) {
     }
   }
   if (!orderId || !shipmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
+  await assertOrderIsOperational(adminClient, orderId);
   if (selectedIds.length === 0) {
     const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
     if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
@@ -1577,8 +1646,12 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
   if (selectedIds.length === 0) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+remaining+line`);
   if (!orderId) redirect(`/orders/?error=Select+fulfillment+items+and+a+date`);
+  await assertOrderIsOperational(adminClient, orderId);
   const ownerOrderIdByLineId = new Map(selectedIds.map((lineId) => [lineId, getString(formData, `owner_order_id_${lineId}`) ?? orderId]));
   const fulfillmentOrderIds = Array.from(new Set(ownerOrderIdByLineId.values()));
+  for (const fulfillmentOrderId of fulfillmentOrderIds) {
+    await assertOrderIsOperational(adminClient, fulfillmentOrderId);
+  }
   {
     const { data: parentRows, error: parentError } = await adminClient
       .from("shipping_orders")
@@ -1674,6 +1747,7 @@ export async function editOrderShipmentAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || !shipmentId || !shipmentDate) redirect(`/orders/${orderId ?? ""}?error=Shipment+and+ship+date+are+required`);
+  await assertOrderIsOperational(adminClient, orderId);
 
   const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
@@ -1748,6 +1822,7 @@ export async function addOrderShipmentLineAction(formData: FormData) {
   const adminClient = getSupabaseAdmin();
 
   if (!orderId || !shipmentId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Select+an+item+to+add`);
+  await assertOrderIsOperational(adminClient, orderId);
   if (quantity <= 0) redirect(`/orders/${orderId}?error=Quantity+must+be+greater+than+zero`);
 
   const { data: shipmentRow } = await adminClient

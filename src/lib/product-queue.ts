@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { customerQueueObligationQty, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
+import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 
 type QueueLine = {
   id: string;
@@ -100,6 +101,30 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   if (uniqueProductIds.length === 0) return { productsUpdated: 0, linesUpdated: 0 };
 
   const supabase = getSupabaseAdmin();
+  // A product can have an old numeric SKU alongside its current operational SKU. Inventory
+  // displays those aliases as one customer list, so persisted positions must be calculated
+  // across that same canonical product identity—not independently per historical record.
+  const [{ data: products, error: productsError }, { data: aliases, error: aliasesError }] = await Promise.all([
+    supabase.from("products").select("id,sku"),
+    supabase.from("product_aliases").select("product_id,alias"),
+  ]);
+  if (productsError) throw new Error(productsError.message);
+  if (aliasesError) throw new Error(aliasesError.message);
+
+  const aliasesByProductId = new Map<string, string[]>();
+  for (const alias of aliases ?? []) {
+    if (!alias.product_id || !alias.alias) continue;
+    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
+  }
+  const productKeyById = new Map((products ?? []).map((product) => [
+    product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
+  ]));
+  const targetProductKeys = new Set(uniqueProductIds.map((productId) => productKeyById.get(productId) ?? productId));
+  const canonicalProductIds = (products ?? [])
+    .filter((product) => targetProductKeys.has(productKeyById.get(product.id) ?? product.id))
+    .map((product) => product.id);
+
   const { error: firstPaymentColumnError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
   const shippingOrderPaymentField = firstPaymentColumnError ? "" : ", first_payment_at";
   const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
@@ -111,7 +136,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
       .select(`id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status, qbo_invoices(invoice_date,raw_payload))`)
-      .in("product_id", uniqueProductIds)
+      .in("product_id", canonicalProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);
 
@@ -120,19 +145,20 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
     if ((page ?? []).length < 1000) break;
   }
 
-  const linesByProduct = new Map<string, QueueLine[]>();
+  const linesByCanonicalProduct = new Map<string, QueueLine[]>();
   for (const rawLine of data ?? []) {
     const line = rawLine as unknown as QueueLine;
     if (line.shipping_orders?.duplicate_of_order_id) continue;
     if (!line.product_id || !isActiveQueueLine(line)) continue;
-    const rows = linesByProduct.get(line.product_id) ?? [];
+    const productKey = productKeyById.get(line.product_id) ?? line.product_id;
+    const rows = linesByCanonicalProduct.get(productKey) ?? [];
     rows.push(line);
-    linesByProduct.set(line.product_id, rows);
+    linesByCanonicalProduct.set(productKey, rows);
   }
 
   let linesUpdated = 0;
-  for (const productId of uniqueProductIds) {
-    const lines = linesByProduct.get(productId) ?? [];
+  for (const productKey of targetProductKeys) {
+    const lines = linesByCanonicalProduct.get(productKey) ?? [];
     const positioned = calculateQueuePositions(lines);
 
     const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
@@ -152,7 +178,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
 
     const inactiveLines = (data ?? [])
       .map((row) => row as unknown as QueueLine)
-      .filter((line) => line.product_id === productId && !isActiveQueueLine(line) && line.queue_position_start != null);
+      .filter((line) => (productKeyById.get(line.product_id ?? "") ?? line.product_id) === productKey && !isActiveQueueLine(line) && line.queue_position_start != null);
     const inactiveResults = await Promise.all(inactiveLines.map((line) => supabase
       .from("shipping_order_lines")
       .update({ queue_position_start: null, queue_position_count: null })
@@ -161,7 +187,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
     if (inactiveError) throw new Error(inactiveError.message);
   }
 
-  return { productsUpdated: uniqueProductIds.length, linesUpdated };
+  return { productsUpdated: canonicalProductIds.length, linesUpdated };
 }
 
 /** Queue renumbering is positions-only so product or mapping changes cannot alter warehouse state. */

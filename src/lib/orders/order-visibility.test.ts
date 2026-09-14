@@ -242,6 +242,21 @@ describe("orders visibility and activation", () => {
     expect(matchesOrderTab(result, "orders")).toBe(false);
   });
 
+  it("places an explicitly cancelled order only in Cancelled even with mixed open and shipped lines", () => {
+    const result = classifyOrder(order({
+      cancellation_status: "CANCELLED",
+      shipping_order_lines: [
+        line({ ordered_qty: 1, fulfilled_qty: 0, fulfillment_status: "CANCELLED" }),
+        line({ ordered_qty: 1, fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    }));
+
+    expect(result.isCancelled).toBe(true);
+    expect(result.operationalLines).toEqual([]);
+    expect(["orders", "new", "warehouse", "partial", "archived"].some((tab) => matchesOrderTab(result, tab))).toBe(false);
+    expect(matchesOrderTab(result, "cancelled")).toBe(true);
+  });
+
   it("keeps historical duplicate rows hidden even if their shared QBO invoice is voided", () => {
     const result = classifyOrder(order({
       duplicate_of_order_id: "canonical-order",

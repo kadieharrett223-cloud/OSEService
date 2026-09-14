@@ -13,6 +13,7 @@ import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
+import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
 
 function revalidateOrdersList() {
   revalidateOrdersProjection();
@@ -224,6 +225,30 @@ export async function cancelOrderManuallyAction(formData: FormData) {
     p_reason: `Manual cancellation: ${reason}`,
   } as never);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+  const [{ data: verifiedOrderData }, { data: verifiedLineData, error: verificationQueryError }] = await Promise.all([
+    adminClient.from("shipping_orders").select("*").eq("id", orderId).maybeSingle(),
+    adminClient
+      .from("shipping_order_lines")
+      .select("id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,inventory_allocations(allocation_status)")
+      .eq("shipping_order_id", orderId),
+  ]);
+  const verifiedOrder = verifiedOrderData as { cancellation_status?: string | null } | null;
+  const verificationErrors = verificationQueryError
+    ? [`verification_query_failed:${verificationQueryError.message}`]
+    : getOrderCancellationPostconditionErrors(
+        verifiedOrder?.cancellation_status,
+        (verifiedLineData ?? []) as unknown as CancellationLineState[],
+      );
+  if (verificationErrors.length > 0) {
+    await writeOrderActivity(adminClient, orderId, "ORDER_CANCELLATION_VERIFICATION_FAILED", {
+      message: verificationErrors.join(", "),
+    });
+    revalidateOrdersList();
+    revalidatePath("/inventory");
+    revalidatePath(`/orders/${orderId}`);
+    redirect(`/orders/${orderId}?error=Order+was+cancelled+but+its+queue+cleanup+requires+review`);
+  }
 
   await writeOrderActivity(adminClient, orderId, "ORDER_CANCELLED_MANUAL", {
     reason,

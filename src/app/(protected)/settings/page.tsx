@@ -22,7 +22,7 @@ type QboBacklogReview = {
   qbo_sku: string | null;
   source_description: string | null;
   quantity: number;
-  first_payment_at: string;
+  first_payment_at: string | null;
 };
 
 type QboForwardIntakeState = { is_enabled: boolean; activated_at: string | null };
@@ -239,7 +239,7 @@ export default async function SettingsPage({
         <h2 className="text-xl">QBO Manual-Duplicate Review</h2>
         <table className="mt-3 w-full min-w-[760px] text-left text-sm">
           <thead><tr className="border-b border-[#ececec] text-[#5a5a5a]"><th className="px-2 py-2">Invoice</th><th className="px-2 py-2">Customer</th><th className="px-2 py-2">SKU / Description</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">First Paid</th></tr></thead>
-          <tbody>{openQboBacklogReviews.map((review) => <tr key={`${review.invoice_number}-${review.qbo_sku}`} className="border-b border-[#f1f5f9]"><td className="px-2 py-2">{review.invoice_number ?? "—"}</td><td className="px-2 py-2">{review.customer_name ?? "—"}</td><td className="px-2 py-2">{review.qbo_sku ?? "—"}<div className="text-xs text-[#5a5a5a]">{review.source_description ?? ""}</div></td><td className="px-2 py-2">{review.quantity}</td><td className="px-2 py-2">{new Date(review.first_payment_at).toLocaleString()}</td></tr>)}</tbody>
+          <tbody>{openQboBacklogReviews.map((review) => <tr key={`${review.invoice_number}-${review.qbo_sku}`} className="border-b border-[#f1f5f9]"><td className="px-2 py-2">{review.invoice_number ?? "—"}</td><td className="px-2 py-2">{review.customer_name ?? "—"}</td><td className="px-2 py-2">{review.qbo_sku ?? "—"}<div className="text-xs text-[#5a5a5a]">{review.source_description ?? ""}</div></td><td className="px-2 py-2">{review.quantity}</td><td className="px-2 py-2">{review.first_payment_at ? new Date(review.first_payment_at).toLocaleString() : "Payment date unavailable"}</td></tr>)}</tbody>
         </table>
         {!qboBacklogReviews?.length ? <p className="mt-3 text-sm text-[#5a5a5a]">No manual duplicate reviews are open.</p> : null}
       </section>

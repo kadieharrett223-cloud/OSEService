@@ -5,6 +5,7 @@ import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 type QueueLine = {
   id: string;
   product_id: string | null;
+  qbo_invoice_line_id?: string | null;
   approved_qty: number | null;
   ordered_qty?: number | null;
   fulfilled_qty: number | null;
@@ -18,7 +19,7 @@ type QueueLine = {
   queue_position_override_reason?: string | null;
   queue_position_override_at?: string | null;
   queue_position_override_by?: string | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; source_invoice_id?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null } | null;
 };
 
 /** Legacy imports populated sequential positions without recording a real admin move. */
@@ -135,7 +136,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, cancellation_status, review_status, qbo_invoices(invoice_date,raw_payload))`)
+      .select(`id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, source_invoice_id, cancellation_status, review_status, qbo_invoices(invoice_date,raw_payload))`)
       .in("product_id", canonicalProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);
@@ -145,30 +146,64 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
     if ((page ?? []).length < 1000) break;
   }
 
-  const linesByCanonicalProduct = new Map<string, QueueLine[]>();
-  for (const rawLine of data ?? []) {
-    const line = rawLine as unknown as QueueLine;
-    if (line.shipping_orders?.duplicate_of_order_id) continue;
-    if (!line.product_id || !isActiveQueueLine(line)) continue;
+  const activeLines = (data ?? [])
+    .map((row) => row as unknown as QueueLine)
+    .filter((line) => !line.shipping_orders?.duplicate_of_order_id && Boolean(line.product_id) && isActiveQueueLine(line));
+
+  // A refreshed QBO row and its legacy bridge are one obligation. The live QBO line wins when
+  // it is approved; both rows receive the same persisted position so no later queue rebuild can
+  // count one customer twice or disagree with the Inventory Customer List.
+  const qboLinesByInvoiceProduct = new Map<string, QueueLine[]>();
+  for (const line of activeLines) {
+    if (!line.qbo_invoice_line_id || !line.product_id) continue;
+    const key = `${line.shipping_orders?.source_invoice_id ?? ""}|${line.product_id}`;
+    qboLinesByInvoiceProduct.set(key, [...(qboLinesByInvoiceProduct.get(key) ?? []), line]);
+  }
+  const logicalKeyForLine = (line: QueueLine) => {
+    if (line.qbo_invoice_line_id) return `QBO:${line.qbo_invoice_line_id}`;
+    const matchKey = `${line.shipping_orders?.source_invoice_id ?? ""}|${line.product_id ?? ""}`;
+    const matches = qboLinesByInvoiceProduct.get(matchKey) ?? [];
+    return matches.length === 1 ? `QBO:${matches[0]!.qbo_invoice_line_id}` : `LINE:${line.id}`;
+  };
+  const linesByCanonicalProduct = new Map<string, Map<string, QueueLine[]>>();
+  for (const line of activeLines) {
+    if (!line.product_id) continue;
     const productKey = productKeyById.get(line.product_id) ?? line.product_id;
-    const rows = linesByCanonicalProduct.get(productKey) ?? [];
-    rows.push(line);
-    linesByCanonicalProduct.set(productKey, rows);
+    const byLogicalKey = linesByCanonicalProduct.get(productKey) ?? new Map<string, QueueLine[]>();
+    const logicalKey = logicalKeyForLine(line);
+    byLogicalKey.set(logicalKey, [...(byLogicalKey.get(logicalKey) ?? []), line]);
+    linesByCanonicalProduct.set(productKey, byLogicalKey);
   }
 
   let linesUpdated = 0;
   for (const productKey of targetProductKeys) {
-    const lines = linesByCanonicalProduct.get(productKey) ?? [];
-    const positioned = calculateQueuePositions(lines);
+    const logicalGroups = linesByCanonicalProduct.get(productKey) ?? new Map<string, QueueLine[]>();
+    const membersByRepresentativeId = new Map<string, QueueLine[]>();
+    const representatives = [...logicalGroups.values()].map((members) => {
+      const representative = [...members].sort((left, right) => {
+        const leftManual = hasAuditedManualPosition(left);
+        const rightManual = hasAuditedManualPosition(right);
+        if (leftManual !== rightManual) return leftManual ? -1 : 1;
+        const leftLiveQbo = Boolean(left.qbo_invoice_line_id);
+        const rightLiveQbo = Boolean(right.qbo_invoice_line_id);
+        if (leftLiveQbo !== rightLiveQbo) return leftLiveQbo ? -1 : 1;
+        return compareQueueLines(left, right);
+      })[0]!;
+      membersByRepresentativeId.set(representative.id, members);
+      return representative;
+    });
+    const positioned = calculateQueuePositions(representatives);
 
     const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
     for (const { line, start, units } of positioned) {
-      if (Number(line.queue_position_start ?? 0) !== start || Number(line.queue_position_count ?? 0) !== units) {
-        updates.push(supabase
-          .from("shipping_order_lines")
-          .update({ queue_position_start: start, queue_position_count: units })
-          .eq("id", line.id));
-        linesUpdated += 1;
+      for (const member of membersByRepresentativeId.get(line.id) ?? [line]) {
+        if (Number(member.queue_position_start ?? 0) !== start || Number(member.queue_position_count ?? 0) !== units) {
+          updates.push(supabase
+            .from("shipping_order_lines")
+            .update({ queue_position_start: start, queue_position_count: units })
+            .eq("id", member.id));
+          linesUpdated += 1;
+        }
       }
     }
 

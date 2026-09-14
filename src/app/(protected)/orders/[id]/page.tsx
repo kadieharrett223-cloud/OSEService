@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { isOpenDemandLine } from "@/lib/demand/product-demand";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import {
@@ -33,6 +34,7 @@ import {
   updateOrderOperationsAction,
   overrideProductQueuePositionAction,
   completeServiceOnlyOrderAction,
+  cancelOrderManuallyAction,
   uploadOrderAttachmentAction,
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
@@ -50,6 +52,8 @@ type OrderDetailRow = {
   source_invoice_id: string | null;
   legacy_customer_name: string | null;
   review_status: string | null;
+  cancellation_status?: string | null;
+  cancellation_reason?: string | null;
   promised_ship_date: string | null;
   shipping_method: string | null;
   fulfillment_method?: "SHIP" | "WILL_CALL" | null;
@@ -618,6 +622,8 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
   if (columnSet.has("tracking_number")) columns.push("tracking_number");
   if (columnSet.has("carrier")) columns.push("carrier");
   if (columnSet.has("fulfillment_method")) columns.push("fulfillment_method");
+  if (columnSet.has("cancellation_status")) columns.push("cancellation_status");
+  if (columnSet.has("cancellation_reason")) columns.push("cancellation_reason");
 
   const lineColumns = [
     "id",
@@ -730,6 +736,39 @@ function describeActivityEvent(
   }
 }
 
+function ManualOrderCancellation({
+  orderId,
+  adminUnlocked,
+  cancellationStatus,
+  cancellationReason,
+}: {
+  orderId: string;
+  adminUnlocked: boolean;
+  cancellationStatus?: string | null;
+  cancellationReason?: string | null;
+}) {
+  const isCancelled = String(cancellationStatus ?? "").toUpperCase() === "CANCELLED";
+
+  if (isCancelled) {
+    return <p className="mt-6 text-xs text-[#64748b]">This order is cancelled{cancellationReason ? ` · ${cancellationReason}` : ""}.</p>;
+  }
+  if (!adminUnlocked) return null;
+
+  return (
+    <details className="mt-6 w-full border-t border-[#e5e7eb] pt-3 text-xs text-[#64748b]">
+      <summary className="w-fit cursor-pointer text-[#94a3b8] underline decoration-dotted underline-offset-4 hover:text-[#b91c1c]">Cancel this order</summary>
+      <form action={cancelOrderManuallyAction} className="mt-3 max-w-xl rounded-lg border border-[#fecaca] bg-[#fff7f7] p-3">
+        <input type="hidden" name="orderId" value={orderId} />
+        <p className="font-semibold text-[#991b1b]">Manual order cancellation</p>
+        <p className="mt-1 text-[#7f1d1d]">Open allocations and customer-list demand will be removed. Existing shipment history and shipped quantities will be preserved.</p>
+        <label className="mt-3 block font-semibold text-[#7f1d1d]">Reason<input name="reason" className="input mt-1 bg-white" placeholder="Required cancellation reason" minLength={3} required /></label>
+        <label className="mt-3 flex items-start gap-2 text-[#7f1d1d]"><input type="checkbox" name="confirmation" value="CONFIRM_CANCEL_ORDER" className="mt-0.5" required /><span>I confirm this order should be moved to Cancelled and removed from active customer lists.</span></label>
+        <button type="submit" className="mt-3 rounded-md border border-[#dc2626] px-3 py-1.5 font-semibold text-[#b91c1c] hover:bg-[#fee2e2]">Confirm cancellation</button>
+      </form>
+    </details>
+  );
+}
+
 export default async function OrderDetailPage({
   params,
   searchParams,
@@ -738,6 +777,7 @@ export default async function OrderDetailPage({
   searchParams: Promise<{ error?: string; message?: string }>;
 }) {
   const user = await requireUser();
+  const adminUnlocked = await isAdminUnlockedForUser(user.id);
   const supabase = getSupabaseAdmin();
   const { id } = await params;
   const { error, message } = await searchParams;
@@ -745,6 +785,8 @@ export default async function OrderDetailPage({
 
   const shippingOrderColumnSet = await loadTableColumnSet(supabase, "shipping_orders", [
     "fulfillment_method",
+    "cancellation_status",
+    "cancellation_reason",
   ]);
   const shippingOrderLineColumnSet = await loadTableColumnSet(supabase, "shipping_order_lines", [
     "ordered_qty", "approved_qty", "fulfilled_qty", "approval_status", "warehouse_status", "fulfillment_status",
@@ -850,6 +892,7 @@ export default async function OrderDetailPage({
           <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. {hasPhysicalInvoiceLine ? "Refresh the QuickBooks lines to create the mapped operational items before warehouse fulfillment begins." : "Complete this service invoice when the work has been performed."}</p>
           {!hasPhysicalInvoiceLine ? <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3"><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">QuickBooks Invoice Lines</p><ul className="mt-2 space-y-1 text-sm text-[#334155]">{serviceItems.map((item, index) => <li key={`${item.sku ?? "service"}-${index}`}>{item.sku ?? "Service"} · {item.description} · Qty {item.qty}</li>)}</ul></div> : null}
           <div className="mt-4 flex flex-wrap gap-2">{hasPhysicalInvoiceLine && orderRecord.source_invoice_id ? <form action={createOrderFromQuickbooksInvoiceAction}><input type="hidden" name="qbo_invoice_id" value={orderRecord.source_invoice_id} /><button type="submit" className="btn-primary">Refresh QuickBooks Lines</button></form> : hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
+          <ManualOrderCancellation orderId={orderRecord.id} adminUnlocked={adminUnlocked} cancellationStatus={orderRecord.cancellation_status} cancellationReason={orderRecord.cancellation_reason} />
         </section>
       </div>
     );
@@ -1901,6 +1944,7 @@ export default async function OrderDetailPage({
               </div>
             </section>
           </div>
+          <ManualOrderCancellation orderId={orderRecord.id} adminUnlocked={adminUnlocked} cancellationStatus={orderRecord.cancellation_status} cancellationReason={orderRecord.cancellation_reason} />
         </div>
 
         <aside className="space-y-6">

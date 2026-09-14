@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
@@ -184,6 +185,60 @@ export async function cancelVoidedOrderAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
   redirect(`/exceptions?message=Order+cancelled+in+ERP`);
+}
+
+export async function cancelOrderManuallyAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const confirmation = getString(formData, "confirmation");
+  const reason = normalizeReasonForStorage(getString(formData, "reason") ?? "");
+
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
+  if (!(await isAdminUnlockedForUser(user.id))) {
+    redirect(`/orders/${orderId}?error=Admin+mode+is+required+to+cancel+an+order`);
+  }
+  if (confirmation !== "CONFIRM_CANCEL_ORDER" || reason.length < 3) {
+    redirect(`/orders/${orderId}?error=Cancellation+reason+and+confirmation+are+required`);
+  }
+
+  const adminClient = getSupabaseAdmin();
+  const { data: orderData, error: orderError } = await adminClient
+    .from("shipping_orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
+  const order = orderData as { id: string; cancellation_status?: string | null } | null;
+  if (orderError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderError.message)}`);
+  if (!order) redirect("/orders?error=Order+not+found");
+  if (String(order.cancellation_status ?? "").toUpperCase() === "CANCELLED") {
+    redirect(`/orders/${orderId}?message=Order+is+already+cancelled`);
+  }
+
+  const { data: affectedLines } = await adminClient
+    .from("shipping_order_lines")
+    .select("product_id")
+    .eq("shipping_order_id", orderId)
+    .not("product_id", "is", null);
+  const { error } = await adminClient.rpc("cancel_voided_order", {
+    p_order_id: orderId,
+    p_reason: `Manual cancellation: ${reason}`,
+  } as never);
+  if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+  await writeOrderActivity(adminClient, orderId, "ORDER_CANCELLED_MANUAL", {
+    reason,
+    cancelled_by: user.id,
+  });
+  await recalculateProductQueues(
+    (affectedLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)),
+  );
+  revalidateErpHealth();
+  revalidatePath("/exceptions");
+  revalidateOrdersList();
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect("/orders?tab=cancelled&message=Order+cancelled+and+removed+from+active+customer+queues");
 }
 
 function getFileExtension(fileName: string) {

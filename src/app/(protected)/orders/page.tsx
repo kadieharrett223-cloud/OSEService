@@ -345,7 +345,6 @@ export default async function OrdersPage({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {activeTab === "warehouse" ? <Link href="/freight-consolidation" className="btn-primary inline-flex">Find Combined Shipments</Link> : null}
             <Link href="/orders/import-assign" className="btn-primary inline-flex">
               Import/Assign Review
             </Link>

@@ -46,6 +46,14 @@ type CachedCanonicalCustomerQueue = {
   canonicalLines: CanonicalQueueLine[];
   qboInvoiceLines: CanonicalQboInvoiceLine[];
   manualMappingSkus: string[];
+  /**
+   * Every active local representation of an obligation points at its one
+   * canonical queue row.  A QBO refresh can temporarily leave both the live
+   * QBO line and its bridged old-ERP line on an order; the latter must still
+   * display the customer's real queue position rather than "Not in active
+   * Customer List".
+   */
+  queueEntryBySourceLineId: Array<[string, ProjectedCustomerQueueRow]>;
   lineProductIdEntries: Array<[string, string]>;
 };
 
@@ -191,20 +199,33 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
   const projected = projectCanonicalCustomerQueuesByProductKey(queueRows, (row) => (
     productQueueKeyById.get(lineProductIdByLineId.get(row.lineId) ?? "") || lineProductIdByLineId.get(row.lineId) || row.lineId
   ));
+  const projectedByLogicalDemandKey = new Map(projected.map((row) => [row.logicalDemandKey, row]));
+  const queueEntryBySourceLineId = new Map(projected.map((row) => [row.lineId, row]));
+
+  // The page may render a bridged historical line to preserve the exact QBO
+  // invoice description.  Resolve that representation through its logical
+  // QBO obligation, too.  This is deliberately an alias only: it does not
+  // create demand or alter any physical inventory state.
+  for (const line of bridged) {
+    if (!isOpenCustomerQueueLine(line)) continue;
+    const canonicalRow = projectedByLogicalDemandKey.get(demandLineIdentity(line));
+    if (canonicalRow) queueEntryBySourceLineId.set(line.id, canonicalRow);
+  }
   return {
     queue: projected,
     canonicalLines,
     qboInvoiceLines: allQboLines,
     manualMappingSkus: [...manualMappingSkus],
+    queueEntryBySourceLineId: [...queueEntryBySourceLineId.entries()],
     lineProductIdEntries: [...lineProductIdByLineId.entries()],
   };
 });
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQueueLoaderResult> {
-  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, lineProductIdEntries } = await loadCanonicalCustomerQueueUncached();
+  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueEntryBySourceLineId, lineProductIdEntries } = await loadCanonicalCustomerQueueUncached();
   const lineProductIdByLineId = new Map(lineProductIdEntries);
-  const queueByLineId = new Map(queue.map((row) => [row.lineId, row]));
+  const queueByLineId = new Map(queueEntryBySourceLineId);
   const queueByLogicalDemandKey = new Map(queue.map((row) => [row.logicalDemandKey, row]));
   const queueByProductId = new Map<string, ProjectedCustomerQueueRow[]>();
   for (const row of queue) {

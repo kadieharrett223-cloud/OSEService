@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getCanonicalOpenDemandLines, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
 import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
@@ -231,6 +232,48 @@ describe("re-entering a QuickBooks invoice", () => {
 
     expect(plan.updates[0]?.product_id).toBe("product-yzrcj");
     expect(plan.productIds.sort()).toEqual(["product-jvcj", "product-yzrcj"]);
+  });
+
+  it("keeps every unchanged product queued while replacing one product on a refreshed invoice", () => {
+    const currentInvoiceLines = [
+      invoiceLine({ id: "qbo-hdmbl", qbo_line_id: "1", product_id: "product-hdmbl", qbo_sku: "HDMBL-10", ordered_qty: 1 }),
+      invoiceLine({ id: "qbo-jack", qbo_line_id: "2", product_id: "product-jvcj", qbo_sku: "JVCJ-6", ordered_qty: 1 }),
+      invoiceLine({ id: "qbo-hpu", qbo_line_id: "3", product_id: "product-hpu", qbo_sku: "HPU1103", ordered_qty: 1 }),
+    ];
+    const currentOrderLines = [
+      orderLine({ id: "line-hdmbl", qbo_invoice_line_id: "qbo-hdmbl", product_id: "product-hdmbl", ordered_qty: 1, approved_qty: 1 }),
+      orderLine({ id: "line-jack", qbo_invoice_line_id: "qbo-jack", product_id: "product-yzrcj", ordered_qty: 1, approved_qty: 1 }),
+      orderLine({ id: "line-hpu", qbo_invoice_line_id: "qbo-hpu", product_id: "product-hpu", ordered_qty: 1, approved_qty: 1 }),
+    ];
+
+    const plan = planQuickbooksOrderRefresh(currentInvoiceLines, currentOrderLines, new Map());
+    expect(plan.removals).toEqual([]);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates.map((update) => [update.lineId, update.product_id])).toEqual([
+      ["line-hdmbl", "product-hdmbl"],
+      ["line-jack", "product-jvcj"],
+      ["line-hpu", "product-hpu"],
+    ]);
+    expect(new Set(plan.productIds)).toEqual(new Set(["product-hdmbl", "product-yzrcj", "product-jvcj", "product-hpu"]));
+
+    const refreshedLines = currentOrderLines.map((line) => {
+      const update = plan.updates.find((candidate) => candidate.lineId === line.id)!;
+      return {
+        ...line,
+        ...update,
+        approval_status: "APPROVED",
+        fulfillment_status: "PENDING",
+      };
+    });
+    const retiredHistory = [
+      { ...refreshedLines[0], id: "retired-hdmbl", qbo_invoice_line_id: null, logical_demand_key: "qbo-hdmbl", fulfilled_qty: 1, fulfillment_status: "FULFILLED", parent_duplicate_of_order_id: "live-order" },
+      { ...refreshedLines[2], id: "retired-hpu", qbo_invoice_line_id: null, logical_demand_key: "qbo-hpu", fulfilled_qty: 1, fulfillment_status: "FULFILLED", parent_duplicate_of_order_id: "live-order" },
+    ];
+    const queueLines = getCanonicalOpenDemandLines([...refreshedLines, ...retiredHistory], new Set(), new Set());
+
+    expect(queueLines).toHaveLength(3);
+    expect(queueLines.every(isOpenCustomerQueueLine)).toBe(true);
+    expect(queueLines.map((line) => line.product_id)).toEqual(["product-hdmbl", "product-jvcj", "product-hpu"]);
   });
 
   it("removes unshipped demand that no longer exists on the current QBO invoice", () => {

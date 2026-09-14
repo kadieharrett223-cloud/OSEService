@@ -28,6 +28,7 @@ export type RefreshPlan = {
   inserts: Array<{ qboInvoiceLineId: string; productId: string; orderedQty: number; qboSku: string | null; qboLineId: string | null }>;
   skippedShipped: string[];
   skippedUnmapped: string[];
+  removals: Array<{ lineId: string; productId: string | null }>;
   productIds: string[];
 };
 
@@ -78,7 +79,7 @@ export function planQuickbooksOrderRefresh(
   productIdByAlias: Map<string, string>,
 ): RefreshPlan {
   const existingByInvoiceLine = new Map(orderLines.map((line) => [line.qbo_invoice_line_id ?? "", line]));
-  const plan: RefreshPlan = { updates: [], inserts: [], skippedShipped: [], skippedUnmapped: [], productIds: [] };
+  const plan: RefreshPlan = { updates: [], inserts: [], skippedShipped: [], skippedUnmapped: [], removals: [], productIds: [] };
   const productIds = new Set<string>();
 
   for (const invoiceLine of invoiceLines) {
@@ -97,7 +98,13 @@ export function planQuickbooksOrderRefresh(
         plan.skippedShipped.push(existing.id);
         continue;
       }
-      const resolvedProductId = existing.product_id ?? productId;
+      const resolvedProductId = productId ?? existing.product_id ?? null;
+      if (!productId) {
+        plan.skippedUnmapped.push(invoiceLine.id);
+        plan.removals.push({ lineId: existing.id, productId: existing.product_id ?? null });
+        if (existing.product_id) productIds.add(existing.product_id);
+        continue;
+      }
       plan.updates.push({
         lineId: existing.id,
         ordered_qty: orderedQty,
@@ -105,6 +112,7 @@ export function planQuickbooksOrderRefresh(
         approval_status: "APPROVED",
         product_id: resolvedProductId,
       });
+      if (existing.product_id) productIds.add(existing.product_id);
       if (resolvedProductId) productIds.add(resolvedProductId);
       continue;
     }
@@ -122,6 +130,17 @@ export function planQuickbooksOrderRefresh(
       qboLineId: invoiceLine.qbo_line_id ?? null,
     });
     productIds.add(productId);
+  }
+
+  const currentInvoiceLineIds = new Set(invoiceLines.map((line) => line.id));
+  for (const orderLine of orderLines) {
+    if (!orderLine.qbo_invoice_line_id || currentInvoiceLineIds.has(orderLine.qbo_invoice_line_id)) continue;
+    if (Number(orderLine.fulfilled_qty ?? 0) > 0) {
+      plan.skippedShipped.push(orderLine.id);
+      continue;
+    }
+    plan.removals.push({ lineId: orderLine.id, productId: orderLine.product_id ?? null });
+    if (orderLine.product_id) productIds.add(orderLine.product_id);
   }
 
   plan.productIds = Array.from(productIds);

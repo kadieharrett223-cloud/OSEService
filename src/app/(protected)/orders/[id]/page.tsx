@@ -24,6 +24,7 @@ import { cancellationAwareOperationalTotals, cancellationAwareStatus, isCancelle
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
+  refreshOrderFromQuickbooksAction,
   deleteOrderAttachmentAction,
   markOrderLinesPickedUpAction,
   markOrderLineShippedAction,
@@ -1634,6 +1635,14 @@ export default async function OrderDetailPage({
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>
+            {!isCancelled && orderRecord.source_invoice_id ? (
+              <form action={refreshOrderFromQuickbooksAction}>
+                <input type="hidden" name="orderId" value={orderRecord.id} />
+                <button type="submit" className="btn-primary text-xs" title="Fetch the latest invoice and line-item changes directly from QuickBooks">
+                  Refresh from QuickBooks
+                </button>
+              </form>
+            ) : null}
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
             {!isCancelled && shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">

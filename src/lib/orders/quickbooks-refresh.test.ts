@@ -212,13 +212,38 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.skippedShipped).toEqual(["order-line-1"]);
   });
 
-  it("keeps an existing product mapping rather than remapping a live line", () => {
+  it("uses the current QBO-line mapping as the authority", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ product_id: "product-different" })],
       [orderLine({ product_id: "product-existing" })],
       aliases,
     );
 
-    expect(plan.updates[0]?.product_id).toBe("product-existing");
+    expect(plan.updates[0]?.product_id).toBe("product-different");
+  });
+
+  it("replaces the operational product when the refreshed QBO line maps to a different item", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ product_id: "product-yzrcj" })],
+      [orderLine({ product_id: "product-jvcj" })],
+      aliases,
+    );
+
+    expect(plan.updates[0]?.product_id).toBe("product-yzrcj");
+    expect(plan.productIds.sort()).toEqual(["product-jvcj", "product-yzrcj"]);
+  });
+
+  it("removes unshipped demand that no longer exists on the current QBO invoice", () => {
+    const plan = planQuickbooksOrderRefresh([], [orderLine({ product_id: "product-old" })], aliases);
+
+    expect(plan.removals).toEqual([{ lineId: "order-line-1", productId: "product-old" }]);
+    expect(plan.productIds).toEqual(["product-old"]);
+  });
+
+  it("preserves shipped history even when its QBO line is no longer current", () => {
+    const plan = planQuickbooksOrderRefresh([], [orderLine({ fulfilled_qty: 1 })], aliases);
+
+    expect(plan.removals).toHaveLength(0);
+    expect(plan.skippedShipped).toEqual(["order-line-1"]);
   });
 });

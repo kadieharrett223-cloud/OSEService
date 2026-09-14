@@ -14,6 +14,7 @@ import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
+import { syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
 
 function revalidateOrdersList() {
   revalidateOrdersProjection();
@@ -639,13 +640,21 @@ export async function moveOrderBackToOrdersAction(formData: FormData) {
 async function activateExistingQuickbooksOrder(
   adminClient: ReturnType<typeof getSupabaseAdmin>,
   orderId: string,
-  invoice: { id: string; qbo_invoice_id: string | null; invoice_number: string | null },
+  invoice: { id: string; qbo_invoice_id: string | null; invoice_number: string | null; raw_payload?: unknown },
 ) {
   await assertOrderIsOperational(adminClient, orderId);
-  const { data: invoiceLines } = await adminClient
+  const { data: importedInvoiceLines } = await adminClient
     .from("qbo_invoice_lines")
     .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku, source_description")
     .eq("qbo_invoice_id", invoice.id);
+
+  const rawLines = invoice.raw_payload && typeof invoice.raw_payload === "object" && Array.isArray((invoice.raw_payload as { Line?: unknown[] }).Line)
+    ? (invoice.raw_payload as { Line: Array<Record<string, unknown>> }).Line
+    : [];
+  const currentQboLineIds = new Set(rawLines.map((line) => String(line.Id ?? "").trim()).filter(Boolean));
+  const invoiceLines = currentQboLineIds.size > 0
+    ? (importedInvoiceLines ?? []).filter((line) => currentQboLineIds.has(String(line.qbo_line_id ?? "")))
+    : importedInvoiceLines ?? [];
 
   const { data: orderLines } = await adminClient
     .from("shipping_order_lines")
@@ -660,8 +669,24 @@ async function activateExistingQuickbooksOrder(
 
   const plan = planQuickbooksOrderRefresh(invoiceLines ?? [], orderLines ?? [], productIdByAlias);
   const existingLineById = new Map((orderLines ?? []).map((line) => [line.id, line]));
+  for (const removal of plan.removals) {
+    const { error: allocationError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", removal.lineId);
+    if (allocationError) redirect(`/orders/${orderId}?error=${encodeURIComponent(allocationError.message)}`);
+    const { error } = await adminClient.from("shipping_order_lines").update({
+      approved_qty: 0,
+      allocation_status: "UNALLOCATED",
+      warehouse_status: "REMOVED",
+      fulfillment_status: "REMOVED",
+    }).eq("id", removal.lineId);
+    if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  }
   for (const update of plan.updates) {
     const existing = existingLineById.get(update.lineId);
+    const productChanged = Boolean(existing?.product_id && update.product_id && existing.product_id !== update.product_id);
+    if (productChanged) {
+      const { error: allocationError } = await adminClient.from("inventory_allocations").delete().eq("shipping_order_line_id", update.lineId);
+      if (allocationError) redirect(`/orders/${orderId}?error=${encodeURIComponent(allocationError.message)}`);
+    }
     const shouldMoveFromPendingReview = String(existing?.warehouse_status ?? "").toUpperCase() === "PENDING_REVIEW"
       && String(existing?.fulfillment_status ?? "").toUpperCase() === "PENDING"
       && ["", "UNALLOCATED"].includes(String(existing?.allocation_status ?? "").toUpperCase());
@@ -672,10 +697,20 @@ async function activateExistingQuickbooksOrder(
         approved_qty: update.approved_qty,
         approval_status: update.approval_status,
         product_id: update.product_id ?? undefined,
+        ...(productChanged ? { allocation_status: "UNALLOCATED", fulfillment_source: null } : {}),
         ...(shouldMoveFromPendingReview ? { warehouse_status: "ON_FLOOR", fulfillment_status: "PENDING" } : {}),
       })
       .eq("id", update.lineId);
     if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+    const invoiceLineId = existing?.qbo_invoice_line_id;
+    if (invoiceLineId && update.product_id) {
+      await adminClient.from("qbo_invoice_lines").update({
+        product_id: update.product_id,
+        mapping_status: "MAPPED",
+        approval_status: "APPROVED",
+      }).eq("id", invoiceLineId);
+    }
   }
 
   for (const insert of plan.inserts) {
@@ -709,6 +744,51 @@ async function activateExistingQuickbooksOrder(
   revalidatePath("/inventory");
 }
 
+export async function refreshOrderFromQuickbooksAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
+
+  const adminClient = getSupabaseAdmin();
+  await assertOrderIsOperational(adminClient, orderId);
+  const { data: order, error: orderError } = await adminClient
+    .from("shipping_orders")
+    .select("id,source_invoice_id")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (orderError || !order?.source_invoice_id) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(orderError?.message ?? "This order is not linked to a QuickBooks invoice")}`);
+  }
+
+  const { data: invoiceBefore, error: invoiceBeforeError } = await adminClient
+    .from("qbo_invoices")
+    .select("id,qbo_invoice_id")
+    .eq("id", order.source_invoice_id)
+    .maybeSingle();
+  if (invoiceBeforeError || !invoiceBefore?.qbo_invoice_id) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(invoiceBeforeError?.message ?? "QuickBooks invoice reference is missing")}`);
+  }
+
+  try {
+    await syncQuickbooksInvoice(invoiceBefore.qbo_invoice_id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "QuickBooks refresh failed";
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(message)}`);
+  }
+
+  const { data: refreshedInvoice, error: refreshedInvoiceError } = await adminClient
+    .from("qbo_invoices")
+    .select("id,qbo_invoice_id,invoice_number,raw_payload")
+    .eq("id", order.source_invoice_id)
+    .maybeSingle();
+  if (refreshedInvoiceError || !refreshedInvoice) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(refreshedInvoiceError?.message ?? "Refreshed invoice could not be loaded")}`);
+  }
+
+  await activateExistingQuickbooksOrder(adminClient, orderId, refreshedInvoice);
+  redirect(`/orders/${orderId}?message=${encodeURIComponent(`Invoice ${refreshedInvoice.invoice_number ?? ""} refreshed from live QuickBooks data`)}`);
+}
+
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");
@@ -716,7 +796,7 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (!invoiceId) redirect("/orders/new?error=Select+a+QuickBooks+invoice");
 
   const [{ data: invoice, error: invoiceError }, { data: existing }] = await Promise.all([
-    adminClient.from("qbo_invoices").select("id, qbo_invoice_id, invoice_number, customer_id, payment_status, invoice_date, total_amount").eq("id", invoiceId).maybeSingle(),
+    adminClient.from("qbo_invoices").select("id, qbo_invoice_id, invoice_number, customer_id, payment_status, invoice_date, total_amount, raw_payload").eq("id", invoiceId).maybeSingle(),
     adminClient.from("shipping_orders").select("id, review_status, source_type, source_system, created_at").eq("source_invoice_id", invoiceId).order("created_at", { ascending: true }),
   ]);
 

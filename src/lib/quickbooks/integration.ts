@@ -469,18 +469,28 @@ async function ensureAccessToken(connection: Awaited<ReturnType<typeof loadConne
   return accessToken;
 }
 
-async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loadConnectionForSync>>, accessToken: string) {
+async function syncQuickbooksSnapshots(
+  connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
+  accessToken: string,
+  qboInvoiceId?: string,
+) {
   const supabase = getSupabaseAdmin();
   const apiBase = getQuickbooksApiBase(connection.environment);
   const pageSize = 200;
   const maxPages = 50;
   const invoices: Array<Record<string, unknown>> = [];
-  const cursor = connection.invoice_sync_cursor_at;
+  const cursor = qboInvoiceId ? null : connection.invoice_sync_cursor_at;
 
   for (let page = 0; page < maxPages; page += 1) {
     const startPosition = page * pageSize + 1;
-    const cursorFilter = cursor ? ` where Metadata.LastUpdatedTime > '${cursor}'` : "";
-    const qboQuery = `select * from Invoice${cursorFilter} order by Metadata.LastUpdatedTime startposition ${startPosition} maxresults ${pageSize}`;
+    const cursorFilter = qboInvoiceId
+      ? ` where Id = '${qboInvoiceId.replaceAll("'", "''")}'`
+      : cursor
+        ? ` where Metadata.LastUpdatedTime > '${cursor}'`
+        : "";
+    const qboQuery = qboInvoiceId
+      ? `select * from Invoice${cursorFilter} startposition ${startPosition} maxresults ${pageSize}`
+      : `select * from Invoice${cursorFilter} order by Metadata.LastUpdatedTime startposition ${startPosition} maxresults ${pageSize}`;
 
     const payload = await fetchQuickbooksQuery({
       apiBase,
@@ -509,7 +519,7 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 
   const customers: Array<Record<string, unknown>> = [];
 
-  if (!cursor) {
+  if (!cursor && !qboInvoiceId) {
     for (let page = 0; page < maxPages; page += 1) {
       const startPosition = page * pageSize + 1;
       const payload = await fetchQuickbooksQuery({
@@ -555,7 +565,7 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   }
 
   const knownCustomerIds = new Set<string>();
-  if (cursor) {
+  if (cursor || qboInvoiceId) {
     const invoiceCustomerIds = [...new Set(invoices
       .map((invoice) => (invoice.CustomerRef as Record<string, unknown> | undefined)?.value)
       .filter((customerId): customerId is string => typeof customerId === "string" && customerId.length > 0))];
@@ -733,6 +743,8 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
   }
 
   const existingLineMap = new Map<string, {
+    qbo_item_id: string | null;
+    qbo_sku: string | null;
     product_id: string | null;
     mapping_status: string;
     approval_status: string;
@@ -747,7 +759,7 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
       const chunk = qboInvoiceUuids.slice(i, i + 500);
       const { data: existingLines, error: existingLinesError } = await supabase
         .from("qbo_invoice_lines")
-        .select("qbo_invoice_id, qbo_line_id, product_id, mapping_status, approval_status, warehouse_status, allocation_status, fulfillment_status")
+        .select("qbo_invoice_id, qbo_line_id, qbo_item_id, qbo_sku, product_id, mapping_status, approval_status, warehouse_status, allocation_status, fulfillment_status")
         .in("qbo_invoice_id", chunk);
 
       if (existingLinesError) {
@@ -756,6 +768,8 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
 
       for (const line of existingLines ?? []) {
         existingLineMap.set(`${line.qbo_invoice_id}:${line.qbo_line_id}`, {
+          qbo_item_id: line.qbo_item_id ?? null,
+          qbo_sku: line.qbo_sku ?? null,
           product_id: line.product_id ?? null,
           mapping_status: line.mapping_status,
           approval_status: line.approval_status,
@@ -792,6 +806,9 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
         const unitPrice = Number(salesItemDetail?.UnitPrice ?? 0);
         const lineTotal = Number(typedLine.Amount ?? 0);
         const existing = existingLineMap.get(`${qboInvoiceId}:${lineId}`);
+        const itemIdentityChanged = Boolean(existing)
+          && ((existing?.qbo_item_id && itemId && existing.qbo_item_id !== itemId)
+            || (!existing?.qbo_item_id && existing?.qbo_sku && itemName && existing.qbo_sku.trim().toUpperCase() !== itemName.trim().toUpperCase()));
 
         return {
           qbo_invoice_id: qboInvoiceId,
@@ -799,15 +816,17 @@ async function syncQuickbooksSnapshots(connection: Awaited<ReturnType<typeof loa
           qbo_item_id: itemId,
           qbo_sku: itemName,
           source_description: description,
-          product_id: existing?.product_id ?? null,
+          // A QBO item replacement on the same line ID must be remapped. Carrying the
+          // old product forward is what made invoice edits keep the previous SKU.
+          product_id: itemIdentityChanged ? null : existing?.product_id ?? null,
           ordered_qty: Number.isFinite(qty) ? qty : 0,
           unit_price: Number.isFinite(unitPrice) ? unitPrice : null,
           line_total: Number.isFinite(lineTotal) ? lineTotal : null,
-          mapping_status: existing?.mapping_status ?? "PENDING_REVIEW",
-          approval_status: existing?.approval_status ?? "PENDING_REVIEW",
-          warehouse_status: existing?.warehouse_status ?? "PENDING_REVIEW",
-          allocation_status: existing?.allocation_status ?? "UNALLOCATED",
-          fulfillment_status: existing?.fulfillment_status ?? "PENDING",
+          mapping_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.mapping_status ?? "PENDING_REVIEW",
+          approval_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.approval_status ?? "PENDING_REVIEW",
+          warehouse_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.warehouse_status ?? "PENDING_REVIEW",
+          allocation_status: itemIdentityChanged ? "UNALLOCATED" : existing?.allocation_status ?? "UNALLOCATED",
+          fulfillment_status: itemIdentityChanged ? "PENDING" : existing?.fulfillment_status ?? "PENDING",
         };
       })
       .filter((row): row is NonNullable<typeof row> => row !== null);
@@ -1024,6 +1043,19 @@ export async function syncQuickbooksInvoices() {
 
     throw error;
   }
+}
+
+/** Fetch one invoice directly from QBO without advancing the global incremental-sync cursor. */
+export async function syncQuickbooksInvoice(qboInvoiceId: string) {
+  const connection = await loadConnectionForSync();
+  const accessToken = await ensureAccessToken(connection);
+  const result = await syncQuickbooksSnapshots(connection, accessToken, qboInvoiceId);
+
+  if (result.invoiceCount !== 1) {
+    throw new Error("QuickBooks did not return that invoice. It may have been deleted or made unavailable.");
+  }
+
+  return result;
 }
 
 export function describeQuickbooksConfig() {

@@ -10,6 +10,8 @@ type SelectedFile = {
   selectedAt: string;
 };
 
+const MAX_UPLOAD_BATCH_BYTES = 3_800_000;
+
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
@@ -24,6 +26,7 @@ export function AttachmentDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState<SelectedFile[]>([]);
   const [dragActive, setDragActive] = useState(false);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
 
   const hasFiles = selected.length > 0;
 
@@ -46,6 +49,13 @@ export function AttachmentDropzone({
   }
 
   function updateFiles(files: File[], append = true) {
+    const nextFiles = append ? [...selected.map((item) => item.file), ...files] : files;
+    const totalBytes = nextFiles.reduce((total, file) => total + file.size, 0);
+    if (totalBytes > MAX_UPLOAD_BATCH_BYTES) {
+      setSelectionError("This upload is too large. Keep each upload batch under 3.8 MB; you can upload additional files in a separate batch.");
+      return;
+    }
+    setSelectionError(null);
     const incoming = filesToSelected(files);
 
     setSelected((current) => {
@@ -128,8 +138,10 @@ export function AttachmentDropzone({
         <p className="text-sm font-medium text-[#253247]">Drag files here</p>
         <p className="my-1 text-xs text-[#64748b]">or</p>
         <span className="inline-flex rounded-md border border-[#d0d7e2] bg-white px-3 py-1.5 text-xs font-medium text-[#334155]">Upload Files</span>
-        <p className="mt-1 text-xs text-[#64748b]">Supports JPG, PNG, HEIC, PDF, MP4</p>
+        <p className="mt-1 text-xs text-[#64748b]">Supports JPG, PNG, HEIC, PDF, MP4 · up to 3.8 MB per upload</p>
       </div>
+
+      {selectionError ? <p role="alert" className="rounded-md border border-[#fecaca] bg-[#fff5f5] p-2 text-sm font-medium text-[#991b1b]">{selectionError}</p> : null}
 
       {hasFiles ? (
         <div className="space-y-2 rounded-md border border-[#eceff4] bg-white p-3">

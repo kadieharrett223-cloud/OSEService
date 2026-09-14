@@ -263,13 +263,23 @@ describe("re-entering a QuickBooks invoice", () => {
         ...update,
         approval_status: "APPROVED",
         fulfillment_status: "PENDING",
+        parent_source_type: "QBO_INVOICE",
       };
     });
     const retiredHistory = [
       { ...refreshedLines[0], id: "retired-hdmbl", qbo_invoice_line_id: null, logical_demand_key: "qbo-hdmbl", fulfilled_qty: 1, fulfillment_status: "FULFILLED", parent_duplicate_of_order_id: "live-order" },
       { ...refreshedLines[2], id: "retired-hpu", qbo_invoice_line_id: null, logical_demand_key: "qbo-hpu", fulfilled_qty: 1, fulfillment_status: "FULFILLED", parent_duplicate_of_order_id: "live-order" },
     ];
-    const queueLines = getCanonicalOpenDemandLines([...refreshedLines, ...retiredHistory], new Set(), new Set());
+    const staleHistoricalResolutions = [
+      { qbo_invoice_line_id: "qbo-hdmbl", resolution_type: "HISTORICAL_FULFILLMENT" as const, status: "ACTIVE" as const },
+      { qbo_invoice_line_id: "qbo-hpu", resolution_type: "DUPLICATE" as const, status: "ACTIVE" as const },
+    ];
+    const queueLines = getCanonicalOpenDemandLines(
+      [...refreshedLines, ...retiredHistory],
+      new Set(),
+      new Set(),
+      staleHistoricalResolutions,
+    );
 
     expect(queueLines).toHaveLength(3);
     expect(queueLines.every(isOpenCustomerQueueLine)).toBe(true);

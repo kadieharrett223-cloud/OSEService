@@ -120,9 +120,26 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   void completedQboLineIds;
   void completedQboInvoiceIds;
   const terminalResolutions = reviewedResolutions.filter((resolution) => ["DUPLICATE", "REPLACED", "HISTORICAL_FULFILLMENT"].includes(resolution.resolution_type));
-  return dedupeDemandLines(withLogicalFulfilledQty(
-    excludeReviewedObligationResolutions(lines.filter(hasActiveDemandParent), terminalResolutions),
-  )).filter(isOpenDemandLine);
+  const activeParentLines = lines.filter(hasActiveDemandParent);
+  const acceptedLiveQuickBooksLines = activeParentLines.filter((line) => (
+    line.parent_source_type === "QBO_INVOICE"
+    && Boolean(line.qbo_invoice_line_id)
+    && isOpenCustomerQueueLine(line)
+  ));
+  const acceptedLiveIds = new Set(acceptedLiveQuickBooksLines.map((line) => line.id));
+  const historicallyResolvedLines = excludeReviewedObligationResolutions(
+    activeParentLines.filter((line) => !acceptedLiveIds.has(line.id)),
+    terminalResolutions,
+  );
+
+  // A stale historical resolution may suppress an OLD_ERP representation, but it must never
+  // suppress the current mapped line on an active QuickBooks order. QuickBooks is the current
+  // invoice truth after a refresh; the local line status and fulfilled quantity decide when that
+  // live obligation leaves the Customer List.
+  return dedupeDemandLines(withLogicalFulfilledQty([
+    ...acceptedLiveQuickBooksLines,
+    ...historicallyResolvedLines,
+  ])).filter(isOpenDemandLine);
 }
 
 /**
@@ -145,7 +162,12 @@ export function dedupeDemandLines<T extends DemandLineLike>(lines: T[]): T[] {
   }
 
   return Array.from(byIdentity.values()).map((duplicates) => {
-    const selected = [...duplicates].sort((left, right) => openQtyOf(right) - openQtyOf(left) || left.id.localeCompare(right.id))[0];
+    const selected = [...duplicates].sort((left, right) => {
+      const leftIsLiveQbo = left.parent_source_type === "QBO_INVOICE" && Boolean(left.qbo_invoice_line_id);
+      const rightIsLiveQbo = right.parent_source_type === "QBO_INVOICE" && Boolean(right.qbo_invoice_line_id);
+      if (leftIsLiveQbo !== rightIsLiveQbo) return leftIsLiveQbo ? -1 : 1;
+      return openQtyOf(right) - openQtyOf(left) || left.id.localeCompare(right.id);
+    })[0];
     const warehouseStates = new Set(duplicates.map((line) => String(line.warehouse_status ?? "").toUpperCase()));
     const hasWarehouseState = [...warehouseStates].some((state) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(state));
     const hasNonWarehouseState = [...warehouseStates].some((state) => !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(state));

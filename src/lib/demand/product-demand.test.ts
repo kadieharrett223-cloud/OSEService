@@ -189,6 +189,38 @@ describe("shared active logical demand", () => {
     expect(getCanonicalOpenDemandLines(rows, new Set(), new Set()).map((line) => line.id)).toEqual(["live"]);
   });
 
+  it("does not let a stale historical resolution suppress a current approved QuickBooks line", () => {
+    const rows = [{
+      id: "live-hdmbl",
+      product_id: "product-hdmbl",
+      qbo_invoice_line_id: "qbo-hdmbl",
+      parent_source_type: "QBO_INVOICE",
+      approved_qty: 1,
+      ordered_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+    }];
+    const resolutions = [{
+      qbo_invoice_line_id: "qbo-hdmbl",
+      resolution_type: "HISTORICAL_FULFILLMENT" as const,
+      status: "ACTIVE" as const,
+    }];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set(), resolutions).map((line) => line.id)).toEqual(["live-hdmbl"]);
+  });
+
+  it("uses the current QuickBooks line instead of an older bridged representation", () => {
+    const rows = [
+      { id: "old-hdmbl", product_id: "old-product", logical_demand_key: "qbo-hdmbl", approved_qty: 4, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "live-hdmbl", product_id: "current-product", qbo_invoice_line_id: "qbo-hdmbl", parent_source_type: "QBO_INVOICE", approved_qty: 1, ordered_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(), new Set())).toMatchObject([
+      { id: "live-hdmbl", product_id: "current-product", ordered_qty: 1 },
+    ]);
+  });
+
   it("keeps reviewed SKU corrections visible while excluding reviewed replacements and duplicates", () => {
     const rows = [
       { id: "11601-old", source_record_id: "da25408f-149b-4387-92e9-1591e56c5afb", logical_demand_key: "6f592815-0062-46cd-b308-431ca6392ebc", approved_qty: 1, fulfillment_status: "PENDING" },

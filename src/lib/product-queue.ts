@@ -19,7 +19,7 @@ type QueueLine = {
   queue_position_override_reason?: string | null;
   queue_position_override_at?: string | null;
   queue_position_override_by?: string | null;
-  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; source_invoice_id?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_date: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null } | null;
+  shipping_orders?: { created_at: string | null; first_payment_at?: string | null; source_invoice_id?: string | null; order_number?: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null; qbo_invoices?: { invoice_number?: string | null; invoice_date: string | null; raw_payload?: { PrivateNote?: string | null } | null } | null } | null;
 };
 
 /** Legacy imports populated sequential positions without recording a real admin move. */
@@ -48,6 +48,15 @@ function compareQueueLines(left: QueueLine, right: QueueLine) {
   const rightHasPriorityDate = Number.isFinite(rightPriorityDate);
   if (leftHasPriorityDate !== rightHasPriorityDate) return leftHasPriorityDate ? -1 : 1;
   if (leftHasPriorityDate && leftPriorityDate !== rightPriorityDate) return leftPriorityDate - rightPriorityDate;
+
+  // Match the Customer List projection exactly: when payment dates tie, keep the lower invoice
+  // number ahead of a later invoice before considering import/create timestamps.
+  const leftInvoice = Number.parseInt(String(left.shipping_orders?.qbo_invoices?.invoice_number ?? left.shipping_orders?.order_number ?? ""), 10);
+  const rightInvoice = Number.parseInt(String(right.shipping_orders?.qbo_invoices?.invoice_number ?? right.shipping_orders?.order_number ?? ""), 10);
+  const leftHasInvoice = Number.isFinite(leftInvoice);
+  const rightHasInvoice = Number.isFinite(rightInvoice);
+  if (leftHasInvoice !== rightHasInvoice) return leftHasInvoice ? -1 : 1;
+  if (leftHasInvoice && leftInvoice !== rightInvoice) return leftInvoice - rightInvoice;
 
   const leftDate = Date.parse(String(left.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
   const rightDate = Date.parse(String(right.shipping_orders?.created_at ?? "")) || Number.MAX_SAFE_INTEGER;
@@ -136,7 +145,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   for (let offset = 0; ; offset += 1000) {
     const { data: page, error } = await supabase
       .from("shipping_order_lines")
-      .select(`id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, source_invoice_id, cancellation_status, review_status, qbo_invoices(invoice_date,raw_payload))`)
+      .select(`id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, priority, queue_position_override, queue_position_override_reason, queue_position_override_at, queue_position_override_by, queue_position_start, queue_position_count, shipping_orders(created_at${shippingOrderPaymentField}${duplicateParentField}, source_invoice_id, order_number, cancellation_status, review_status, qbo_invoices(invoice_number,invoice_date,raw_payload))`)
       .in("product_id", canonicalProductIds)
       .order("id", { ascending: true })
       .range(offset, offset + 999);

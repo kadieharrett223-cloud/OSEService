@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab, getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
+import { cancellationAwareOperationalTotals } from "@/lib/orders/cancellation-presentation";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine } from "@/lib/fulfillment/suggested-allocation";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -276,14 +277,15 @@ async function getOrdersDataset() {
       const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
       const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
       const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
-      const totalQty = canonicalSummary.ordered;
+      const operationalTotals = cancellationAwareOperationalTotals(canonicalSummary, classification.isCancelled);
+      const totalQty = operationalTotals.ordered;
       const hasPhysicalLines = canonicalSummary.lineCount > 0;
       const inStockQty = canonicalSummary.items.reduce((sum, { line }) => sum + (line?.id ? coverageByLineId.get(line.id)?.warehouseQty ?? 0 : 0), 0);
       const warehouseQty = canonicalSummary.items
         .filter(({ line }) => line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
         .reduce((sum, { line, quantity }) => sum + Math.max(0, quantity - Number(line?.fulfilled_qty ?? 0)), 0);
-      const shippedQty = canonicalSummary.fulfilled;
-      const remainingQty = canonicalSummary.remaining;
+      const shippedQty = operationalTotals.fulfilled;
+      const remainingQty = operationalTotals.remaining;
       const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
       const remainingAvailable = Math.min(Math.max(0, remainingQty - remainingInWarehouse), Math.max(0, inStockQty - warehouseQty));
       const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable);
@@ -291,7 +293,7 @@ async function getOrdersDataset() {
       if (remainingAvailable > 0) remainingStatusParts.push(`${remainingAvailable} available`);
       if (remainingInWarehouse > 0) remainingStatusParts.push(`${remainingInWarehouse} in warehouse`);
       if (remainingWaiting > 0) remainingStatusParts.push(`${remainingWaiting} waiting`);
-      const remainingStatus = remainingQty === 0 ? "Complete" : remainingStatusParts.length > 0 ? remainingStatusParts.join(" · ") : "Not in stock";
+      const remainingStatus = classification.isCancelled ? "Cancelled" : remainingQty === 0 ? "Complete" : remainingStatusParts.length > 0 ? remainingStatusParts.join(" · ") : "Not in stock";
       const tabs = ["orders", "new", "warehouse", "partial", "archived", "cancelled"].filter((tab) => matchesOrderTab(classification, tab));
       const searchable = [
         order.order_number,

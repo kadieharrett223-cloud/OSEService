@@ -20,6 +20,7 @@ import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, m
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
+import { cancellationAwareOperationalTotals, cancellationAwareStatus, isCancelledOrder } from "@/lib/orders/cancellation-presentation";
 import {
   addOrderNoteAction,
   createOrderFromQuickbooksInvoiceAction,
@@ -588,6 +589,7 @@ function deriveItemStatus(item: InvoiceItem) {
 
 function itemStatusClass(label: string) {
   const normalized = label.toUpperCase();
+  if (normalized.includes("CANCEL")) return "bg-[#fee2e2] text-[#b91c1c]";
   if (normalized.includes("READY") || normalized.includes("SHIP") || normalized === "PAID") return "bg-[#e7f7ed] text-[#1b7a43]";
   if (normalized.includes("WAIT") || normalized.includes("PENDING")) return "bg-[#fff7e6] text-[#b45309]";
   if (normalized.includes("HOLD")) return "bg-[#fee2e2] text-[#b91c1c]";
@@ -849,6 +851,8 @@ export default async function OrderDetailPage({
   if (!orderRecord) {
     return <div className="p-6">Order not found.</div>;
   }
+
+  const isCancelled = isCancelledOrder(orderRecord.cancellation_status);
 
   let siblingOrderIds = [orderRecord.id];
   if (orderRecord.source_invoice_id) {
@@ -1467,12 +1471,19 @@ export default async function OrderDetailPage({
     };
   }
 
-  const requiresMappingReview = isPendingReview && visibleItems.some((item) =>
+  const requiresMappingReview = !isCancelled && isPendingReview && visibleItems.some((item) =>
     !item.isNonInventory && !item.productId && !item.shippingLine?.product_id,
   );
 
   const itemStockSummary = visibleItems.map((item) => {
-    const supply = getItemSupplySnapshot(item);
+    const activeSupply = getItemSupplySnapshot(item);
+    const supply = isCancelled ? {
+      comingFrom: "Cancelled",
+      availability: "No active demand",
+      fulfillment: "Cancelled",
+      action: "Closed",
+      coverage: null,
+    } : activeSupply;
     const orderedQty = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
     const canonicalMatch = item.sku ? bestCanonicalLineMatch(normalizeSkuKey(item.sku), item.description) : null;
     const fulfilled = Math.min(orderedQty, Math.max(
@@ -1480,11 +1491,13 @@ export default async function OrderDetailPage({
       item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0,
       Number(canonicalMatch?.fulfilled_qty ?? 0),
     ));
-    const needed = Math.max(0, orderedQty - fulfilled);
+    const needed = isCancelled ? 0 : Math.max(0, orderedQty - fulfilled);
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(needed, floorAvailable);
     const fulfillmentSource = String(item.shippingLine?.fulfillment_source ?? "").toUpperCase();
-    const status = item.isNonInventory
+    const status = isCancelled
+      ? "Cancelled"
+      : item.isNonInventory
       ? "N/A"
       : needed === 0 && orderedQty > 0
       ? "Shipped"
@@ -1508,7 +1521,10 @@ export default async function OrderDetailPage({
     return { item, supply, needed, inStock, fulfilled, status };
   });
 
-  const canonicalPhysicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: operationalLines });
+  const canonicalPhysicalSummary = cancellationAwareOperationalTotals(
+    getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: operationalLines }),
+    isCancelled,
+  );
   const visibleOpenTotal = canonicalPhysicalSummary.remaining;
   const visibleShippedTotal = canonicalPhysicalSummary.fulfilled;
   const visibleBackorderedTotal = itemStockSummary.reduce((sum, row) => sum + Math.max(0, row.needed - row.inStock), 0);
@@ -1525,13 +1541,13 @@ export default async function OrderDetailPage({
   const totalUnitsShipped = canonicalPhysicalSummary.fulfilled;
   const totalEligibleInventoryUnits = canonicalPhysicalSummary.ordered;
   // Fulfillment selection is independent of stock, allocation, and source assignment.
-  const selectablePhysicalLines = orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
-  const selectableSiblingPhysicalLines = siblingPhysicalLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
+  const selectablePhysicalLines = isCancelled ? [] : orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
+  const selectableSiblingPhysicalLines = isCancelled ? [] : siblingPhysicalLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
   const hasShippableLines = selectablePhysicalLines.length > 0 || selectableSiblingPhysicalLines.length > 0;
   const showNoShippableLinesNotice = !hasShippableLines
     && !isServiceOnlyOrder
     && normalizedError.includes("no remaining physical inventory lines available for shipment selection");
-  const overallStatus = totalUnitsNeeded === 0 && totalEligibleInventoryUnits > 0
+  const derivedOverallStatus = totalUnitsNeeded === 0 && totalEligibleInventoryUnits > 0
     ? "Fulfilled"
     : totalUnitsShipped > 0
       ? "Partially Shipped"
@@ -1542,10 +1558,11 @@ export default async function OrderDetailPage({
         : totalUnitsInStock > 0
           ? "Partial"
           : "Waiting for Inventory";
+  const overallStatus = cancellationAwareStatus(isCancelled, derivedOverallStatus);
   const allVisibleLinesCancelled = visibleItems.length > 0 && visibleItems.every((item) =>
     item.shippingLine && String(item.shippingLine.fulfillment_status ?? "").toUpperCase() === "CANCELLED",
   );
-  const fulfillmentProgressStatus = allVisibleLinesCancelled
+  const fulfillmentProgressStatus = isCancelled || allVisibleLinesCancelled
     ? "Cancelled"
     : totalEligibleInventoryUnits > 0 && totalUnitsNeeded === 0
       ? "Complete"
@@ -1564,7 +1581,7 @@ export default async function OrderDetailPage({
       remainingQty: Math.max(0, Number(item.shippingLine!.approved_qty ?? 0) - Number(item.shippingLine!.fulfilled_qty ?? 0)),
     }));
 
-  const hasOpenWarehouseItems = orderLines.some((line) =>
+  const hasOpenWarehouseItems = !isCancelled && orderLines.some((line) =>
     ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase())
     && Number(line.fulfilled_qty ?? 0) <= 0
     && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(line.fulfillment_status ?? "").toUpperCase()),
@@ -1600,10 +1617,16 @@ export default async function OrderDetailPage({
               <span className="text-lg text-[#64748b]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
-              <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
-              <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
-              <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
+              {isCancelled ? (
+                <span className="rounded-full bg-[#fee2e2] px-2 py-1 text-[#b91c1c]">Cancelled</span>
+              ) : (
+                <>
+                  <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+                  <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
+                  <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
+                  <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
+                </>
+              )}
               <span className="font-normal text-[#64748b]">· {formatDate(orderRecord.created_at)} · {orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</span>
             </div>
             <p className="mt-1 truncate text-xs text-[#64748b]">{contactAddress}</p>
@@ -1612,7 +1635,7 @@ export default async function OrderDetailPage({
           <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
-            {shippingOrderColumnSet.has("fulfillment_method") ? (
+            {!isCancelled && shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
                 <AutoSubmitSelect id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
@@ -1626,7 +1649,7 @@ export default async function OrderDetailPage({
                 <button type="submit" className="btn-secondary text-xs">Save</button>
               </form>
             ) : null}
-            {shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes") ? (
+            {!isCancelled && (shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes")) ? (
               <details className="group rounded-xl border border-[#e5e7eb] bg-white p-3 shadow-sm">
                 <summary className="cursor-pointer list-none text-sm font-semibold text-[#334155]">Edit Order</summary>
                 <form action={updateOrderScheduleAction} className="mt-3 grid min-w-[280px] gap-3">
@@ -1654,7 +1677,9 @@ export default async function OrderDetailPage({
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#475569]">
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsShipped} shipped</span>
                 <span className="rounded-full bg-[#f8fafc] px-3 py-1.5">{totalUnitsNeeded} remaining</span>
-                {isServiceOnlyOrder ? (
+                {isCancelled ? (
+                  <span className="rounded-full bg-[#fee2e2] px-3 py-1.5 text-[#b91c1c]">Cancelled</span>
+                ) : isServiceOnlyOrder ? (
                   <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>
                 ) : (
                   <ShipmentSelectionButton pickupMode={orderRecord.fulfillment_method === "WILL_CALL"} />
@@ -1722,7 +1747,7 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
+                            {!isCancelled && shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
@@ -1733,7 +1758,9 @@ export default async function OrderDetailPage({
                           <span className="self-center text-center text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
                           <span className="self-center text-center"><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
-                            {line ? (
+                            {isCancelled ? (
+                              <span className="inline-flex rounded-lg border border-[#fecaca] bg-[#fff7f7] px-3 py-2 text-xs font-semibold text-[#b91c1c]">Closed</span>
+                            ) : line ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2f7] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">Manage</span>
                             ) : item.productId ? (
                               <span className="inline-flex rounded-lg border border-[#d9e2e8] bg-[#f8fafc] px-3 py-2 text-xs font-semibold text-[#64748b]">Mapped</span>
@@ -1747,7 +1774,7 @@ export default async function OrderDetailPage({
                             )}
                           </span>
                         </summary>
-                        {line ? <div className="border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4">
+                        {line && !isCancelled ? <div className="border-t border-[#eef2f7] bg-[#fafbfc] px-4 py-4">
                           <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#dbe3ee] bg-white px-3 py-2 text-sm font-semibold text-[#334155]">
                             <span>FULFILLMENT · {item.sku ?? line.products?.sku ?? "Item"} · Qty {remainingQty}</span>
                             <span className="text-[#94a3b8]">→</span>
@@ -1963,7 +1990,7 @@ export default async function OrderDetailPage({
           </section>
           <section className="rounded-2xl border border-[#bbdec5] bg-[#f1fbf3] p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#356344]">Fulfillment</h2>
-            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{totalUnitsShipped}/{totalEligibleInventoryUnits} <span className="text-xl">Fulfilled</span></div>
+            <div className="mt-2 text-3xl font-bold text-[#1b7a43]">{isCancelled ? "Cancelled" : <>{totalUnitsShipped}/{totalEligibleInventoryUnits} <span className="text-xl">Fulfilled</span></>}</div>
             <p className="mt-1 text-sm font-semibold text-[#356344]">{fulfillmentProgressStatus}</p>
           </section>
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/types";
 import { runEnabledQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
+import { resolveKnownQboProductId } from "@/lib/orders/quickbooks-refresh";
 
 type QboEnvironment = "sandbox" | "production";
 
@@ -753,6 +754,24 @@ async function syncQuickbooksSnapshots(
     fulfillment_status: string;
   }>();
 
+  // A QBO SKU can be a deleted/suffixed form of an operational SKU.  Only aliases
+  // already stored in the product catalog are eligible for automatic mapping.
+  const productIdByAlias = new Map<string, string>();
+  const [{ data: products, error: productsError }, { data: productAliases, error: aliasesError }] = await Promise.all([
+    supabase.from("products").select("id,sku"),
+    supabase.from("product_aliases").select("product_id,alias"),
+  ]);
+  if (productsError) throw new Error(productsError.message);
+  if (aliasesError) throw new Error(aliasesError.message);
+  for (const product of products ?? []) {
+    const sku = String(product.sku ?? "").trim().toUpperCase();
+    if (sku) productIdByAlias.set(sku, product.id);
+  }
+  for (const alias of productAliases ?? []) {
+    const value = String(alias.alias ?? "").trim().toUpperCase();
+    if (value && alias.product_id) productIdByAlias.set(value, alias.product_id);
+  }
+
   const qboInvoiceUuids = Array.from(qboInvoiceUuidMap.values());
   if (qboInvoiceUuids.length > 0) {
     for (let i = 0; i < qboInvoiceUuids.length; i += 500) {
@@ -806,9 +825,11 @@ async function syncQuickbooksSnapshots(
         const unitPrice = Number(salesItemDetail?.UnitPrice ?? 0);
         const lineTotal = Number(typedLine.Amount ?? 0);
         const existing = existingLineMap.get(`${qboInvoiceId}:${lineId}`);
-        const itemIdentityChanged = Boolean(existing)
-          && ((existing?.qbo_item_id && itemId && existing.qbo_item_id !== itemId)
-            || (!existing?.qbo_item_id && existing?.qbo_sku && itemName && existing.qbo_sku.trim().toUpperCase() !== itemName.trim().toUpperCase()));
+        const itemIdentityChanged = Boolean(existing
+          && ((existing.qbo_item_id && itemId && existing.qbo_item_id !== itemId)
+            || (!existing.qbo_item_id && existing.qbo_sku && itemName && existing.qbo_sku.trim().toUpperCase() !== itemName.trim().toUpperCase())));
+        const resolvedProductId = resolveKnownQboProductId(itemName, productIdByAlias, existing?.product_id ?? null, itemIdentityChanged);
+        const hasKnownProduct = Boolean(resolvedProductId);
 
         return {
           qbo_invoice_id: qboInvoiceId,
@@ -818,13 +839,13 @@ async function syncQuickbooksSnapshots(
           source_description: description,
           // A QBO item replacement on the same line ID must be remapped. Carrying the
           // old product forward is what made invoice edits keep the previous SKU.
-          product_id: itemIdentityChanged ? null : existing?.product_id ?? null,
+          product_id: resolvedProductId,
           ordered_qty: Number.isFinite(qty) ? qty : 0,
           unit_price: Number.isFinite(unitPrice) ? unitPrice : null,
           line_total: Number.isFinite(lineTotal) ? lineTotal : null,
-          mapping_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.mapping_status ?? "PENDING_REVIEW",
-          approval_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.approval_status ?? "PENDING_REVIEW",
-          warehouse_status: itemIdentityChanged ? "PENDING_REVIEW" : existing?.warehouse_status ?? "PENDING_REVIEW",
+          mapping_status: hasKnownProduct ? "MAPPED" : "PENDING_REVIEW",
+          approval_status: hasKnownProduct ? "APPROVED" : "PENDING_REVIEW",
+          warehouse_status: hasKnownProduct ? (existing?.warehouse_status === "PENDING_REVIEW" ? "APPROVED" : existing?.warehouse_status ?? "APPROVED") : "PENDING_REVIEW",
           allocation_status: itemIdentityChanged ? "UNALLOCATED" : existing?.allocation_status ?? "UNALLOCATED",
           fulfillment_status: itemIdentityChanged ? "PENDING" : existing?.fulfillment_status ?? "PENDING",
         };

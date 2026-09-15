@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCanonicalOpenDemandLines, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
-import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
+import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, resolveKnownQboProductId, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
 
@@ -13,6 +13,11 @@ function orderLine(overrides: Partial<RefreshOrderLine> = {}): RefreshOrderLine 
 }
 
 describe("re-entering a QuickBooks invoice", () => {
+  it("approves only an exact known alias after a QBO item identity change", () => {
+    expect(resolveKnownQboProductId("4PML-9-1", new Map([["4PML-9", "product-lift"]]), "old-product", true)).toBe("product-lift");
+    expect(resolveKnownQboProductId("UNKNOWN-DELETED", new Map([["4PML-9", "product-lift"]]), "old-product", true)).toBeNull();
+  });
+
   it("refreshes and approves an existing unshipped line instead of duplicating it", () => {
     const plan = planQuickbooksOrderRefresh([invoiceLine()], [orderLine()], aliases);
 

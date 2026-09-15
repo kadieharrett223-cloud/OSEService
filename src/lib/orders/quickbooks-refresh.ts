@@ -64,6 +64,19 @@ export function qboSkuCandidates(value: string | null | undefined) {
   return candidates;
 }
 
+/** Resolve only exact, already-approved SKU aliases; this never guesses a product. */
+export function resolveKnownQboProductId(
+  qboSku: string | null | undefined,
+  productIdByAlias: Map<string, string>,
+  existingProductId: string | null | undefined = null,
+  itemIdentityChanged = false,
+) {
+  const aliasProductId = qboSkuCandidates(qboSku)
+    .map((candidate) => productIdByAlias.get(candidate))
+    .find(Boolean) ?? null;
+  return itemIdentityChanged ? aliasProductId : existingProductId ?? aliasProductId;
+}
+
 export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
   const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
   const description = String(line.source_description ?? "").trim().toLowerCase();
@@ -86,9 +99,7 @@ export function planQuickbooksOrderRefresh(
     if (isNonInventoryQuickbooksLine(invoiceLine)) continue;
     const rawOrderedQty = Number(invoiceLine.ordered_qty ?? Number.NaN);
     if (Number.isFinite(rawOrderedQty) && rawOrderedQty <= 0) continue;
-    const productId = invoiceLine.product_id
-      ?? qboSkuCandidates(invoiceLine.qbo_sku).map((candidate) => productIdByAlias.get(candidate)).find(Boolean)
-      ?? null;
+    const productId = resolveKnownQboProductId(invoiceLine.qbo_sku, productIdByAlias, invoiceLine.product_id);
     const orderedQty = rawOrderedQty > 0 ? rawOrderedQty : 1;
     const existing = existingByInvoiceLine.get(invoiceLine.id);
 

@@ -70,6 +70,20 @@ describe("QBO forward intake classifier", () => {
     expect(candidates.map((candidate) => candidate.invoiceNumber)).toEqual(["127052"]);
   });
 
+  it("imports safe mapped items while separately reviewing an unmapped sibling", () => {
+    const candidates = selectAutomaticForwardIntakeCandidates([
+      {
+        qboInvoiceId: "mixed", invoiceNumber: "127152", customerName: "Gary", firstPaymentAt: "2026-09-16", invoiceDate: "2026-09-16", decision: "MAPPING_REVIEW",
+        lines: [
+          { qboInvoiceLineId: "mapped", sku: "HLCJ-6", quantity: 1, productId: "product-1", decision: "AUTO_IMPORT" },
+          { qboInvoiceLineId: "unmapped", sku: "DELIVERY", quantity: 1, productId: null, decision: "MAPPING_REVIEW" },
+        ],
+      },
+    ]);
+
+    expect(candidates.map((candidate) => candidate.invoiceNumber)).toEqual(["127152"]);
+  });
+
   it("does not suppress distinct QuickBooks identities that share a printed invoice number", () => {
     const candidates = selectAutomaticForwardIntakeCandidates([
       { qboInvoiceId: "qbo-36504", invoiceNumber: "125968", customerName: "Cary Stewart", firstPaymentAt: "2026-08-26T00:00:00.000Z", invoiceDate: "2026-08-26", decision: "AUTO_IMPORT", lines: [] },

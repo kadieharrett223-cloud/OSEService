@@ -1140,10 +1140,10 @@ export async function syncQuickbooksInvoices() {
       firstPaymentByQboInvoiceId,
     );
     const forwardIntakeResult = await runEnabledQboForwardIntake(paymentResult.firstPaymentByQboInvoiceId);
-    const queueRebuild = await recalculateProductQueues([
-      ...paymentResult.affectedProductIds,
-      ...forwardIntakeResult.affectedProductIds,
-    ]);
+    // Forward intake already queues its newly-created lines. Rebuild only
+    // products whose established orders changed payment priority here, so a
+    // large sync does not perform the same queue work twice.
+    const queueRebuild = await recalculateProductQueues(paymentResult.affectedProductIds);
 
     const syncCursorAt = new Date().toISOString();
       const { error } = await supabase
@@ -1169,7 +1169,7 @@ export async function syncQuickbooksInvoices() {
       forwardIntakeEnabled: forwardIntakeResult.enabled,
       forwardIntakeImportedLines: forwardIntakeResult.importedLines,
       paymentLinkedInvoicesRefreshed: paymentLinkedResult.refreshedInvoiceIds.length,
-      queueProductsRebuilt: queueRebuild.productsUpdated,
+      queueProductsRebuilt: queueRebuild.productsUpdated + forwardIntakeResult.affectedProductIds.length,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

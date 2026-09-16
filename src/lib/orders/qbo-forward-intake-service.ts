@@ -40,7 +40,13 @@ export function summarizeQboInvoiceIntake(decisions: QboForwardIntakeDecision[])
 }
 
 export function selectAutomaticForwardIntakeCandidates(preview: QboForwardIntakePreviewInvoice[]) {
-  return preview.filter((invoice) => invoice.decision === "AUTO_IMPORT");
+  // A discount, delivery, or newly introduced unmapped line must not strand
+  // the other clean physical items on the same paid invoice. Import those
+  // safe, mapped obligations; the unmatched line remains visible for review.
+  // Identity conflicts stay out of automatic creation entirely.
+  return preview.filter((invoice) => invoice.decision === "AUTO_IMPORT"
+    || (invoice.decision !== "MANUAL_DUPLICATE_REVIEW"
+      && invoice.lines.some((line) => line.decision === "AUTO_IMPORT")));
 }
 
 /** The only forward-intake decisions that require a human review. */

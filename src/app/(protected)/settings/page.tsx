@@ -8,7 +8,6 @@ import {
   lockSettingsAdminAction,
   setAccessUserActiveAction,
   setQboForwardIntakeEnabledAction,
-  syncQuickbooksAction,
   unlockSettingsAdminAction,
 } from "@/app/(protected)/settings/actions";
 import {
@@ -206,9 +205,7 @@ export default async function SettingsPage({
               {isConnected ? "Reconnect QuickBooks" : "Connect QuickBooks"}
             </button>
           </form>
-          <form action={syncQuickbooksAction}>
-            <SyncInvoicesButton disabled={!isConnected || quickbooksTableMissing} />
-          </form>
+          <SyncInvoicesButton disabled={!isConnected || quickbooksTableMissing} />
           <a href="/settings/qbo-first-payment-audit" className="btn-secondary">
             Audit First Payments
           </a>

@@ -110,7 +110,7 @@ export function getPhysicalFulfillmentTotals(
   };
 }
 
-function parseInvoicePhysicalItems(rawPayload: unknown) {
+function parseInvoicePhysicalItems(rawPayload: unknown, linkedQboLineIds: Set<string>) {
   const lines = Array.isArray((rawPayload as { Line?: unknown[] } | null | undefined)?.Line)
     ? (rawPayload as { Line: unknown[] }).Line
     : [];
@@ -132,7 +132,10 @@ function parseInvoicePhysicalItems(rawPayload: unknown) {
     const topLevelQtyRaw = item.Qty;
     const hasExplicitQty = detailQtyRaw !== undefined || topLevelQtyRaw !== undefined;
     const qty = Number(detailQtyRaw ?? topLevelQtyRaw ?? Number.NaN);
-    if (isNonInventory) return null;
+    // QBO sometimes records a real component as a "Note". It is eligible only
+    // when this invoice has an explicit mapped shipping line linked to that exact
+    // QBO line ID; free-text notes are never converted into inventory demand.
+    if (isNonInventory && !linkedQboLineIds.has(String(item.Id ?? `${sku ?? "invoice-line"}-${index}`))) return null;
     if (hasExplicitQty && Number.isFinite(qty) && qty <= 0) return null;
     return {
       key: String(item.Id ?? `${sku ?? "invoice-line"}-${index}`),
@@ -204,7 +207,11 @@ export function getCanonicalPhysicalOrderSummary({
   manualMappingSkus?: Set<string>;
 }): CanonicalPhysicalOrderSummary {
   const sourceLines = lines ?? [];
-  const invoiceItems = parseInvoicePhysicalItems(rawPayload);
+  const linkedQboLineIds = new Set(sourceLines
+    .filter((line) => isPhysicalFulfillmentLine(line, { manualMappingSkus }))
+    .map((line) => String(line.qbo_invoice_lines?.qbo_line_id ?? "").trim())
+    .filter(Boolean));
+  const invoiceItems = parseInvoicePhysicalItems(rawPayload, linkedQboLineIds);
 
   if (invoiceItems.length === 0) {
     const physicalLines = getPhysicalFulfillmentLines(sourceLines, { manualMappingSkus });

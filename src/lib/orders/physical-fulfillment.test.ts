@@ -194,6 +194,20 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("counts a QBO note as physical only when it is explicitly linked to a mapped component", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["LIFT", 1], ["Note", 1]], { descriptions: { LIFT: "Lift", Note: "220V 3hp motor" } }),
+      lines: [
+        line({ id: "lift", legacy_item_code: "LIFT", fulfilled_qty: 1, fulfillment_status: "FULFILLED", qbo_invoice_lines: { qbo_line_id: "1", qbo_sku: "LIFT" } }),
+        line({ id: "motor", legacy_item_code: "HPU2204", products: { sku: "HPU2204", canonical_name: "220V 3hp motor" }, fulfilled_qty: 1, fulfillment_status: "FULFILLED", qbo_invoice_lines: { qbo_line_id: "2", qbo_sku: "Note" } }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 2, remaining: 0, isComplete: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["lift", "motor"]);
+    expectInvariant(summary);
+  });
+
   it("counts duplicate OLD_ERP/QBO representations once for 122285 Deana Bonetto", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PXL-10", 1], ["HPU2203", 1]]),

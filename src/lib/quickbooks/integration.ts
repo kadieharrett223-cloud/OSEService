@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/types";
 import { runEnabledQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
-import { resolveKnownQboProductId } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, resolveKnownQboProductId } from "@/lib/orders/quickbooks-refresh";
 import { recalculateProductQueues } from "@/lib/product-queue";
 
 type QboEnvironment = "sandbox" | "production";
@@ -784,21 +784,13 @@ async function syncQuickbooksSnapshots(
 
   // A QBO SKU can be a deleted/suffixed form of an operational SKU.  Only aliases
   // already stored in the product catalog are eligible for automatic mapping.
-  const productIdByAlias = new Map<string, string>();
   const [{ data: products, error: productsError }, { data: productAliases, error: aliasesError }] = await Promise.all([
     supabase.from("products").select("id,sku"),
     supabase.from("product_aliases").select("product_id,alias"),
   ]);
   if (productsError) throw new Error(productsError.message);
   if (aliasesError) throw new Error(aliasesError.message);
-  for (const product of products ?? []) {
-    const sku = String(product.sku ?? "").trim().toUpperCase();
-    if (sku) productIdByAlias.set(sku, product.id);
-  }
-  for (const alias of productAliases ?? []) {
-    const value = String(alias.alias ?? "").trim().toUpperCase();
-    if (value && alias.product_id) productIdByAlias.set(value, alias.product_id);
-  }
+  const productIdByAlias = buildSafeQboProductIdByAlias(products ?? [], productAliases ?? []);
 
   const qboInvoiceUuids = Array.from(qboInvoiceUuidMap.values());
   if (qboInvoiceUuids.length > 0) {

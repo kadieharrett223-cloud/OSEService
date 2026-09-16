@@ -64,6 +64,41 @@ export function qboSkuCandidates(value: string | null | undefined) {
   return candidates;
 }
 
+/**
+ * Builds the safe lookup used by both QBO snapshot sync and forward intake.
+ * A direct catalog SKU is authoritative. An alias is usable only when it
+ * points to one product, so an old duplicate alias cannot silently route a
+ * newly-paid customer to the wrong queue.
+ */
+export function buildSafeQboProductIdByAlias(
+  products: Array<{ id: string; sku: string | null }>,
+  aliases: Array<{ product_id: string; alias: string | null }>,
+) {
+  const directProductIdsBySku = new Map<string, Set<string>>();
+  const aliasProductIdsBySku = new Map<string, Set<string>>();
+  const add = (target: Map<string, Set<string>>, value: string | null, productId: string) => {
+    const key = String(value ?? "").trim().toUpperCase();
+    if (!key) return;
+    const productIds = target.get(key) ?? new Set<string>();
+    productIds.add(productId);
+    target.set(key, productIds);
+  };
+
+  for (const product of products) add(directProductIdsBySku, product.sku, product.id);
+  for (const alias of aliases) add(aliasProductIdsBySku, alias.alias, alias.product_id);
+
+  const resolved = new Map<string, string>();
+  for (const [sku, productIds] of directProductIdsBySku) {
+    if (productIds.size === 1) resolved.set(sku, [...productIds][0]!);
+  }
+  for (const [sku, productIds] of aliasProductIdsBySku) {
+    if (!directProductIdsBySku.has(sku) && productIds.size === 1) {
+      resolved.set(sku, [...productIds][0]!);
+    }
+  }
+  return resolved;
+}
+
 /** Resolve only exact, already-approved SKU aliases; this never guesses a product. */
 export function resolveKnownQboProductId(
   qboSku: string | null | undefined,

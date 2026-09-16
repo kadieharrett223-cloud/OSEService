@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCanonicalOpenDemandLines, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
-import { planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, resolveKnownQboProductId, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, resolveKnownQboProductId, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
 
@@ -13,6 +13,30 @@ function orderLine(overrides: Partial<RefreshOrderLine> = {}): RefreshOrderLine 
 }
 
 describe("re-entering a QuickBooks invoice", () => {
+  it("keeps an exact catalog SKU ahead of stale duplicate aliases", () => {
+    const lookup = buildSafeQboProductIdByAlias(
+      [{ id: "exact-product", sku: "4PC-6" }],
+      [
+        { product_id: "old-product-a", alias: "4PC-6" },
+        { product_id: "old-product-b", alias: "4PC-6" },
+      ],
+    );
+
+    expect(lookup.get("4PC-6")).toBe("exact-product");
+  });
+
+  it("leaves an alias shared by multiple products unresolved", () => {
+    const lookup = buildSafeQboProductIdByAlias(
+      [],
+      [
+        { product_id: "product-a", alias: "OLD-SKU" },
+        { product_id: "product-b", alias: "OLD-SKU" },
+      ],
+    );
+
+    expect(lookup.has("OLD-SKU")).toBe(false);
+  });
+
   it("approves only an exact known alias after a QBO item identity change", () => {
     expect(resolveKnownQboProductId("4PML-9-1", new Map([["4PML-9", "product-lift"]]), "old-product", true)).toBe("product-lift");
     expect(resolveKnownQboProductId("UNKNOWN-DELETED", new Map([["4PML-9", "product-lift"]]), "old-product", true)).toBeNull();

@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
-import { qboSkuCandidates } from "./quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "./quickbooks-refresh";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 import { isWithinAutomaticQboIntake, qboIntakePriorityDate } from "./qbo-intake-policy";
@@ -66,9 +66,10 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
     fetchAllRows<{ product_id: string; alias: string | null }>((from, to) => supabase.from("product_aliases").select("product_id,alias").order("id").range(from, to)),
     fetchAllRows<{ qbo_invoice_line_id: string | null; status: string | null }>((from, to) => supabase.from("reviewed_obligation_resolutions").select("qbo_invoice_line_id,status").order("id").range(from, to)),
   ]);
-  const productIdBySku = new Map<string, string>();
-  for (const product of products) if (product.sku) productIdBySku.set(normalized(product.sku), product.id);
-  for (const alias of aliases) if (alias.alias && !isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(normalized(alias.alias), alias.product_id);
+  const productIdBySku = buildSafeQboProductIdByAlias(
+    products,
+    aliases.filter((alias) => !isUnsafeGlobalProductAlias(alias.alias)),
+  );
   const linesByInvoice = new Map<string, InvoiceLine[]>();
   for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);
   const exactOrderLineIds = new Set(orderLines.flatMap((line) => line.qbo_invoice_line_id ? [line.qbo_invoice_line_id] : []));

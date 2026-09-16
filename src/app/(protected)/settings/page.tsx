@@ -15,6 +15,7 @@ import {
   describeQuickbooksConfig,
   getQuickbooksConnectionStatus,
 } from "@/lib/quickbooks/integration";
+import { SyncInvoicesButton } from "@/app/(protected)/settings/sync-invoices-button";
 
 type QboBacklogReview = {
   invoice_number: string | null;
@@ -206,9 +207,7 @@ export default async function SettingsPage({
             </button>
           </form>
           <form action={syncQuickbooksAction}>
-            <button type="submit" className="btn-secondary" disabled={!isConnected || quickbooksTableMissing}>
-              Sync Invoices
-            </button>
+            <SyncInvoicesButton disabled={!isConnected || quickbooksTableMissing} />
           </form>
           <a href="/settings/qbo-first-payment-audit" className="btn-secondary">
             Audit First Payments

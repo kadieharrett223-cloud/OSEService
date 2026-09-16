@@ -132,7 +132,10 @@ export async function syncQuickbooksAction() {
     const paymentRefreshMessage = result.paymentLinkedInvoicesRefreshed
       ? ` Refreshed ${result.paymentLinkedInvoicesRefreshed} payment-linked invoice${result.paymentLinkedInvoicesRefreshed === 1 ? "" : "s"}.`
       : "";
-    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.${paymentRefreshMessage}${forwardIntakeMessage}`)}`);
+    const queueMessage = result.queueProductsRebuilt
+      ? ` Rebuilt ${result.queueProductsRebuilt} affected customer list${result.queueProductsRebuilt === 1 ? "" : "s"}.`
+      : "";
+    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.${paymentRefreshMessage}${queueMessage}${forwardIntakeMessage}`)}`);
   } catch (error) {
     if (isRedirectLikeError(error)) throw error;
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

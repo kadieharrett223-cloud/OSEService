@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/supabase/types";
 import { runEnabledQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
 import { resolveKnownQboProductId } from "@/lib/orders/quickbooks-refresh";
+import { recalculateProductQueues } from "@/lib/product-queue";
 
 type QboEnvironment = "sandbox" | "production";
 
@@ -20,6 +21,12 @@ type ConnectionRow = {
   last_sync_error: string | null;
   invoice_sync_cursor_at: string | null;
   updated_at: string;
+};
+
+type ShippingOrderPaymentSnapshot = {
+  id: string;
+  source_invoice_id: string | null;
+  first_payment_at: string | null;
 };
 
 type TokenResponse = {
@@ -1018,7 +1025,13 @@ async function syncQuickbooksFirstPaymentDates(
 ) {
   const supabase = getSupabaseAdmin();
   const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
-  if (capabilityError) return { paymentsProcessed: 0, ordersUpdated: 0, skipped: true, firstPaymentByQboInvoiceId: new Map<string, string>() };
+  if (capabilityError) return {
+    paymentsProcessed: 0,
+    ordersUpdated: 0,
+    skipped: true,
+    firstPaymentByQboInvoiceId: new Map<string, string>(),
+    affectedProductIds: [] as string[],
+  };
 
   // Queue priority must reflect every linked invoice's actual first payment; the
   // forward-intake cutoff is enforced separately when deciding which orders to create.
@@ -1027,17 +1040,56 @@ async function syncQuickbooksFirstPaymentDates(
 
   const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
   const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));
-  const updates = [...paymentsByInvoiceId.entries()]
-    .map(([qboInvoiceId, firstPaymentAt]) => ({ invoiceId: invoiceIdByQboId.get(qboInvoiceId), firstPaymentAt }))
-    .filter((row): row is { invoiceId: string; firstPaymentAt: string } => Boolean(row.invoiceId));
+  const paymentDateBySourceInvoiceId = new Map(
+    [...paymentsByInvoiceId.entries()]
+      .map(([qboInvoiceId, firstPaymentAt]) => [invoiceIdByQboId.get(qboInvoiceId), firstPaymentAt] as const)
+      .filter((row): row is readonly [string, string] => Boolean(row[0])),
+  );
+  const { data: existingOrders, error: existingOrdersError } = await (supabase
+    .from("shipping_orders") as any)
+    .select("id,source_invoice_id,first_payment_at")
+    .not("source_invoice_id", "is", null);
+  if (existingOrdersError) throw new Error(existingOrdersError.message);
+
+  // Do not rewrite every order on every sync. Besides reducing load, this gives
+  // us the precise set of product queues whose payment-date priority changed.
+  const updates = ((existingOrders ?? []) as ShippingOrderPaymentSnapshot[])
+    .map((order) => ({
+      orderId: order.id,
+      firstPaymentAt: paymentDateBySourceInvoiceId.get(order.source_invoice_id ?? ""),
+      currentFirstPaymentAt: order.first_payment_at,
+    }))
+    .filter((row): row is { orderId: string; firstPaymentAt: string; currentFirstPaymentAt: string | null } => Boolean(row.firstPaymentAt))
+    .filter((row) => String(row.currentFirstPaymentAt ?? "").slice(0, 10) !== row.firstPaymentAt.slice(0, 10));
 
   const results = await Promise.all(updates.map((row) => supabase
     .from("shipping_orders")
     .update({ first_payment_at: row.firstPaymentAt } as never)
-    .eq("source_invoice_id", row.invoiceId)));
+    .eq("id", row.orderId)));
   const failed = results.find((result) => result.error)?.error;
   if (failed) throw new Error(failed.message);
-  return { paymentsProcessed: paymentsByInvoiceId.size, ordersUpdated: updates.length, skipped: false, firstPaymentByQboInvoiceId: paymentsByInvoiceId };
+
+  const affectedProductIds = new Set<string>();
+  for (let index = 0; index < updates.length; index += 200) {
+    const orderIds = updates.slice(index, index + 200).map((row) => row.orderId);
+    const { data: orderLines, error: orderLinesError } = await supabase
+      .from("shipping_order_lines")
+      .select("product_id")
+      .in("shipping_order_id", orderIds)
+      .not("product_id", "is", null);
+    if (orderLinesError) throw new Error(orderLinesError.message);
+    for (const line of orderLines ?? []) {
+      if (line.product_id) affectedProductIds.add(line.product_id);
+    }
+  }
+
+  return {
+    paymentsProcessed: paymentsByInvoiceId.size,
+    ordersUpdated: updates.length,
+    skipped: false,
+    firstPaymentByQboInvoiceId: paymentsByInvoiceId,
+    affectedProductIds: [...affectedProductIds],
+  };
 }
 
 async function syncPaymentLinkedInvoices(
@@ -1088,6 +1140,10 @@ export async function syncQuickbooksInvoices() {
       firstPaymentByQboInvoiceId,
     );
     const forwardIntakeResult = await runEnabledQboForwardIntake(paymentResult.firstPaymentByQboInvoiceId);
+    const queueRebuild = await recalculateProductQueues([
+      ...paymentResult.affectedProductIds,
+      ...forwardIntakeResult.affectedProductIds,
+    ]);
 
     const syncCursorAt = new Date().toISOString();
       const { error } = await supabase
@@ -1113,6 +1169,7 @@ export async function syncQuickbooksInvoices() {
       forwardIntakeEnabled: forwardIntakeResult.enabled,
       forwardIntakeImportedLines: forwardIntakeResult.importedLines,
       paymentLinkedInvoicesRefreshed: paymentLinkedResult.refreshedInvoiceIds.length,
+      queueProductsRebuilt: queueRebuild.productsUpdated,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

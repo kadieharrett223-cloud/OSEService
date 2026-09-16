@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  findLogicalFulfillmentOverages,
   isActiveSameInvoiceSiblingOwner,
   resolveSingleFulfillmentOwner,
 } from "./fulfillment-owner";
@@ -47,5 +48,30 @@ describe("fulfillment owner selection", () => {
       "other-parent",
       [canonical, { id: "other-parent", source_invoice_id: "invoice-elsewhere" }],
     )).toBe(false);
+  });
+
+  it("blocks a second shipment when a legacy line already fulfilled the sole QBO obligation", () => {
+    const overages = findLogicalFulfillmentOverages(
+      [
+        { id: "legacy-lift", product_id: "lift", ordered_qty: 1, fulfilled_qty: 1 },
+        { id: "qbo-lift", product_id: "lift", qbo_invoice_line_id: "qbo-line-1", ordered_qty: 1, fulfilled_qty: 0 },
+      ],
+      [{ lineId: "qbo-lift", quantity: 1 }],
+    );
+
+    expect(overages).toEqual(["QBO:qbo-line-1"]);
+  });
+
+  it("does not combine an ambiguous pair of separate QBO product lines", () => {
+    const overages = findLogicalFulfillmentOverages(
+      [
+        { id: "legacy-lift", product_id: "lift", ordered_qty: 1, fulfilled_qty: 1 },
+        { id: "qbo-lift-a", product_id: "lift", qbo_invoice_line_id: "qbo-line-1", ordered_qty: 1, fulfilled_qty: 0 },
+        { id: "qbo-lift-b", product_id: "lift", qbo_invoice_line_id: "qbo-line-2", ordered_qty: 1, fulfilled_qty: 0 },
+      ],
+      [{ lineId: "qbo-lift-a", quantity: 1 }],
+    );
+
+    expect(overages).toEqual([]);
   });
 });

@@ -11,7 +11,7 @@ import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMov
 import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
-import { isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
+import { findLogicalFulfillmentOverages, isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
 import { syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
@@ -154,6 +154,57 @@ async function resolveCanonicalSiblingOrderId(
   const canonical = resolveCanonicalOrderParent(siblings ?? []);
   if (!canonical?.id || canonical.id === orderId) return null;
   return canonical.id;
+}
+
+type FulfillmentCapacityLine = {
+  id: string;
+  shipping_order_id: string;
+  product_id: string | null;
+  qbo_invoice_line_id: string | null;
+  ordered_qty: number | null;
+  approved_qty: number | null;
+  fulfilled_qty: number | null;
+};
+
+/** Reject a second warehouse deduction for the same exact QBO obligation across active sibling parents. */
+async function assertLogicalFulfillmentCapacity(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  selectedLines: FulfillmentCapacityLine[],
+  selectedQuantities: Map<string, number>,
+) {
+  const selectedOrderIds = [...new Set(selectedLines.map((line) => line.shipping_order_id))];
+  const { data: selectedParents, error: selectedParentError } = await supabase
+    .from("shipping_orders")
+    .select("id,source_invoice_id")
+    .in("id", selectedOrderIds);
+  if (selectedParentError) throw new Error(selectedParentError.message);
+  const sourceInvoiceIds = [...new Set((selectedParents ?? [])
+    .map((parent) => parent.source_invoice_id)
+    .filter((sourceInvoiceId): sourceInvoiceId is string => Boolean(sourceInvoiceId)))];
+  if (sourceInvoiceIds.length === 0) return;
+
+  const { data: siblingParents, error: siblingParentError } = await supabase
+    .from("shipping_orders")
+    .select("id")
+    .in("source_invoice_id", sourceInvoiceIds)
+    .is("duplicate_of_order_id", null);
+  if (siblingParentError) throw new Error(siblingParentError.message);
+  const activeSiblingOrderIds = (siblingParents ?? []).map((parent) => parent.id);
+  if (activeSiblingOrderIds.length === 0) return;
+
+  const { data: rawSiblingLines, error: siblingLineError } = await supabase
+    .from("shipping_order_lines")
+    .select("id,shipping_order_id,product_id,qbo_invoice_line_id,ordered_qty,approved_qty,fulfilled_qty")
+    .in("shipping_order_id", activeSiblingOrderIds);
+  if (siblingLineError) throw new Error(siblingLineError.message);
+  const siblingLines = (rawSiblingLines ?? []) as unknown as FulfillmentCapacityLine[];
+  const overages = findLogicalFulfillmentOverages(
+    siblingLines,
+    selectedLines.map((line) => ({ lineId: line.id, quantity: selectedQuantities.get(line.id) ?? 0 })),
+  );
+  if (overages.length > 0) {
+    throw new Error("This QuickBooks invoice item is already fulfilled by its linked order record. No duplicate shipment or inventory deduction was made.");
+  }
 }
 
 async function getLogicalOrderIds(
@@ -1602,7 +1653,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const { data: lines, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, fulfillment_source")
+    .select("id, shipping_order_id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, fulfillment_source")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
 
@@ -1610,7 +1661,9 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const selectedLines = (lines ?? []) as unknown as Array<{
     id: string;
+    shipping_order_id: string;
     product_id: string | null;
+    qbo_invoice_line_id: string | null;
     ordered_qty: number | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
@@ -1622,6 +1675,15 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   if (selectedLines.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Selected+line+does+not+belong+to+this+order`);
   if (selectedLines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+ship+an+unmapped+product+line`);
   if (selectedLines.some((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"))) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
+  try {
+    await assertLogicalFulfillmentCapacity(
+      adminClient,
+      selectedLines,
+      new Map(selectedLines.map((line) => [line.id, Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0))])),
+    );
+  } catch (capacityError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(capacityError instanceof Error ? capacityError.message : "Unable to validate fulfillment capacity")}`);
+  }
 
   const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;
@@ -1702,12 +1764,17 @@ export async function completeOrderShipmentAction(formData: FormData) {
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
   const { data: sourceRows, error: sourceError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, fulfillment_source")
+    .select("id,shipping_order_id,product_id,qbo_invoice_line_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_source")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
   if (sourceError || sourceRows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
-  const shipmentSourceRows = (sourceRows ?? []) as unknown as Array<{ id: string; fulfillment_source?: string | null }>;
+  const shipmentSourceRows = (sourceRows ?? []) as unknown as Array<FulfillmentCapacityLine & { fulfillment_source?: string | null }>;
   if (shipmentSourceRows.some((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"))) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
+  try {
+    await assertLogicalFulfillmentCapacity(adminClient, shipmentSourceRows, new Map(lines.map((line) => [line.line_id, line.quantity])));
+  } catch (capacityError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(capacityError instanceof Error ? capacityError.message : "Unable to validate fulfillment capacity")}`);
+  }
 
   const { data: shipmentId, error } = await adminClient.rpc("complete_order_shipment", {
     p_order_id: orderId,
@@ -1771,13 +1838,18 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
 
   const { data: rows, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, shipping_order_id, product_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
+    .select("id, shipping_order_id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
     .in("id", selectedIds);
   if (lineError || rows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
 
-  const lines = (rows ?? []) as unknown as Array<{ id: string; shipping_order_id: string; product_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
+  const lines = (rows ?? []) as unknown as Array<{ id: string; shipping_order_id: string; product_id: string | null; qbo_invoice_line_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
   if (lines.some((line) => ownerOrderIdByLineId.get(line.id) !== line.shipping_order_id)) redirect(`/orders/${orderId}?error=Selected+line+owner+does+not+match+its+operational+record`);
   if (lines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+fulfill+an+unmapped+product+line`);
+  try {
+    await assertLogicalFulfillmentCapacity(adminClient, lines, selectedQuantities);
+  } catch (capacityError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(capacityError instanceof Error ? capacityError.message : "Unable to validate fulfillment capacity")}`);
+  }
 
   const fulfilledAtIso = `${fulfillmentDate}T12:00:00.000Z`;
   const linesByOwner = new Map<string, typeof lines>();

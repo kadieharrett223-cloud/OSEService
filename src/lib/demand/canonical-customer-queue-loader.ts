@@ -182,14 +182,21 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
     const fulfilledQty = Math.max(0, Number(line.fulfilled_qty ?? 0));
     const firstPaymentAt = parent?.first_payment_at ?? null;
     const invoiceDate = parent?.qbo_invoices?.invoice_date ?? null;
-    const priorityDate = firstPaymentAt ?? invoiceDate;
-    const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER" = firstPaymentAt ? "FIRST_PAYMENT" : invoiceDate ? "INVOICE_DATE" : "INVOICE_NUMBER";
+    const orderCreatedAt = parent?.created_at ?? null;
+    const priorityDate = firstPaymentAt ?? invoiceDate ?? orderCreatedAt;
+    const priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" | "INVOICE_NUMBER" = firstPaymentAt
+      ? "FIRST_PAYMENT"
+      : invoiceDate
+        ? "INVOICE_DATE"
+        : orderCreatedAt
+          ? "ORDER_CREATED"
+          : "INVOICE_NUMBER";
     const hasAuditedManualPosition = Boolean(
       line.queue_position_override_reason
       || line.queue_position_override_at
       || line.queue_position_override_by,
     );
-    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt: parent?.created_at ?? null, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: false };
+    return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: false };
   }
   for (const line of canonicalLines) {
     if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;

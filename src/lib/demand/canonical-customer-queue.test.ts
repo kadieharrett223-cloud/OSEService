@@ -92,10 +92,19 @@ describe("projectCanonicalCustomerQueue", () => {
     ]);
   });
 
-  it("uses the invoice number only when payment and creation dates are both unavailable", () => {
+  it("uses the recorded order creation date before an invoice-number fallback", () => {
     const queue = projectCanonicalCustomerQueue([
-      row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER" }),
-      row({ invoice: "122347", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER" }),
+      row({ invoice: "12000", sourceInvoiceId: "later-created", lineId: "later-created", logicalDemandKey: "later-created", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED", orderCreatedAt: "2026-06-02" }),
+      row({ invoice: "99999", sourceInvoiceId: "earlier-created", lineId: "earlier-created", logicalDemandKey: "earlier-created", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED", orderCreatedAt: "2026-06-01" }),
+    ]);
+
+    expect(queue.map((item) => item.invoice)).toEqual(["99999", "12000"]);
+  });
+
+  it("uses the invoice number only when every date is unavailable", () => {
+    const queue = projectCanonicalCustomerQueue([
+      row({ invoice: "127011", sourceInvoiceId: "newer-source", lineId: "newer", logicalDemandKey: "newer", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: null }),
+      row({ invoice: "122347", sourceInvoiceId: "older-source", lineId: "older", logicalDemandKey: "older", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "INVOICE_NUMBER", orderCreatedAt: null }),
     ]);
 
     expect(queue.map((item) => item.invoice)).toEqual(["122347", "127011"]);

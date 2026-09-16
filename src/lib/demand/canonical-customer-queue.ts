@@ -6,7 +6,7 @@ export type CanonicalCustomerQueueRow = CustomerDemandRow & {
   firstPaymentAt: string | null;
   invoiceDate: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" | "INVOICE_NUMBER";
   orderCreatedAt: string | null;
   storedPosition: number | null;
   manualPosition?: number | null;
@@ -18,8 +18,11 @@ export type ProjectedCustomerQueueRow = CanonicalCustomerQueueRow & {
 };
 
 function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCustomerQueueRow) {
-  const leftPriorityDate = Date.parse(left.priorityDate ?? left.firstPaymentAt ?? left.invoiceDate ?? "");
-  const rightPriorityDate = Date.parse(right.priorityDate ?? right.firstPaymentAt ?? right.invoiceDate ?? "");
+  // A first payment establishes the customer's place.  If payment is not
+  // known, use the invoice date; historical records without either retain the
+  // recorded order creation date before we ever fall back to an invoice number.
+  const leftPriorityDate = Date.parse(left.priorityDate ?? left.firstPaymentAt ?? left.invoiceDate ?? left.orderCreatedAt ?? "");
+  const rightPriorityDate = Date.parse(right.priorityDate ?? right.firstPaymentAt ?? right.invoiceDate ?? right.orderCreatedAt ?? "");
   const leftHasPriorityDate = Number.isFinite(leftPriorityDate);
   const rightHasPriorityDate = Number.isFinite(rightPriorityDate);
   if (leftHasPriorityDate !== rightHasPriorityDate) return leftHasPriorityDate ? -1 : 1;
@@ -46,8 +49,9 @@ function compareQueueRows(left: CanonicalCustomerQueueRow, right: CanonicalCusto
 /**
  * The display-only Customer List queue. Stored line positions remain compatibility metadata;
  * canonical open demand, merged by invoice, is the authoritative display population. Priority is
- * the actual first payment when known, otherwise the invoice creation date, then the invoice
- * number in ascending order only when neither date is available.
+ * the actual first payment when known, otherwise the invoice creation date. Historical records
+ * missing both retain their recorded order creation date; invoice number is used only if every
+ * date is unavailable.
  */
 export function projectCanonicalCustomerQueue<T extends CanonicalCustomerQueueRow>(rows: T[]): Array<T & { position: string }> {
   const merged = mergeOpenCustomerDemand(rows.filter((row) => !row.excludedFromQueue)).sort(compareQueueRows);

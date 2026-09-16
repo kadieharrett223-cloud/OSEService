@@ -24,7 +24,7 @@ type CustomerQueueItem = {
   orderId: string;
   firstPaymentAt: string | null;
   priorityDate: string | null;
-  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "INVOICE_NUMBER";
+  priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" | "INVOICE_NUMBER";
   manuallyMoved?: boolean;
 };
 

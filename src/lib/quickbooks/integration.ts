@@ -262,6 +262,27 @@ function getPaymentStatus(invoice: Record<string, unknown>) {
   return "Partially Paid";
 }
 
+const PAYMENT_ELIGIBLE_STATUSES = new Set(["Paid", "Partially Paid"]);
+
+/**
+ * Payments do not reliably advance an Invoice's QBO metadata timestamp.  The
+ * regular invoice cursor can therefore miss an invoice that was issued earlier
+ * and paid today.  Refresh only payment-linked invoices that are absent or
+ * still locally unpaid; already-current paid snapshots do not add QBO calls.
+ */
+export function selectPaymentLinkedInvoiceRefreshIds(
+  firstPaymentByQboInvoiceId: Map<string, string>,
+  snapshots: Array<{ qbo_invoice_id: string; payment_status: string | null }>,
+) {
+  const paymentStatusByInvoiceId = new Map(
+    snapshots.map((snapshot) => [snapshot.qbo_invoice_id, snapshot.payment_status]),
+  );
+
+  return [...firstPaymentByQboInvoiceId.keys()]
+    .filter((qboInvoiceId) => !PAYMENT_ELIGIBLE_STATUSES.has(paymentStatusByInvoiceId.get(qboInvoiceId) ?? ""))
+    .sort();
+}
+
 export function getQuickbooksConnectUrl(origin: string, state: string) {
   const config = getQuickbooksCredentials();
 
@@ -993,6 +1014,7 @@ export async function getQuickbooksFirstPaymentDates() {
 async function syncQuickbooksFirstPaymentDates(
   connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
   accessToken: string,
+  knownFirstPaymentByQboInvoiceId?: Map<string, string>,
 ) {
   const supabase = getSupabaseAdmin();
   const { error: capabilityError } = await supabase.from("shipping_orders").select("first_payment_at").limit(1);
@@ -1000,7 +1022,8 @@ async function syncQuickbooksFirstPaymentDates(
 
   // Queue priority must reflect every linked invoice's actual first payment; the
   // forward-intake cutoff is enforced separately when deciding which orders to create.
-  const paymentsByInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
+  const paymentsByInvoiceId = knownFirstPaymentByQboInvoiceId
+    ?? await loadQuickbooksFirstPaymentDates(connection, accessToken);
 
   const { data: invoices } = await supabase.from("qbo_invoices").select("id,qbo_invoice_id");
   const invoiceIdByQboId = new Map((invoices ?? []).map((invoice) => [invoice.qbo_invoice_id, invoice.id]));
@@ -1017,6 +1040,35 @@ async function syncQuickbooksFirstPaymentDates(
   return { paymentsProcessed: paymentsByInvoiceId.size, ordersUpdated: updates.length, skipped: false, firstPaymentByQboInvoiceId: paymentsByInvoiceId };
 }
 
+async function syncPaymentLinkedInvoices(
+  connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
+  accessToken: string,
+  firstPaymentByQboInvoiceId: Map<string, string>,
+) {
+  const supabase = getSupabaseAdmin();
+  const { data: snapshots, error } = await supabase
+    .from("qbo_invoices")
+    .select("qbo_invoice_id,payment_status");
+  if (error) throw new Error(error.message);
+
+  const refreshIds = selectPaymentLinkedInvoiceRefreshIds(
+    firstPaymentByQboInvoiceId,
+    snapshots ?? [],
+  );
+
+  let invoiceCount = 0;
+  let customerCount = 0;
+  // Keep this sequential: QBO throttles requests, and normally this is only
+  // newly paid invoices that the incremental invoice cursor could not see.
+  for (const qboInvoiceId of refreshIds) {
+    const refreshed = await syncQuickbooksSnapshots(connection, accessToken, qboInvoiceId);
+    invoiceCount += refreshed.invoiceCount;
+    customerCount += refreshed.customerCount;
+  }
+
+  return { invoiceCount, customerCount, refreshedInvoiceIds: refreshIds };
+}
+
 export async function syncQuickbooksInvoices() {
   const supabase = getSupabaseAdmin();
   const connection = await loadConnectionForSync();
@@ -1024,7 +1076,17 @@ export async function syncQuickbooksInvoices() {
   try {
     const accessToken = await ensureAccessToken(connection);
     const result = await syncQuickbooksSnapshots(connection, accessToken);
-    const paymentResult = await syncQuickbooksFirstPaymentDates(connection, accessToken);
+    const firstPaymentByQboInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
+    const paymentLinkedResult = await syncPaymentLinkedInvoices(
+      connection,
+      accessToken,
+      firstPaymentByQboInvoiceId,
+    );
+    const paymentResult = await syncQuickbooksFirstPaymentDates(
+      connection,
+      accessToken,
+      firstPaymentByQboInvoiceId,
+    );
     const forwardIntakeResult = await runEnabledQboForwardIntake(paymentResult.firstPaymentByQboInvoiceId);
 
     const syncCursorAt = new Date().toISOString();
@@ -1043,12 +1105,14 @@ export async function syncQuickbooksInvoices() {
     }
 
     return {
-      ...result,
+      invoiceCount: result.invoiceCount + paymentLinkedResult.invoiceCount,
+      customerCount: result.customerCount + paymentLinkedResult.customerCount,
       paymentsProcessed: paymentResult.paymentsProcessed,
       ordersUpdated: paymentResult.ordersUpdated,
       paymentSyncSkipped: paymentResult.skipped,
       forwardIntakeEnabled: forwardIntakeResult.enabled,
       forwardIntakeImportedLines: forwardIntakeResult.importedLines,
+      paymentLinkedInvoicesRefreshed: paymentLinkedResult.refreshedInvoiceIds.length,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

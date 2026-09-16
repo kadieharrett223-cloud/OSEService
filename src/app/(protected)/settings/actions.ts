@@ -129,7 +129,10 @@ export async function syncQuickbooksAction() {
     const forwardIntakeMessage = result.forwardIntakeEnabled
       ? ` ${result.forwardIntakeImportedLines ?? 0} clean demand line(s) automatically imported.`
       : " Continuous forward intake is disabled.";
-    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.${forwardIntakeMessage}`)}`);
+    const paymentRefreshMessage = result.paymentLinkedInvoicesRefreshed
+      ? ` Refreshed ${result.paymentLinkedInvoicesRefreshed} payment-linked invoice${result.paymentLinkedInvoicesRefreshed === 1 ? "" : "s"}.`
+      : "";
+    redirect(`/settings?message=${encodeURIComponent(`QuickBooks sync complete: ${result.invoiceCount} invoices, ${result.customerCount} customers, ${result.ordersUpdated ?? 0} first-payment dates updated.${paymentRefreshMessage}${forwardIntakeMessage}`)}`);
   } catch (error) {
     if (isRedirectLikeError(error)) throw error;
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";

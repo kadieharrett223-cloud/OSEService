@@ -17,10 +17,10 @@ import { customerQueueObligationQty, demandLineIdentity, isOpenCustomerQueueLine
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
-import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
-import { canonicalProductSkuKey, canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
+import { canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -204,6 +204,14 @@ function formatPackageSummary(dimensions: PackageDimensions | null) {
   return [formatPackageDimensions(dimensions), formatPackageWeight(dimensions)].filter(Boolean).join(" · ") || null;
 }
 
+function normalizeSkuKey(value: string | null | undefined) {
+  return String(value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeQboSkuKeys(value: string | null | undefined) {
+  return qboSkuCandidates(value).map(normalizeSkuKey).filter(Boolean) as string[];
+}
+
 const UNSORTED_GROUP = "Other / Unsorted";
 const UNSORTED_GROUP_SORT = 9990;
 
@@ -307,10 +315,13 @@ export default async function InventoryPage({
     const invoiceProductKey = key.split("|").slice(0, 2).join("|");
     provenInvoiceShippedQtyByProduct.set(invoiceProductKey, (provenInvoiceShippedQtyByProduct.get(invoiceProductKey) ?? 0) + quantity);
   }
-  const productIdByAlias = buildSafeQboProductIdByAlias(
-    productRows,
-    productAliasRows.filter((alias): alias is ProductAliasRow & { product_id: string } => Boolean(alias.product_id)),
-  );
+  const productIdByAliasKey = new Map<string, string>();
+  for (const product of productRows) {
+    if (product.sku) productIdByAliasKey.set(normalizeSkuKey(product.sku), product.id);
+  }
+  for (const alias of productAliasRows) {
+    if (alias.alias && alias.product_id) productIdByAliasKey.set(normalizeSkuKey(alias.alias), alias.product_id);
+  }
   const allQboLineRows = sharedCanonicalQueue.qboInvoiceLines;
   const fulfilledQtyByQboInvoiceLineId = new Map<string, number>();
   for (const line of dedupedQueueLineRows) {
@@ -333,25 +344,20 @@ export default async function InventoryPage({
   }
   const invoiceQtyByInvoiceProduct = new Map<string, number>();
   for (const qboLine of allQboLineRows as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; product_id: string | null; ordered_qty?: number | null }>) {
-    const qboProductId = qboLine.product_id ?? qboSkuCandidates(qboLine.qbo_sku).map((sku) => productIdByAlias.get(sku)).find(Boolean) ?? null;
+    const qboProductId = qboLine.product_id ?? normalizeQboSkuKeys(qboLine.qbo_sku).map((key) => productIdByAliasKey.get(key)).find(Boolean) ?? null;
     const orderedQty = Math.max(0, Number(qboLine.ordered_qty ?? 0));
     if (qboProductId && orderedQty > 0) {
       const qtyKey = `${qboLine.qbo_invoice_id}|${qboProductId}`;
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
   }
-  const aliasesByProductId = new Map<string, string[]>();
+  const operationalSkuByProduct = new Map<string, string>();
   for (const alias of productAliasRows) {
     if (!alias.product_id || !alias.alias) continue;
-    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
+    const candidate = preferredOperationalSku(null, [alias.alias]);
+    if (!candidate || /^\d+$/.test(candidate)) continue;
+    if (!operationalSkuByProduct.has(alias.product_id)) operationalSkuByProduct.set(alias.product_id, candidate);
   }
-  // Numeric QuickBooks item IDs can have several historical aliases. The canonical product
-  // name is the stable operational identity; alias insertion order must never split demand,
-  // floor stock, or incoming containers into separate inventory rows.
-  const operationalSkuByProduct = new Map(productRows.map((product) => [
-    product.id,
-    preferredOperationalSku(product.sku, aliasesByProductId.get(product.id), product.canonical_name),
-  ]));
 
   const demandSkuCountsByProduct = new Map<string, Map<string, number>>();
   for (const line of dedupedQueueLineRows) {
@@ -364,13 +370,11 @@ export default async function InventoryPage({
   }
   for (const [productId, counts] of demandSkuCountsByProduct) {
     const preferred = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
-    // A legacy invoice description can improve the label only when the catalog has no stable
-    // operational SKU. It must not replace a product's canonical grouping key.
-    if (preferred && !operationalSkuByProduct.get(productId)) operationalSkuByProduct.set(productId, preferred);
+    if (preferred) operationalSkuByProduct.set(productId, preferred);
   }
   const canonicalInventoryKeyByProductId = new Map(productRows.map((product) => [
     product.id,
-    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name) || product.id,
+    canonicalSkuKey(operationalSkuByProduct.get(product.id) ?? product.sku ?? "") || product.id,
   ]));
 
   const onFloorByProduct = toRecordMap(

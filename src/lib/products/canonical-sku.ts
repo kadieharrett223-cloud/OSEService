@@ -21,20 +21,9 @@ export function canonicalSkuKey(value: string | null | undefined) {
   return stripped;
 }
 
-export function preferredOperationalSku(
-  primarySku: string | null | undefined,
-  aliases: Array<string | null | undefined> = [],
-  canonicalName?: string | null,
-) {
+export function preferredOperationalSku(primarySku: string | null | undefined, aliases: Array<string | null | undefined> = []) {
   const primary = String(primarySku ?? "").trim().toUpperCase();
   if (primary && !/^\d+$/.test(primary)) return primary;
-
-  // Recycled QuickBooks item IDs are often numeric. In that case the canonical
-  // product name is the explicit operational identity; aliases are merely
-  // lookup aids and may contain several historical variants. Never let alias
-  // insertion order split one product's customer queue.
-  const canonical = String(canonicalName ?? "").trim().toUpperCase();
-  if (canonical && !/^\d+$/.test(canonical) && !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(canonical))) return canonical;
 
   const operationalAlias = aliases
     .map((alias) => String(alias ?? "").trim().toUpperCase())
@@ -42,12 +31,8 @@ export function preferredOperationalSku(
   return operationalAlias ?? primary;
 }
 
-export function canonicalProductSkuKey(
-  primarySku: string | null | undefined,
-  aliases: Array<string | null | undefined> = [],
-  canonicalName?: string | null,
-) {
-  return canonicalSkuKey(preferredOperationalSku(primarySku, aliases, canonicalName));
+export function canonicalProductSkuKey(primarySku: string | null | undefined, aliases: Array<string | null | undefined> = []) {
+  return canonicalSkuKey(preferredOperationalSku(primarySku, aliases));
 }
 
 /** Generic accounting labels describe a line's role, not a reusable product identity. */

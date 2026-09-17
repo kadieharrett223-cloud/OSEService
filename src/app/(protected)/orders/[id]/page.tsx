@@ -55,8 +55,6 @@ type OrderDetailRow = {
   legacy_customer_name: string | null;
   review_status: string | null;
   cancellation_status?: string | null;
-  payment_hold?: boolean | null;
-  payment_hold_reason?: string | null;
   cancellation_reason?: string | null;
   promised_ship_date: string | null;
   shipping_method: string | null;
@@ -629,8 +627,6 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
   if (columnSet.has("fulfillment_method")) columns.push("fulfillment_method");
   if (columnSet.has("cancellation_status")) columns.push("cancellation_status");
   if (columnSet.has("cancellation_reason")) columns.push("cancellation_reason");
-  if (columnSet.has("payment_hold")) columns.push("payment_hold");
-  if (columnSet.has("payment_hold_reason")) columns.push("payment_hold_reason");
 
   const lineColumns = [
     "id",
@@ -1077,27 +1073,19 @@ export default async function OrderDetailPage({
   const assignableProducts = [...(productRows ?? [])]
     .sort((left, right) => String(left.sku ?? left.canonical_name ?? "").localeCompare(String(right.sku ?? right.canonical_name ?? "")));
 
-  type ProductLookup = { id: string; sku: string | null; canonical_name: string | null };
-  const directProductsBySku = new Map<string, Map<string, ProductLookup>>();
-  const aliasProductsBySku = new Map<string, Map<string, ProductLookup>>();
-  const addProductLookup = (target: Map<string, Map<string, ProductLookup>>, keyValue: string | null, product: ProductLookup) => {
-    const key = normalizeSkuKey(keyValue);
-    if (!key) return;
-    const matches = target.get(key) ?? new Map<string, ProductLookup>();
-    matches.set(product.id, product);
-    target.set(key, matches);
-  };
-  for (const product of productRows ?? []) addProductLookup(directProductsBySku, product.sku, product);
-  for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
-    const product = alias.products as ProductLookup | null;
-    if (product) addProductLookup(aliasProductsBySku, alias.alias, product);
+  const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
+  for (const product of productRows ?? []) {
+    const skuKey = normalizeSkuKey(product.sku);
+    if (skuKey) productMap.set(skuKey, product);
   }
-  // Product identity is a display input too. Prefer an exact catalog SKU and
-  // leave a shared legacy alias unresolved instead of showing coverage for an
-  // unrelated product.
-  const productMap = new Map<string, ProductLookup>();
-  for (const [key, matches] of directProductsBySku) if (matches.size === 1) productMap.set(key, matches.values().next().value!);
-  for (const [key, matches] of aliasProductsBySku) if (!directProductsBySku.has(key) && matches.size === 1) productMap.set(key, matches.values().next().value!);
+
+  for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
+    const aliasKey = normalizeSkuKey(alias.alias);
+    const product = alias.products as { id: string; sku: string | null; canonical_name: string | null } | null;
+    if (aliasKey && product) {
+      productMap.set(aliasKey, product);
+    }
+  }
   const aliasesByProductId = new Map<string, string[]>();
   for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
     if (!alias.product_id || !alias.alias) continue;
@@ -1105,7 +1093,7 @@ export default async function OrderDetailPage({
   }
   const canonicalProductKeyById = new Map((productRows ?? []).map((product) => [
     product.id,
-    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name) || product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
   ]));
 
   const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.flatMap((item) =>
@@ -1643,7 +1631,6 @@ export default async function OrderDetailPage({
               ) : (
                 <>
                   <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
-                  {orderRecord.payment_hold ? <span className={`rounded-full px-2 py-1 ${quickbooksSnapshot?.payment_status === "Paid" ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fee2e2] text-[#b91c1c]"}`}>{quickbooksSnapshot?.payment_status === "Paid" ? "Payment hold cleared" : "Payment hold — do not ship"}</span> : null}
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
                   <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>

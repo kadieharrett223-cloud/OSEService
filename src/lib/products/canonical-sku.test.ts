@@ -21,10 +21,6 @@ describe("canonicalSkuKey", () => {
     expect(canonicalProductSkuKey("000246", ["220V", "HPU2204"])).toBe("HPU2204");
   });
 
-  it("uses the product's canonical name before incidental historical aliases", () => {
-    expect(canonicalProductSkuKey("000012", ["4PHR-9-1", "4PHR-9X"], "HK-4PHR-9X")).toBe("4PHR9X");
-  });
-
   it("rejects accounting labels as reusable product aliases", () => {
     expect(isUnsafeGlobalProductAlias("Note")).toBe(true);
     expect(isUnsafeGlobalProductAlias("Misc Charge")).toBe(true);

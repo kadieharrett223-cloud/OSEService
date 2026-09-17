@@ -116,7 +116,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   // displays those aliases as one customer list, so persisted positions must be calculated
   // across that same canonical product identity—not independently per historical record.
   const [{ data: products, error: productsError }, { data: aliases, error: aliasesError }] = await Promise.all([
-    supabase.from("products").select("id,sku,canonical_name"),
+    supabase.from("products").select("id,sku"),
     supabase.from("product_aliases").select("product_id,alias"),
   ]);
   if (productsError) throw new Error(productsError.message);
@@ -129,7 +129,7 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
   }
   const productKeyById = new Map((products ?? []).map((product) => [
     product.id,
-    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name) || product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
   ]));
   const targetProductKeys = new Set(uniqueProductIds.map((productId) => productKeyById.get(productId) ?? productId));
   const canonicalProductIds = (products ?? [])

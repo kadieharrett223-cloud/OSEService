@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
-import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "./quickbooks-refresh";
+import { qboSkuCandidates } from "./quickbooks-refresh";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 
 export type HistoricalQboIntakeReviewRow = {
@@ -30,10 +30,11 @@ export async function loadHistoricalQboIntakeReview(): Promise<HistoricalQboInta
     all((from, to) => db.from("product_aliases").select("product_id,alias").range(from, to)),
     all((from, to) => db.from("reviewed_obligation_resolutions").select("qbo_invoice_line_id,status").range(from, to)),
   ]);
-  const productBySku = buildSafeQboProductIdByAlias(
-    products as Array<{ id: string; sku: string | null }>,
-    (aliases as Array<{ product_id: string; alias: string | null }>).filter((row) => !isUnsafeGlobalProductAlias(row.alias)),
-  );
+  const productBySku = new Map<string, string>();
+  for (const row of [...products as Array<{ id: string; sku: string | null }>, ...aliases as Array<{ product_id: string; alias: string | null }>]) {
+    const sku = "sku" in row ? row.sku : row.alias; const id = "id" in row ? row.id : row.product_id;
+    if (sku && (!("alias" in row) || !isUnsafeGlobalProductAlias(sku))) productBySku.set(upper(sku), id);
+  }
   const invoiceById = new Map((invoices as Array<{ id: string; invoice_number: string | null; payment_status: string | null; customers?: { company_name: string | null; full_name: string | null } | null }>).map((invoice) => [invoice.id, invoice]));
   type Representation = { shipping_order_id: string; qbo_invoice_line_id: string | null; approved_qty: number | null; fulfilled_qty: number | null; approval_status: string | null; fulfillment_status: string | null };
   const linesByQboId = new Map<string, Representation[]>();
@@ -42,7 +43,7 @@ export async function loadHistoricalQboIntakeReview(): Promise<HistoricalQboInta
   const terminal = new Set((resolutions as Array<{ qbo_invoice_line_id: string | null; status: string | null }>).filter((row) => upper(row.status) === "ACTIVE" && row.qbo_invoice_line_id).map((row) => row.qbo_invoice_line_id!));
   return (qboLines as Array<{ id: string; qbo_invoice_id: string; qbo_sku: string | null; source_description: string | null; ordered_qty: number | null; product_id: string | null }>).flatMap((source) => {
     const invoice = invoiceById.get(source.qbo_invoice_id); if (!invoice || !PAID.has(upper(invoice.payment_status)) || !isInventoryDemandQuickbooksLine(source)) return [];
-    const productId = source.product_id ?? qboSkuCandidates(source.qbo_sku).map((sku) => productBySku.get(sku)).find(Boolean) ?? null;
+    const productId = source.product_id ?? qboSkuCandidates(source.qbo_sku).map((sku) => productBySku.get(upper(sku))).find(Boolean) ?? null;
     const representations = linesByQboId.get(source.id) ?? [];
     const activeRepresentations = representations.filter((line) => { const parent = ordersById.get(line.shipping_order_id) as { duplicate_of_order_id?: string | null; cancellation_status?: string | null } | undefined; return !parent?.duplicate_of_order_id && upper(parent?.cancellation_status) !== "CANCELLED"; });
     const open = activeRepresentations.some((line) => Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0) && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status)) && !CLOSED.has(upper(line.fulfillment_status)));

@@ -6,7 +6,7 @@ import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-custome
 import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { canApproveHistoricalQboIntakeLine, isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
-import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 
@@ -53,13 +53,8 @@ export async function reviewHistoricalQboIntakeAction(formData: FormData) {
   const sourceLines = (rawSourceLines ?? []) as ExistingLine[];
   const candidates = (rawCandidates ?? []) as Parent[];
   const aliases = qboSkuCandidates(source.qbo_sku);
-  const [productResult, aliasResult] = await Promise.all([
-    db.from("products").select("id,sku"),
-    aliases.length ? db.from("product_aliases").select("product_id,alias").in("alias", aliases) : Promise.resolve({ data: [], error: null }),
-  ]);
-  if (productResult.error || aliasResult.error) throw new Error(productResult.error?.message ?? aliasResult.error?.message ?? "Unable to resolve product mapping.");
-  const productIdByAlias = buildSafeQboProductIdByAlias(productResult.data ?? [], aliasResult.data ?? []);
-  const productId = source.product_id ?? aliases.map((alias) => productIdByAlias.get(alias)).find(Boolean) ?? null;
+  const { data: aliasRows } = aliases.length ? await db.from("product_aliases").select("product_id,alias").in("alias", aliases) : { data: [] };
+  const productId = source.product_id ?? aliasRows?.[0]?.product_id ?? null;
   const existingLines = sourceLines ?? [];
   const terminal = (resolutions ?? []).length > 0 || existingLines.some((line) => CLOSED.has(upper(line.fulfillment_status)) || Number(line.fulfilled_qty ?? 0) >= Number(source.ordered_qty ?? 0));
   const open = existingLines.some((line) => Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0) && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status)) && !CLOSED.has(upper(line.fulfillment_status)));

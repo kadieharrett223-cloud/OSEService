@@ -13,6 +13,13 @@ const UNSAFE_GLOBAL_ALIAS_KEYS = new Set([
   "TAXADJUSTMENT",
 ]);
 
+/** Pull a real model code from a catalog title such as "HL-2PBP-8 Base Plate".
+ * Descriptive words must never become a product identity. */
+function modelSkuFromCanonicalName(value: string) {
+  const candidates = value.match(/(?:\b(?:HL|HK|FB|YZ)-)?(?:[A-Z]{1,5}\d[A-Z0-9]*|\d+[A-Z]+[A-Z0-9]*)(?:-[A-Z0-9]+)*/g) ?? [];
+  return candidates.find((candidate) => !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(candidate))) ?? null;
+}
+
 export function canonicalSkuKey(value: string | null | undefined) {
   const normalize = (candidate: string) => candidate.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   const full = normalize(String(value ?? ""));
@@ -34,6 +41,8 @@ export function preferredOperationalSku(
   // lookup aids and may contain several historical variants. Never let alias
   // insertion order split one product's customer queue.
   const canonical = String(canonicalName ?? "").trim().toUpperCase();
+  const modelSku = modelSkuFromCanonicalName(canonical);
+  if (modelSku) return modelSku;
   if (canonical && !/^\d+$/.test(canonical) && !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(canonical))) return canonical;
 
   const operationalAlias = aliases

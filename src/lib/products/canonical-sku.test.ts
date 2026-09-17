@@ -25,6 +25,11 @@ describe("canonicalSkuKey", () => {
     expect(canonicalProductSkuKey("000012", ["4PHR-9-1", "4PHR-9X"], "HK-4PHR-9X")).toBe("4PHR9X");
   });
 
+  it("uses the model embedded in a descriptive canonical name to merge imported stock and incoming QBO demand", () => {
+    expect(canonicalProductSkuKey("000001", ["2PBP-8", "HL-2PBP-8"], "HL-2PBP-8 Base Plate 8K")).toBe("2PBP8");
+    expect(canonicalProductSkuKey("2PBP-8", [], "Model: Olympic 2PBP-8 / 8,000-lb Base Plate 2-Post Lift")).toBe("2PBP8");
+  });
+
   it("rejects accounting labels as reusable product aliases", () => {
     expect(isUnsafeGlobalProductAlias("Note")).toBe(true);
     expect(isUnsafeGlobalProductAlias("Misc Charge")).toBe(true);

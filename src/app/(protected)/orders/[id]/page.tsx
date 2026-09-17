@@ -1077,19 +1077,27 @@ export default async function OrderDetailPage({
   const assignableProducts = [...(productRows ?? [])]
     .sort((left, right) => String(left.sku ?? left.canonical_name ?? "").localeCompare(String(right.sku ?? right.canonical_name ?? "")));
 
-  const productMap = new Map<string, { id: string; sku: string | null; canonical_name: string | null }>();
-  for (const product of productRows ?? []) {
-    const skuKey = normalizeSkuKey(product.sku);
-    if (skuKey) productMap.set(skuKey, product);
-  }
-
+  type ProductLookup = { id: string; sku: string | null; canonical_name: string | null };
+  const directProductsBySku = new Map<string, Map<string, ProductLookup>>();
+  const aliasProductsBySku = new Map<string, Map<string, ProductLookup>>();
+  const addProductLookup = (target: Map<string, Map<string, ProductLookup>>, keyValue: string | null, product: ProductLookup) => {
+    const key = normalizeSkuKey(keyValue);
+    if (!key) return;
+    const matches = target.get(key) ?? new Map<string, ProductLookup>();
+    matches.set(product.id, product);
+    target.set(key, matches);
+  };
+  for (const product of productRows ?? []) addProductLookup(directProductsBySku, product.sku, product);
   for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
-    const aliasKey = normalizeSkuKey(alias.alias);
-    const product = alias.products as { id: string; sku: string | null; canonical_name: string | null } | null;
-    if (aliasKey && product) {
-      productMap.set(aliasKey, product);
-    }
+    const product = alias.products as ProductLookup | null;
+    if (product) addProductLookup(aliasProductsBySku, alias.alias, product);
   }
+  // Product identity is a display input too. Prefer an exact catalog SKU and
+  // leave a shared legacy alias unresolved instead of showing coverage for an
+  // unrelated product.
+  const productMap = new Map<string, ProductLookup>();
+  for (const [key, matches] of directProductsBySku) if (matches.size === 1) productMap.set(key, matches.values().next().value!);
+  for (const [key, matches] of aliasProductsBySku) if (!directProductsBySku.has(key) && matches.size === 1) productMap.set(key, matches.values().next().value!);
   const aliasesByProductId = new Map<string, string[]>();
   for (const alias of (aliasRows ?? []) as ProductAliasLookupRow[]) {
     if (!alias.product_id || !alias.alias) continue;

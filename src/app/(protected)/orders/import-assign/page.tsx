@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getQuickbooksFirstPaymentDates } from "@/lib/quickbooks/integration";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { previewQboForwardIntake } from "@/lib/orders/qbo-forward-intake-service";
@@ -116,13 +116,10 @@ export default async function ImportAssignOrdersPage() {
   const customerRows = customerIds.length ? await loadCustomersById(customerIds) : [];
 
   const customerNameById = new Map(customerRows.map((customer) => [customer.id, customer.company_name ?? customer.full_name ?? "Customer pending"]));
-  const productIdBySku = new Map<string, string>();
-  for (const product of productResult.data ?? []) {
-    if (product.sku) productIdBySku.set(product.sku.trim().toUpperCase(), product.id);
-  }
-  for (const alias of aliasResult.data ?? []) {
-    if (alias.alias && !isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(alias.alias.trim().toUpperCase(), alias.product_id);
-  }
+  const productIdBySku = buildSafeQboProductIdByAlias(
+    productResult.data ?? [],
+    (aliasResult.data ?? []).filter((alias) => !isUnsafeGlobalProductAlias(alias.alias)),
+  );
   const linesByInvoice = new Map<string, InvoiceLine[]>();
   for (const line of invoiceLineRows) {
     const lines = linesByInvoice.get(line.qbo_invoice_id) ?? [];

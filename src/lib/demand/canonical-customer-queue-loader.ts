@@ -94,12 +94,9 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
   ]);
 
-  const productIdByAlias = new Map<string, string>();
   const aliasesByProductId = new Map<string, string[]>();
-  for (const product of products as Array<{ id: string; sku: string | null }>) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
   for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) {
     if (!alias.product_id || !alias.alias) continue;
-    productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
   const productQueueKeyById = new Map((products as Array<{ id: string; sku: string | null; canonical_name: string | null }>).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name)]));

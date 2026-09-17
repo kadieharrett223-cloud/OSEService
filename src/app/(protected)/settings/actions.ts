@@ -13,7 +13,7 @@ import {
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { classifyQboBacklogLine } from "@/lib/orders/qbo-backlog-classifier";
-import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
 import { isWithinAutomaticQboIntake } from "@/lib/orders/qbo-intake-policy";
@@ -250,9 +250,12 @@ export async function importQualifiedQboBacklogAction() {
     const orderLines = (orderLineResult.data ?? []) as unknown as BacklogOrderLine[];
     if (orderLineResult.error) throw new Error(orderLineResult.error.message);
     const inventoryTransactions = (inventoryResult.data ?? []) as unknown as InventoryTransaction[];
-    const productIdBySku = new Map<string, string>();
-    for (const product of productResult.data ?? []) productIdBySku.set(normalizedText(product.sku), product.id);
-    for (const alias of aliasResult.data ?? []) if (!isUnsafeGlobalProductAlias(alias.alias)) productIdBySku.set(normalizedText(alias.alias), alias.product_id);
+    // Use exactly the same collision-safe resolution as the live QBO sync. An
+    // ambiguous historical alias must be reviewed, never silently assigned.
+    const productIdBySku = buildSafeQboProductIdByAlias(
+      productResult.data ?? [],
+      (aliasResult.data ?? []).filter((alias) => !isUnsafeGlobalProductAlias(alias.alias)),
+    );
 
     const linesByInvoice = new Map<string, QboInvoiceLine[]>();
     for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);

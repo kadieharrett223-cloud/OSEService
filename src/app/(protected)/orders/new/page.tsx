@@ -89,8 +89,9 @@ export default async function NewOrderPage({
                 </div>
                 <form action={createOrderFromQuickbooksInvoiceAction}>
                   <input type="hidden" name="qbo_invoice_id" value={invoice.id} />
+                  {invoice.payment_status !== "Paid" ? <input type="hidden" name="payment_hold" value="true" /> : null}
                   <button type="submit" className="btn-primary">
-                    {invoice.existingOrderId ? "Open in New Orders" : "Add to New Orders"}
+                    {invoice.existingOrderId ? "Open in New Orders" : invoice.payment_status === "Paid" ? "Add to New Orders" : "Add With Payment Hold"}
                   </button>
                 </form>
               </div>

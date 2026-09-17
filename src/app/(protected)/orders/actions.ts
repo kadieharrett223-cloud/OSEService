@@ -89,6 +89,41 @@ async function assertOrderIsOperational(
   }
 }
 
+function isPaidQuickbooksInvoice(status: string | null | undefined) {
+  return String(status ?? "").trim().toUpperCase() === "PAID";
+}
+
+/** Payment-held exceptions are intentionally queued, but never shippable until a live QBO refresh confirms balance = 0. */
+async function assertOrderCanShip(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+) {
+  await assertOrderIsOperational(supabase, orderId);
+  const { data: order, error } = await supabase
+    .from("shipping_orders")
+    .select("id,source_invoice_id,payment_hold,qbo_invoices(qbo_invoice_id,payment_status)")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (error || !order) redirect(`/orders/${orderId}?error=${encodeURIComponent(error?.message ?? "Order not found")}`);
+  const heldOrder = order as unknown as { payment_hold?: boolean | null; qbo_invoices?: { qbo_invoice_id?: string | null; payment_status?: string | null } | null };
+  if (!heldOrder.payment_hold) return;
+  const qboInvoiceId = heldOrder.qbo_invoices?.qbo_invoice_id;
+  if (!qboInvoiceId) redirect(`/orders/${orderId}?error=Payment+hold+cannot+be+cleared+because+the+QuickBooks+invoice+is+missing`);
+  try {
+    await syncQuickbooksInvoice(qboInvoiceId);
+  } catch (refreshError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(`Payment hold: could not verify live QuickBooks balance (${refreshError instanceof Error ? refreshError.message : "refresh failed"})`)}`);
+  }
+  const { data: refreshedInvoice, error: refreshedError } = await supabase
+    .from("qbo_invoices")
+    .select("payment_status")
+    .eq("qbo_invoice_id", qboInvoiceId)
+    .maybeSingle();
+  if (refreshedError || !isPaidQuickbooksInvoice(refreshedInvoice?.payment_status)) {
+    redirect(`/orders/${orderId}?error=Payment+hold:+QuickBooks+must+show+a+zero+balance+before+shipping`);
+  }
+}
+
 async function safeAccessUserId(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   userId: string | null | undefined,
@@ -863,6 +898,7 @@ export async function refreshOrderFromQuickbooksAction(formData: FormData) {
 export async function createOrderFromQuickbooksInvoiceAction(formData: FormData) {
   await requireUser();
   const invoiceId = getString(formData, "qbo_invoice_id");
+  const paymentHold = getString(formData, "payment_hold") === "true";
   const adminClient = getSupabaseAdmin();
   if (!invoiceId) redirect("/orders/new?error=Select+a+QuickBooks+invoice");
 
@@ -872,10 +908,17 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   ]);
 
   if (invoiceError || !invoice) redirect(`/orders/new?error=${encodeURIComponent(invoiceError?.message ?? "QuickBooks invoice not found")}`);
+  if (!isPaidQuickbooksInvoice(invoice.payment_status) && !paymentHold) {
+    redirect(`/orders/new?error=Unpaid+invoices+must+be+explicitly+added+with+a+payment+hold`);
+  }
 
   const existingOrder = resolveCanonicalOrderParent(existing ?? []);
   const resolution = resolveInvoiceOrder(existingOrder);
   if (resolution.action === "refresh") {
+    if (paymentHold) {
+      const { error: holdError } = await adminClient.from("shipping_orders").update({ payment_hold: true, payment_hold_reason: "Approved prepayment exception", payment_hold_set_at: new Date().toISOString() } as never).eq("id", resolution.orderId);
+      if (holdError) redirect(`/orders/${resolution.orderId}?error=${encodeURIComponent(holdError.message)}`);
+    }
     await activateExistingQuickbooksOrder(adminClient, resolution.orderId, invoice);
     redirect(`/orders?tab=new&message=QuickBooks+invoice+opened+in+New+Orders`);
   }
@@ -906,7 +949,10 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
       source_type: "QBO_INVOICE",
       review_status: "APPROVED",
       legacy_customer_name: customer?.company_name ?? customer?.full_name ?? null,
-    })
+      payment_hold: paymentHold,
+      payment_hold_reason: paymentHold ? "Approved prepayment exception" : null,
+      payment_hold_set_at: paymentHold ? new Date().toISOString() : null,
+    } as never)
     .select("id")
     .single();
 
@@ -1346,7 +1392,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   const actorId = await safeAccessUserId(adminClient, user.id);
 
   if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
-  await assertOrderIsOperational(adminClient, orderId);
+  await assertOrderCanShip(adminClient, orderId);
   if (!fulfilledDate) redirect(`/orders/${orderId}?error=Completion+date+is+required`);
   if (quantity <= 0) redirect(`/orders/${orderId}?error=Fulfillment+quantity+must+be+greater+than+zero`);
 
@@ -1460,7 +1506,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
   if (!orderId || !lineId) {
     redirect(`/orders/${orderId ?? ""}?error=Missing+line+reference`);
   }
-  await assertOrderIsOperational(adminClient, orderId);
+  await assertOrderCanShip(adminClient, orderId);
 
   if (!trackingNumber) {
     redirect(`/orders/${orderId}?error=Tracking+number+is+required+to+mark+as+shipped`);
@@ -1586,7 +1632,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   }
   const actorId = await safeAccessUserId(adminClient, user.id);
   if (!orderId || selectedIds.length === 0 || !pickupPersonName || !acknowledgmentDocumentId || !driversLicenseDocumentId) redirect(`/orders/${orderId ?? ""}?error=Pickup+person,+acknowledgment,+driver%27s+license,+and+items+are+required`);
-  await assertOrderIsOperational(adminClient, orderId);
+  await assertOrderCanShip(adminClient, orderId);
 
   const documentColumns = await loadTableColumnSet(adminClient, "order_attachments", ["document_type", "is_restricted"]);
   if (!documentColumns.has("document_type") || !documentColumns.has("is_restricted")) redirect(`/orders/${orderId}?error=Pickup+document+schema+is+not+available+yet`);
@@ -1642,7 +1688,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   }
 
   if (!orderId) redirect(`/orders/${orderId ?? ""}?error=Select+at+least+one+mapped+item+to+ship`);
-  await assertOrderIsOperational(adminClient, orderId);
+  await assertOrderCanShip(adminClient, orderId);
   if (selectedIds.length === 0) {
     const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
     if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
@@ -1753,7 +1799,7 @@ export async function completeOrderShipmentAction(formData: FormData) {
     }
   }
   if (!orderId || !shipmentDate || !idempotencyKey) redirect(`/orders/${orderId ?? ""}?error=Select+shipment+items+and+a+ship+date`);
-  await assertOrderIsOperational(adminClient, orderId);
+  await assertOrderCanShip(adminClient, orderId);
   if (selectedIds.length === 0) {
     const hasShippableLines = await hasRemainingShippableLinesForOrder(adminClient, orderId);
     if (!hasShippableLines) redirect(`/orders/${orderId}?error=${encodeURIComponent(NO_SHIPPABLE_LINES_ERROR)}`);
@@ -1817,7 +1863,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
   const ownerOrderIdByLineId = new Map(selectedIds.map((lineId) => [lineId, getString(formData, `owner_order_id_${lineId}`) ?? orderId]));
   const fulfillmentOrderIds = Array.from(new Set(ownerOrderIdByLineId.values()));
   for (const fulfillmentOrderId of fulfillmentOrderIds) {
-    await assertOrderIsOperational(adminClient, fulfillmentOrderId);
+    await assertOrderCanShip(adminClient, fulfillmentOrderId);
   }
   {
     const { data: parentRows, error: parentError } = await adminClient

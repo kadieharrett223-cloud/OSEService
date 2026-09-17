@@ -1097,7 +1097,7 @@ export default async function OrderDetailPage({
   }
   const canonicalProductKeyById = new Map((productRows ?? []).map((product) => [
     product.id,
-    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name) || product.id,
   ]));
 
   const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.flatMap((item) =>

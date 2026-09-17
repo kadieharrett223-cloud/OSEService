@@ -25,6 +25,7 @@ type CustomerQueueItem = {
   firstPaymentAt: string | null;
   priorityDate: string | null;
   priorityDateSource: "FIRST_PAYMENT" | "INVOICE_DATE" | "ORDER_CREATED" | "INVOICE_NUMBER";
+  balanceOwed: number;
   manuallyMoved?: boolean;
 };
 
@@ -60,6 +61,10 @@ function formatPriorityDate(value: string) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+}
+
 export function priorityDateLabel(item: Pick<CustomerQueueItem, "firstPaymentAt" | "priorityDate" | "priorityDateSource">) {
   if (item.firstPaymentAt) return `First Paid: ${formatPriorityDate(item.firstPaymentAt)}`;
   if (item.priorityDateSource === "INVOICE_DATE" && item.priorityDate) return `Invoice created: ${formatPriorityDate(item.priorityDate)}`;
@@ -84,11 +89,13 @@ export function CustomerDemandDropdown({
   }
 
   function downloadReport() {
-    const headers = ["Position", "Customer", "Invoice", "Ordered", "Shipped", "Remaining", "Priority", "Priority Date", "Priority Date Source", "Assignment", "Expected Availability", "Status"];
+    const headers = ["Position", "Customer", "Invoice", "Payment Status", "Balance Owed", "Ordered", "Shipped", "Remaining", "Priority", "Priority Date", "Priority Date Source", "Assignment", "Expected Availability", "Status"];
     const rows = sortedCustomerQueue.map((item) => [
       item.position,
       item.customer,
       item.invoice,
+      item.balanceOwed > 0 ? "UNPAID" : "Paid / no balance",
+      item.balanceOwed > 0 ? formatCurrency(item.balanceOwed) : "",
       String(item.approvedQty),
       String(item.shippedQty),
       String(item.openQty),
@@ -201,6 +208,7 @@ export function CustomerDemandDropdown({
                     <div className="mt-1 truncate text-[#64748b]">Invoice {item.invoice} · Queue position {item.position}</div>
                     <div className="mt-1 text-[#64748b]">{priorityDateLabel(item)}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
+                      {item.balanceOwed > 0 ? <span className="rounded-md border-2 border-orange-500 bg-orange-50 px-2 py-1 text-xs font-extrabold tracking-[0.06em] text-orange-800">UNPAID · BALANCE OWED {formatCurrency(item.balanceOwed)}</span> : null}
                       {item.manuallyMoved ? <span className="rounded-full bg-[#ede9fe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#6d28d9]">MOVED</span> : null}
                       {item.inWarehouse ? <span className="rounded-full bg-[#dbeafe] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#1d4ed8]">IN WAREHOUSE</span> : null}
                       {item.willCall ? <span className="rounded-full bg-[#fef3c7] px-2 py-0.5 text-[10px] font-bold tracking-[0.06em] text-[#92400e]">WILL CALL</span> : null}

@@ -300,6 +300,12 @@ function formatCurrency(value: number | null | undefined) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(value));
 }
 
+function outstandingInvoiceBalance(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return 0;
+  const balance = Number((rawPayload as { Balance?: unknown }).Balance);
+  return Number.isFinite(balance) ? Math.max(0, balance) : 0;
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) return "Pending";
   const parsed = new Date(value);
@@ -944,6 +950,7 @@ export default async function OrderDetailPage({
   }
 
   const parsedInvoiceItems = parseQuickbooksInvoiceItems(quickbooksSnapshot?.raw_payload);
+  const balanceOwed = outstandingInvoiceBalance(quickbooksSnapshot?.raw_payload);
   const isServiceOnlyOrder = (orderRecord.shipping_order_lines ?? []).length === 0
     && parsedInvoiceItems.length > 0
     && parsedInvoiceItems.every((item) => item.isNonInventory);
@@ -1635,6 +1642,7 @@ export default async function OrderDetailPage({
               ) : (
                 <>
                   <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+                  {balanceOwed > 0 ? <span className="rounded-md border-2 border-orange-500 bg-orange-50 px-3 py-1.5 text-sm font-extrabold tracking-[0.07em] text-orange-800">UNPAID · BALANCE OWED {formatCurrency(balanceOwed)}</span> : null}
                   {orderRecord.payment_hold ? <span className={`rounded-full px-2 py-1 ${quickbooksSnapshot?.payment_status === "Paid" ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fee2e2] text-[#b91c1c]"}`}>{quickbooksSnapshot?.payment_status === "Paid" ? "Payment hold cleared" : "Payment hold — do not ship"}</span> : null}
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>

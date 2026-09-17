@@ -172,6 +172,7 @@ type InventoryViewRow = {
     invoiceOrderedQty: number | null;
     provenInvoiceShippedQty: number;
     invoiceFullyShipped: boolean;
+    balanceOwed: number;
     storedPosition: number | null;
     excludedFromQueue?: boolean;
   }>;
@@ -181,6 +182,12 @@ function formatNumber(value: number) {
   const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
   if (Number.isInteger(rounded)) return new Intl.NumberFormat("en-US").format(rounded);
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(rounded);
+}
+
+function outstandingInvoiceBalance(rawPayload: unknown) {
+  if (!rawPayload || typeof rawPayload !== "object") return 0;
+  const balance = Number((rawPayload as { Balance?: unknown }).Balance);
+  return Number.isFinite(balance) ? Math.max(0, balance) : 0;
 }
 
 function formatShortDate(value: string | null | undefined) {
@@ -497,6 +504,7 @@ export default async function InventoryPage({
       invoiceOrderedQty,
       provenInvoiceShippedQty,
       invoiceFullyShipped,
+      balanceOwed: outstandingInvoiceBalance(line.shipping_orders?.qbo_invoices?.raw_payload),
       storedPosition: line.queue_position_start,
       manuallyMoved: Number(sharedQueueRow.manualPosition ?? 0) > 0,
       excludedFromQueue: false,

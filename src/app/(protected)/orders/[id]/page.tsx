@@ -55,6 +55,8 @@ type OrderDetailRow = {
   legacy_customer_name: string | null;
   review_status: string | null;
   cancellation_status?: string | null;
+  payment_hold?: boolean | null;
+  payment_hold_reason?: string | null;
   cancellation_reason?: string | null;
   promised_ship_date: string | null;
   shipping_method: string | null;
@@ -627,6 +629,8 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
   if (columnSet.has("fulfillment_method")) columns.push("fulfillment_method");
   if (columnSet.has("cancellation_status")) columns.push("cancellation_status");
   if (columnSet.has("cancellation_reason")) columns.push("cancellation_reason");
+  if (columnSet.has("payment_hold")) columns.push("payment_hold");
+  if (columnSet.has("payment_hold_reason")) columns.push("payment_hold_reason");
 
   const lineColumns = [
     "id",
@@ -1093,7 +1097,7 @@ export default async function OrderDetailPage({
   }
   const canonicalProductKeyById = new Map((productRows ?? []).map((product) => [
     product.id,
-    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id)) || product.id,
+    canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name) || product.id,
   ]));
 
   const resolvedProductIds = Array.from(new Set(parsedInvoiceItems.flatMap((item) =>
@@ -1631,6 +1635,7 @@ export default async function OrderDetailPage({
               ) : (
                 <>
                   <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+                  {orderRecord.payment_hold ? <span className={`rounded-full px-2 py-1 ${quickbooksSnapshot?.payment_status === "Paid" ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fee2e2] text-[#b91c1c]"}`}>{quickbooksSnapshot?.payment_status === "Paid" ? "Payment hold cleared" : "Payment hold — do not ship"}</span> : null}
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
                   <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
                   <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>

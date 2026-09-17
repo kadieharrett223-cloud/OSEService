@@ -95,7 +95,7 @@ export function getExpectedQty(line: { ordered_qty: number | null; on_order_qty:
 async function loadContainerForecast(supabase: SupabaseAdmin, containerId: string, containerLines: ContainerLineRow[]) {
   const [canonicalQueue, { data: products }, { data: aliases }] = await Promise.all([
     loadCanonicalCustomerQueue(),
-    supabase.from("products").select("id,sku"),
+    supabase.from("products").select("id,sku,canonical_name"),
     supabase.from("product_aliases").select("product_id,alias"),
   ]);
   const aliasesByProductId = new Map<string, string[]>();
@@ -103,7 +103,7 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
     if (!alias.product_id || !alias.alias) continue;
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
-  const productKeyById = new Map((products ?? []).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id))]));
+  const productKeyById = new Map((products ?? []).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name)]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));
   const productIds = [...productKeyById.entries()].filter(([, key]) => containerKeys.has(key)).map(([id]) => id);
   if (!containerKeys.size || !productIds.length) return { rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };

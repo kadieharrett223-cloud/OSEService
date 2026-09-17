@@ -30,6 +30,11 @@ describe("canonicalSkuKey", () => {
     expect(canonicalProductSkuKey("2PBP-8", [], "Model: Olympic 2PBP-8 / 8,000-lb Base Plate 2-Post Lift")).toBe("2PBP8");
   });
 
+  it("does not create a second product identity when QuickBooks places its item description in the SKU field", () => {
+    expect(canonicalProductSkuKey("4PXL-10")).toBe("4PXL10");
+    expect(canonicalProductSkuKey("Model: Olympic 4PXL-10 / The Dually Portable 10,000 lb. Maintenance & Storage Lift")).toBe("4PXL10");
+  });
+
   it("rejects accounting labels as reusable product aliases", () => {
     expect(isUnsafeGlobalProductAlias("Note")).toBe(true);
     expect(isUnsafeGlobalProductAlias("Misc Charge")).toBe(true);

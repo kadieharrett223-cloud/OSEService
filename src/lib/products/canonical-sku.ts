@@ -15,7 +15,7 @@ const UNSAFE_GLOBAL_ALIAS_KEYS = new Set([
 
 /** Pull a real model code from a catalog title such as "HL-2PBP-8 Base Plate".
  * Descriptive words must never become a product identity. */
-function modelSkuFromCanonicalName(value: string) {
+function modelSkuFromText(value: string) {
   const candidates = value.match(/(?:\b(?:HL|HK|FB|YZ)-)?(?:[A-Z]{1,5}\d[A-Z0-9]*|\d+[A-Z]+[A-Z0-9]*)(?:-[A-Z0-9]+)*/g) ?? [];
   return candidates.find((candidate) => !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(candidate))) ?? null;
 }
@@ -34,6 +34,11 @@ export function preferredOperationalSku(
   canonicalName?: string | null,
 ) {
   const primary = String(primarySku ?? "").trim().toUpperCase();
+  // QBO can send its full item description in the SKU field. Extract the
+  // actual model before treating it as an inventory identity, otherwise that
+  // one physical product becomes a second inventory row.
+  const modelSkuFromPrimary = modelSkuFromText(primary);
+  if (modelSkuFromPrimary) return modelSkuFromPrimary;
   if (primary && !/^\d+$/.test(primary)) return primary;
 
   // Recycled QuickBooks item IDs are often numeric. In that case the canonical
@@ -41,7 +46,7 @@ export function preferredOperationalSku(
   // lookup aids and may contain several historical variants. Never let alias
   // insertion order split one product's customer queue.
   const canonical = String(canonicalName ?? "").trim().toUpperCase();
-  const modelSku = modelSkuFromCanonicalName(canonical);
+  const modelSku = modelSkuFromText(canonical);
   if (modelSku) return modelSku;
   if (canonical && !/^\d+$/.test(canonical) && !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(canonical))) return canonical;
 

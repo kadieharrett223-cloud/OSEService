@@ -17,6 +17,7 @@ export type RefreshInvoiceLine = {
 export type RefreshOrderLine = {
   id: string;
   qbo_invoice_line_id?: string | null;
+  legacy_item_code?: string | null;
   product_id?: string | null;
   ordered_qty?: number | null;
   approved_qty?: number | null;
@@ -24,7 +25,7 @@ export type RefreshOrderLine = {
 };
 
 export type RefreshPlan = {
-  updates: Array<{ lineId: string; ordered_qty: number; approved_qty: number; approval_status: string; product_id: string | null }>;
+  updates: Array<{ lineId: string; ordered_qty: number; approved_qty: number; approval_status: string; product_id: string | null; qboInvoiceLineId?: string }>;
   inserts: Array<{ qboInvoiceLineId: string; productId: string; orderedQty: number; qboSku: string | null; qboLineId: string | null }>;
   skippedShipped: string[];
   skippedUnmapped: string[];
@@ -129,6 +130,7 @@ export function planQuickbooksOrderRefresh(
   const existingByInvoiceLine = new Map(orderLines.map((line) => [line.qbo_invoice_line_id ?? "", line]));
   const plan: RefreshPlan = { updates: [], inserts: [], skippedShipped: [], skippedUnmapped: [], removals: [], productIds: [] };
   const productIds = new Set<string>();
+  const attachedLegacyLineIds = new Set<string>();
 
   for (const invoiceLine of invoiceLines) {
     if (isNonInventoryQuickbooksLine(invoiceLine)) continue;
@@ -163,6 +165,37 @@ export function planQuickbooksOrderRefresh(
       if (existing.product_id) productIds.add(existing.product_id);
       if (resolvedProductId) productIds.add(resolvedProductId);
       continue;
+    }
+
+    // Historical imports predate QBO line identifiers. When QBO later sends a
+    // deleted-item suffix (for example MRSL-6-1 (deleted)), reuse exactly one
+    // matching legacy line rather than creating a pending QBO duplicate beside
+    // its recorded shipment. This is deliberately SKU-exact and one-to-one;
+    // ambiguous historical lines still require a human mapping decision.
+    const invoiceSkuCandidates = new Set(qboSkuCandidates(invoiceLine.qbo_sku));
+    const matchingLegacyLines = orderLines.filter((line) => (
+      !line.qbo_invoice_line_id
+      && !attachedLegacyLineIds.has(line.id)
+      && Boolean(line.product_id)
+      && qboSkuCandidates(line.legacy_item_code).some((candidate) => invoiceSkuCandidates.has(candidate))
+    ));
+    if (matchingLegacyLines.length === 1) {
+      const legacyLine = matchingLegacyLines[0]!;
+      const legacyProductId = legacyLine.product_id ?? null;
+      const resolvedProductId = productId ?? legacyProductId;
+      if (resolvedProductId) {
+        plan.updates.push({
+          lineId: legacyLine.id,
+          qboInvoiceLineId: invoiceLine.id,
+          ordered_qty: orderedQty,
+          approved_qty: orderedQty,
+          approval_status: "APPROVED",
+          product_id: resolvedProductId,
+        });
+        attachedLegacyLineIds.add(legacyLine.id);
+        productIds.add(resolvedProductId);
+        continue;
+      }
     }
 
     if (!productId) {

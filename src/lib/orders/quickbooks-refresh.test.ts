@@ -175,6 +175,25 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.skippedUnmapped).toHaveLength(0);
   });
 
+  it("links an exact shipped legacy line to a deleted QBO SKU without creating new demand", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "qbo-mid-rise", qbo_line_id: "1", product_id: null, qbo_sku: "MRSL-6-1 (deleted)", ordered_qty: 1 })],
+      [orderLine({ id: "legacy-mid-rise", qbo_invoice_line_id: null, legacy_item_code: "MRSL-6", product_id: "product-mid-rise", ordered_qty: 1, approved_qty: 1, fulfilled_qty: 1 })],
+      new Map(),
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toEqual([{
+      lineId: "legacy-mid-rise",
+      qboInvoiceLineId: "qbo-mid-rise",
+      ordered_qty: 1,
+      approved_qty: 1,
+      approval_status: "APPROVED",
+      product_id: "product-mid-rise",
+    }]);
+    expect(plan.skippedShipped).toEqual([]);
+  });
+
   it("keeps an existing mapped line active when QBO temporarily omits its mapping", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ product_id: null, qbo_sku: "UNMAPPED-TEMPORARILY" })],

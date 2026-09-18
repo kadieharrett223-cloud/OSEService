@@ -2023,16 +2023,18 @@ export default async function OrderDetailPage({
           <section className="rounded-2xl border border-[#e5e7eb] bg-white p-5 shadow-md">
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-[#475569]">Customer Queue</h2>
             <div className="mt-3 space-y-3">
-              {visibleItems.filter((item) => {
+              {itemStockSummary.filter(({ item, needed }) => {
                 const line = item.shippingLine;
-                const remaining = line
-                  ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0))
-                  : 0;
+                // The Item table and fulfillment totals use canonical physical evidence across
+                // the current QBO parent and any linked old-ERP sibling.  The Customer Queue
+                // must use that identical remaining quantity: a QBO refresh must never show a
+                // shipped lift as a pending queue assignment just because its shipment was
+                // recorded on the linked historical line.
                 return !item.isNonInventory
                   && Boolean(line)
-                  && remaining > 0
+                  && needed > 0
                   && !["CANCELLED", "REMOVED", "DENIED", "FULFILLED"].includes(String(line?.fulfillment_status ?? "").toUpperCase());
-              }).map((item, index) => {
+              }).map(({ item }, index) => {
                 const queueLine = item.shippingLine;
                 const queueSku = item.sku ?? queueLine?.products?.sku ?? "Line item";
                 const queuePosition = queueLine ? canonicalQueuePositionByLineId.get(queueLine.id) : null;

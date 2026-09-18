@@ -256,9 +256,17 @@ export function getCanonicalPhysicalOrderSummary({
         const rightRank = physicalLineInvoiceSkuMatchRank(right, item.sku) ?? Number.MAX_SAFE_INTEGER;
         return leftRank - rightRank || prioritizePhysicalFulfillmentLine(left, right);
       });
-    // The QBO line relationship is the authoritative identity. SKU matching is only a fallback
-    // for historical rows that predate qbo_invoice_line_id.
-    const line = explicitMatches[0] ?? skuMatches[0] ?? null;
+    // The QBO line relationship establishes the obligation, but it must not discard
+    // fulfillment evidence stored on an exact-SKU OLD_ERP sibling. A description
+    // match is deliberately insufficient: an accessory description can mention its
+    // host lift. Only a rank-0 (stored-code/SKU) match may supersede a pending QBO
+    // representation, and only when it carries more proven fulfillment.
+    const explicitLine = explicitMatches[0] ?? null;
+    const fulfilledExactSkuSibling = skuMatches.find((candidate) =>
+      physicalLineInvoiceSkuMatchRank(candidate, item.sku) === 0
+      && Number(candidate.fulfilled_qty ?? 0) > Number(explicitLine?.fulfilled_qty ?? 0),
+    ) ?? null;
+    const line = fulfilledExactSkuSibling ?? explicitLine ?? skuMatches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));
     return {

@@ -236,6 +236,21 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("uses fulfilled exact-SKU OLD_ERP evidence when the linked QBO counterpart is still pending", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4032XL", 5], ["HPU2203-PKG (deleted)", 5]]),
+      lines: [
+        line({ id: "qbo-lift", legacy_item_code: "4032XL", qbo_invoice_lines: { qbo_line_id: "1", qbo_sku: "4032XL" }, approved_qty: 5, ordered_qty: 5, fulfilled_qty: 0 }),
+        line({ id: "old-lift", legacy_item_code: "4032XL", approved_qty: 5, ordered_qty: 5, fulfilled_qty: 5, fulfillment_status: "FULFILLED" }),
+        line({ id: "old-motor", legacy_item_code: "HPU2203", approved_qty: 5, ordered_qty: 5, fulfilled_qty: 5, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ ordered: 10, fulfilled: 10, remaining: 0, isComplete: true });
+    expect(summary.items.map((item) => item.line?.id)).toEqual(["old-lift", "old-motor"]);
+    expectInvariant(summary);
+  });
+
   it("ignores explicit zero-qty deleted QBO lines when computing canonical totals", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PXL-10B (deleted-1)", 0], ["4PXL-10B", 1]]),

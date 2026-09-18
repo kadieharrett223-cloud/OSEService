@@ -8,7 +8,7 @@ import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
-import { isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { findLogicalFulfillmentOverages, isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
@@ -748,10 +748,15 @@ async function activateExistingQuickbooksOrder(
     .eq("shipping_order_id", orderId);
 
   const aliasSkus = (invoiceLines ?? []).flatMap((line) => qboSkuCandidates(line.qbo_sku));
-  const { data: aliasRows } = aliasSkus.length
-    ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
-    : { data: [] };
-  const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
+  const [{ data: productRows }, { data: aliasRows }] = await Promise.all([
+    adminClient.from("products").select("id, sku"),
+    aliasSkus.length
+      ? adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
+      : Promise.resolve({ data: [] as Array<{ alias: string | null; product_id: string }> }),
+  ]);
+  // Do not let an ambiguous alias silently select the last product returned.
+  // Direct catalog SKUs win; aliases are accepted only when uniquely mapped.
+  const productIdByAlias = buildSafeQboProductIdByAlias(productRows ?? [], aliasRows ?? []);
 
   const plan = planQuickbooksOrderRefresh(invoiceLines ?? [], orderLines ?? [], productIdByAlias);
   const existingLineById = new Map((orderLines ?? []).map((line) => [line.id, line]));
@@ -935,10 +940,14 @@ export async function createOrderFromQuickbooksInvoiceAction(formData: FormData)
   if (!invoiceLines?.length) redirect(`/orders/new?error=This+invoice+has+no+imported+QuickBooks+lines`);
 
   const aliasSkus = invoiceLines.flatMap((line) => qboSkuCandidates(line.qbo_sku));
-  const { data: aliasRows } = aliasSkus.length
-    ? await adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
-    : { data: [] };
-  const productIdByAlias = new Map((aliasRows ?? []).map((row) => [String(row.alias).trim().toUpperCase(), row.product_id]));
+  const [{ data: productRows }, { data: aliasRows }] = await Promise.all([
+    adminClient.from("products").select("id, sku"),
+    aliasSkus.length
+      ? adminClient.from("product_aliases").select("alias, product_id").in("alias", aliasSkus)
+      : Promise.resolve({ data: [] as Array<{ alias: string | null; product_id: string }> }),
+  ]);
+  // Keep exact catalog identity ahead of aliases and fail safely on alias collisions.
+  const productIdByAlias = buildSafeQboProductIdByAlias(productRows ?? [], aliasRows ?? []);
 
   const { data: order, error: orderError } = await adminClient
     .from("shipping_orders")

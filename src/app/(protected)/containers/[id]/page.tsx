@@ -4,6 +4,7 @@ import { updateContainerArrivalDatesAction } from "@/app/(protected)/containers/
 import { requireUser } from "@/lib/auth";
 import { loadContainerReceipt } from "@/lib/containers/container-coverage";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { EditContainerManifestWorkspace } from "./edit-container-manifest-workspace";
 import { ReceiveContainerWorkspace } from "./receive-container-workspace";
 
 type ContainerDetailRow = {
@@ -164,23 +165,37 @@ export default async function ContainerDetailPage({
       </div>
 
       {!isReceived ? (
-        <ReceiveContainerWorkspace
-          containerId={container.id}
-          containerNumber={container.container_number}
-          lines={coverage.lines.map((line) => ({
-            id: line.id,
-            productId: line.productId,
-            sku: line.sku,
-            productName: line.productName,
-            expectedQty: line.expectedQty,
-            assignedQty: line.assignedQty,
-            forecastCoverageQty: line.forecastCoverageQty,
-            demandQty: line.demandQty,
-            isUnplanned: line.isUnplanned,
-          }))}
-          demandByProduct={coverage.demandByProduct}
-          productOptions={productOptions}
-        />
+        <>
+          <EditContainerManifestWorkspace
+            containerId={container.id}
+            lines={coverage.lines.map((line) => ({
+              id: line.id,
+              productId: line.productId,
+              sku: line.sku,
+              productName: line.productName,
+              plannedQty: line.expectedQty,
+            }))}
+            productOptions={productOptions}
+            notes={container.notes ?? ""}
+          />
+          <ReceiveContainerWorkspace
+            containerId={container.id}
+            containerNumber={container.container_number}
+            lines={coverage.lines.map((line) => ({
+              id: line.id,
+              productId: line.productId,
+              sku: line.sku,
+              productName: line.productName,
+              expectedQty: line.expectedQty,
+              assignedQty: line.assignedQty,
+              forecastCoverageQty: line.forecastCoverageQty,
+              demandQty: line.demandQty,
+              isUnplanned: line.isUnplanned,
+            }))}
+            demandByProduct={coverage.demandByProduct}
+            productOptions={productOptions}
+          />
+        </>
       ) : (
         <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">

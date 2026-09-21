@@ -166,6 +166,163 @@ type ReceiptEntry = {
   note: string;
 };
 
+type ManifestLineEntry = {
+  id: string;
+  plannedQty: number;
+};
+
+type ManifestAddition = {
+  productId: string;
+  plannedQty: number;
+};
+
+type ManifestPayload = {
+  lines: ManifestLineEntry[];
+  additions: ManifestAddition[];
+  notes: string | null;
+};
+
+function parseManifestPayload(raw: string): ManifestPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!Array.isArray(parsed.lines) || !Array.isArray(parsed.additions)) return null;
+
+    const lines = parsed.lines.map((entry) => {
+      const value = entry as Record<string, unknown>;
+      const plannedQty = Number(value.plannedQty);
+      if (typeof value.id !== "string" || !isUuid(value.id) || !Number.isFinite(plannedQty) || plannedQty < 0) return null;
+      return { id: value.id, plannedQty: Math.floor(plannedQty) } satisfies ManifestLineEntry;
+    });
+    const additions = parsed.additions.map((entry) => {
+      const value = entry as Record<string, unknown>;
+      const plannedQty = Number(value.plannedQty);
+      if (typeof value.productId !== "string" || !isUuid(value.productId) || !Number.isFinite(plannedQty) || plannedQty <= 0) return null;
+      return { productId: value.productId, plannedQty: Math.floor(plannedQty) } satisfies ManifestAddition;
+    });
+    if (lines.some((entry) => !entry) || additions.some((entry) => !entry)) return null;
+
+    return {
+      lines: lines.filter((entry): entry is ManifestLineEntry => Boolean(entry)),
+      additions: additions.filter((entry): entry is ManifestAddition => Boolean(entry)),
+      notes: typeof parsed.notes === "string" ? parsed.notes.trim().slice(0, 4000) || null : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Updates the planned incoming manifest only. Receipt and inventory writes intentionally live
+ * exclusively in receiveContainerAction, so an order correction can never add floor stock.
+ */
+export async function updateContainerManifestAction(formData: FormData) {
+  await requireUser();
+  const supabase = getSupabaseAdmin();
+
+  const containerId = String(formData.get("container_id") ?? "").trim();
+  if (!isUuid(containerId)) {
+    redirect("/containers?error=Invalid+container");
+  }
+
+  const payload = parseManifestPayload(String(formData.get("manifest_payload") ?? ""));
+  if (!payload) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("The container manifest could not be read. Please try again.")}`);
+  }
+
+  const [{ data: container, error: containerError }, { data: lineRows, error: lineError }] = await Promise.all([
+    supabase.from("containers").select("id, lifecycle_status").eq("id", containerId).maybeSingle(),
+    supabase.from("container_lines").select("id, product_id, received_qty").eq("container_id", containerId),
+  ]);
+
+  if (containerError || !container) {
+    redirect("/containers?error=Container+not+found");
+  }
+  if (String((container as { lifecycle_status: string | null }).lifecycle_status ?? "").toUpperCase() === "RECEIVED") {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Received containers are locked so their receipt history and inventory remain accurate.")}`);
+  }
+  if (lineError) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Could not load the current container manifest.")}`);
+  }
+
+  const existingLines = (lineRows ?? []) as Array<{ id: string; product_id: string | null; received_qty: number | null }>;
+  const existingById = new Map(existingLines.map((line) => [line.id, line]));
+  const submittedIds = new Set(payload.lines.map((line) => line.id));
+  const submittedProductIds = new Set(payload.additions.map((line) => line.productId));
+
+  if (submittedIds.size !== payload.lines.length || submittedProductIds.size !== payload.additions.length) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("Each manifest line can only be submitted once.")}`);
+  }
+  if (payload.lines.some((line) => !existingById.has(line.id))) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("This container changed in another session. Reload and try again.")}`);
+  }
+  if (payload.additions.some((line) => existingLines.some((existing) => existing.product_id === line.productId))) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("That product is already on this container. Edit its existing planned quantity instead.")}`);
+  }
+  if (existingLines.some((line) => Number(line.received_qty ?? 0) > 0)) {
+    redirect(`/containers/${containerId}?error=${encodeURIComponent("This container has received quantities and is locked for manifest edits.")}`);
+  }
+
+  if (payload.additions.length > 0) {
+    const { data: productRows, error: productError } = await supabase
+      .from("products")
+      .select("id")
+      .in("id", payload.additions.map((line) => line.productId));
+    if (productError || (productRows ?? []).length !== payload.additions.length) {
+      redirect(`/containers/${containerId}?error=${encodeURIComponent("One of the selected products no longer exists. Reload and try again.")}`);
+    }
+  }
+
+  for (const existing of existingLines) {
+    const requested = payload.lines.find((line) => line.id === existing.id);
+    const plannedQty = requested?.plannedQty ?? 0;
+    if (plannedQty === 0) {
+      const { error: deleteError } = await supabase.from("container_lines").delete().eq("id", existing.id).eq("container_id", containerId);
+      if (deleteError) redirect(`/containers/${containerId}?error=${encodeURIComponent(deleteError.message)}`);
+      continue;
+    }
+    const { error: updateError } = await supabase
+      .from("container_lines")
+      .update({ ordered_qty: 0, on_order_qty: plannedQty, received_qty: 0 })
+      .eq("id", existing.id)
+      .eq("container_id", containerId);
+    if (updateError) redirect(`/containers/${containerId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  if (payload.additions.length > 0) {
+    const { error: insertError } = await supabase.from("container_lines").insert(
+      payload.additions.map((line) => ({
+        container_id: containerId,
+        product_id: line.productId,
+        ordered_qty: 0,
+        on_order_qty: line.plannedQty,
+        received_qty: 0,
+        product_mapping_status: "MAPPED",
+        source_line_ref: "MANUAL_MANIFEST_EDIT",
+      })),
+    );
+    if (insertError) redirect(`/containers/${containerId}?error=${encodeURIComponent(insertError.message)}`);
+  }
+
+  const { error: notesError } = await supabase.from("containers").update({ notes: payload.notes }).eq("id", containerId);
+  if (notesError) redirect(`/containers/${containerId}?error=${encodeURIComponent(notesError.message)}`);
+
+  await supabase.from("audit_log").insert({
+    entity_type: "container",
+    entity_id: containerId,
+    action: "CONTAINER_MANIFEST_UPDATED",
+    details: { planned_line_count: payload.lines.filter((line) => line.plannedQty > 0).length + payload.additions.length },
+  });
+
+  revalidatePath("/containers");
+  revalidatePath(`/containers/${containerId}`);
+  revalidatePath("/inventory");
+  revalidateOrdersProjection();
+  revalidatePath("/orders");
+  revalidatePath("/order-queue");
+
+  redirect(`/containers/${containerId}?success=${encodeURIComponent("Container manifest updated. No inventory was received or changed.")}`);
+}
+
 function parseReceiptPayload(raw: string): ReceiptEntry[] {
   try {
     const parsed = JSON.parse(raw) as { entries?: unknown };

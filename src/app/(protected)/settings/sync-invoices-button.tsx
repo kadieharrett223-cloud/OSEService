@@ -17,7 +17,18 @@ export function SyncInvoicesButton({ disabled }: { disabled?: boolean }) {
 
     try {
       const response = await fetch("/api/settings/sync-quickbooks", { method: "POST" });
-      const result = await response.json() as SyncResult;
+      // A platform timeout or proxy error can be HTML instead of our normal
+      // JSON contract. Never expose a JSON parser error to the operator.
+      const rawResult = await response.text();
+      let result: SyncResult = {};
+      try {
+        result = rawResult ? JSON.parse(rawResult) as SyncResult : {};
+      } catch {
+        const timeout = response.status === 504 || /timed out|timeout/i.test(rawResult);
+        throw new Error(timeout
+          ? "QuickBooks sync exceeded the server time limit. No final sync result was saved; please retry."
+          : `QuickBooks sync returned an unexpected server response (${response.status || "unknown status"}).`);
+      }
       if (!response.ok) throw new Error(result.error ?? "QuickBooks sync failed.");
       setStatus(result.message ?? "QuickBooks sync complete.");
       router.refresh();

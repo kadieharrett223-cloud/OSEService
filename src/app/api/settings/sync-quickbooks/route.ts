@@ -5,6 +5,12 @@ import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { syncQuickbooksInvoices } from "@/lib/quickbooks/integration";
 
+// A full, admin-triggered QBO reconciliation can include historical payment
+// evidence and a small set of directly linked invoice refreshes.  The Vercel
+// default is 300 seconds; this Pro project supports 800 seconds and must not
+// cut off a valid reconciliation halfway through.
+export const maxDuration = 800;
+
 export async function POST() {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Sign in again before syncing QuickBooks." }, { status: 401 });

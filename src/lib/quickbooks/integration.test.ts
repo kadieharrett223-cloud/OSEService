@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectPaymentLinkedInvoiceRefreshIds } from "./integration";
+import { incrementalPaymentStartDate, selectPaymentLinkedInvoiceRefreshIds } from "./integration";
 
 describe("payment-linked QBO invoice refresh", () => {
   it("refreshes a paid invoice that is missing from the local snapshot", () => {
@@ -26,5 +26,16 @@ describe("payment-linked QBO invoice refresh", () => {
     );
 
     expect(refreshIds).toEqual(["newly-paid"]);
+  });
+});
+
+describe("incremental QBO payment scans", () => {
+  it("keeps a short overlap after the last completed sync", () => {
+    expect(incrementalPaymentStartDate("2026-09-21T12:00:00.000Z")).toBe("2026-09-18");
+  });
+
+  it("uses a full payment scan until there has been a completed sync", () => {
+    expect(incrementalPaymentStartDate(null)).toBeUndefined();
+    expect(incrementalPaymentStartDate("not-a-date")).toBeUndefined();
   });
 });

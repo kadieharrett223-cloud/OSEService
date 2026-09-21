@@ -424,7 +424,7 @@ async function loadConnectionForSync() {
   const supabase = getSupabaseAdmin();
   let { data, error } = await supabase
     .from("quickbooks_connections")
-    .select("id, realm_id, environment, status, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, invoice_sync_cursor_at")
+    .select("id, realm_id, environment, status, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, last_sync_at, invoice_sync_cursor_at")
     .eq("status", "connected")
     .order("updated_at", { ascending: false })
     .limit(1)
@@ -438,7 +438,7 @@ async function loadConnectionForSync() {
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    data = (fallback.data ? { ...fallback.data, invoice_sync_cursor_at: null } : null) as unknown as typeof data;
+    data = (fallback.data ? { ...fallback.data, last_sync_at: null, invoice_sync_cursor_at: null } : null) as unknown as typeof data;
     error = fallback.error;
   }
   if (error) {
@@ -449,7 +449,7 @@ async function loadConnectionForSync() {
     throw new Error("QuickBooks is not connected yet.");
   }
 
-  return data as unknown as Pick<ConnectionRow, "id" | "realm_id" | "environment" | "status" | "encrypted_access_token" | "encrypted_refresh_token" | "access_token_expires_at" | "invoice_sync_cursor_at">;
+  return data as unknown as Pick<ConnectionRow, "id" | "realm_id" | "environment" | "status" | "encrypted_access_token" | "encrypted_refresh_token" | "access_token_expires_at" | "last_sync_at" | "invoice_sync_cursor_at">;
 }
 
 async function persistRefreshedTokens(connectionId: string, tokenPayload: TokenResponse) {
@@ -892,6 +892,17 @@ async function syncQuickbooksSnapshots(
   };
 }
 
+/**
+ * Manual sync is incremental after its first completed run. A small overlap catches payments
+ * posted late by QBO without re-reading years of payment history and timing out the sync.
+ */
+export function incrementalPaymentStartDate(lastCompletedSyncAt: string | null | undefined, overlapDays = 3) {
+  const completedAt = Date.parse(String(lastCompletedSyncAt ?? ""));
+  if (!Number.isFinite(completedAt)) return undefined;
+  const overlapMs = Math.max(0, overlapDays) * 24 * 60 * 60 * 1000;
+  return new Date(completedAt - overlapMs).toISOString().slice(0, 10);
+}
+
 async function loadQuickbooksFirstPaymentDates(
   connection: Awaited<ReturnType<typeof loadConnectionForSync>>,
   accessToken: string,
@@ -1120,7 +1131,13 @@ export async function syncQuickbooksInvoices() {
   try {
     const accessToken = await ensureAccessToken(connection);
     const result = await syncQuickbooksSnapshots(connection, accessToken);
-    const firstPaymentByQboInvoiceId = await loadQuickbooksFirstPaymentDates(connection, accessToken);
+    const firstPaymentByQboInvoiceId = await loadQuickbooksFirstPaymentDates(
+      connection,
+      accessToken,
+      // The invoice cursor is written only after every sync stage succeeds. In contrast,
+      // last_sync_at is also written for a handled failure, so it is not safe as a cutoff.
+      incrementalPaymentStartDate(connection.invoice_sync_cursor_at),
+    );
     const paymentLinkedResult = await syncPaymentLinkedInvoices(
       connection,
       accessToken,

@@ -132,13 +132,28 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
     terminalResolutions,
   );
 
+  const canonicalCandidates = [...acceptedLiveQuickBooksLines, ...historicallyResolvedLines];
+  const canonicalIdentities = new Set(canonicalCandidates.map(demandLineIdentity));
+  const rescuedMappedLines = activeParentLines.filter((line) => {
+    // A terminal review can correctly suppress a historical line. It must not
+    // hide an active mapped customer obligation when the only competing
+    // representation of the same QBO line is still unmapped. That is a stale
+    // bridge/review artifact, not a cancellation or another sale.
+    if (!isOpenCustomerQueueLine(line) || canonicalIdentities.has(demandLineIdentity(line))) return false;
+    return activeParentLines.some((candidate) => (
+      candidate.id !== line.id
+      && demandLineIdentity(candidate) === demandLineIdentity(line)
+      && !candidate.product_id
+    ));
+  });
+
   // A stale historical resolution may suppress an OLD_ERP representation, but it must never
   // suppress the current mapped line on an active QuickBooks order. QuickBooks is the current
   // invoice truth after a refresh; the local line status and fulfilled quantity decide when that
   // live obligation leaves the Customer List.
   return dedupeDemandLines(withLogicalFulfilledQty([
-    ...acceptedLiveQuickBooksLines,
-    ...historicallyResolvedLines,
+    ...canonicalCandidates,
+    ...rescuedMappedLines,
   ])).filter(isOpenDemandLine);
 }
 

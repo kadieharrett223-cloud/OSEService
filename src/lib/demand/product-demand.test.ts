@@ -56,6 +56,23 @@ describe("shared active logical demand", () => {
     ]);
   });
 
+  it("keeps every active approved mapped line in the queue despite a stale terminal review", () => {
+    const lines = [{
+      id: "mapped-hlcj",
+      product_id: "hlcj-6",
+      qbo_invoice_line_id: "qbo-hlcj",
+      approved_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+    }];
+    const resolutions = [{ qbo_invoice_line_id: "qbo-hlcj", resolution_type: "HISTORICAL_FULFILLMENT" as const, status: "ACTIVE" as const }];
+
+    expect(getCanonicalOpenDemandLines(lines, new Set(), new Set(), resolutions)).toMatchObject([
+      { id: "mapped-hlcj", product_id: "hlcj-6" },
+    ]);
+  });
+
   it("does not inherit In Warehouse from a conflicting duplicate representation", () => {
     const lines = [
       { id: "qbo", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "APPROVED", fulfillment_status: "PENDING" },

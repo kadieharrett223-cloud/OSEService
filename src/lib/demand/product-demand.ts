@@ -135,16 +135,12 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   const canonicalCandidates = [...acceptedLiveQuickBooksLines, ...historicallyResolvedLines];
   const canonicalIdentities = new Set(canonicalCandidates.map(demandLineIdentity));
   const rescuedMappedLines = activeParentLines.filter((line) => {
-    // A terminal review can correctly suppress a historical line. It must not
-    // hide an active mapped customer obligation when the only competing
-    // representation of the same QBO line is still unmapped. That is a stale
-    // bridge/review artifact, not a cancellation or another sale.
-    if (!isOpenCustomerQueueLine(line) || canonicalIdentities.has(demandLineIdentity(line))) return false;
-    return activeParentLines.some((candidate) => (
-      candidate.id !== line.id
-      && demandLineIdentity(candidate) === demandLineIdentity(line)
-      && !candidate.product_id
-    ));
+    // An active, approved line that is already mapped to a real inventory
+    // product is an operational customer obligation. A stale terminal review
+    // is never allowed to remove it from the Customer List; only an actual
+    // cancellation, void, replacement parent, or recorded fulfillment can do
+    // that. This preserves one logical obligation via the identity dedupe.
+    return isOpenCustomerQueueLine(line) && !canonicalIdentities.has(demandLineIdentity(line));
   });
 
   // A stale historical resolution may suppress an OLD_ERP representation, but it must never

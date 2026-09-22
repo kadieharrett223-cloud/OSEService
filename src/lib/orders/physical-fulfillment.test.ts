@@ -208,6 +208,34 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("keeps a mapped physical SKU when QuickBooks marks its row as non-sales detail", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: {
+        Line: [
+          {
+            Id: "lift-row",
+            DetailType: "DescriptionOnly",
+            Qty: 1,
+            Description: "Olympic 4PC-6 Little Buddy",
+            SalesItemLineDetail: { Qty: 1, ItemRef: { name: "4PC-6" } },
+          },
+          {
+            Id: "motor-row",
+            DetailType: "SalesItemLineDetail",
+            SalesItemLineDetail: { Qty: 1, ItemRef: { name: "HPU1103" } },
+          },
+        ],
+      },
+      lines: [
+        line({ id: "lift", legacy_item_code: "4PC-6", product_id: "4pc", approved_qty: 1 }),
+        line({ id: "motor", legacy_item_code: "HPU1103", product_id: "motor", approved_qty: 1 }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 0, remaining: 2 });
+    expectInvariant(summary);
+  });
+
   it("counts duplicate OLD_ERP/QBO representations once for 122285 Deana Bonetto", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([["4PXL-10", 1], ["HPU2203", 1]]),

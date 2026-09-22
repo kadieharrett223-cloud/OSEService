@@ -1353,7 +1353,10 @@ export default async function OrderDetailPage({
       amount: item.amount,
       productId: shippingLine?.product_id ?? resolvedProduct?.id ?? null,
       shippingLine,
-      isNonInventory: item.isNonInventory,
+      // A mapped product or matched operational line is authoritative. QBO can
+      // label a real item as a DescriptionOnly/non-sales row, but that metadata
+      // must not hide an already-mapped physical customer obligation as N/A.
+      isNonInventory: item.isNonInventory && !shippingLine?.product_id && !resolvedProduct?.id,
     };
   });
 

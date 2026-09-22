@@ -173,6 +173,16 @@ export function dedupeDemandLines<T extends DemandLineLike>(lines: T[]): T[] {
         && Boolean(right.qbo_invoice_line_id)
         && isOpenCustomerQueueLine(right);
       if (leftIsLiveQbo !== rightIsLiveQbo) return leftIsLiveQbo ? -1 : 1;
+
+      // A refresh can leave an unmapped bridge beside the already-approved,
+      // product-mapped line for the same physical QBO obligation.  The
+      // customer queue is built from the selected representation, so choosing
+      // the unmapped copy here makes a real customer disappear from the list.
+      // Prefer the mapped operational line; this is a representation choice
+      // only and does not create a second obligation or touch inventory.
+      const leftIsMapped = Boolean(left.product_id);
+      const rightIsMapped = Boolean(right.product_id);
+      if (leftIsMapped !== rightIsMapped) return leftIsMapped ? -1 : 1;
       return openQtyOf(right) - openQtyOf(left) || left.id.localeCompare(right.id);
     })[0];
     const warehouseStates = new Set(duplicates.map((line) => String(line.warehouse_status ?? "").toUpperCase()));

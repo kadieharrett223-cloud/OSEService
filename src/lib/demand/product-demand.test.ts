@@ -19,6 +19,31 @@ describe("shared active logical demand", () => {
     expect(totalOpenDemand(lines)).toBe(1);
   });
 
+  it("keeps an exact mapped product in the queue when an unmapped refresh duplicate exists", () => {
+    const lines = [
+      {
+        id: "mapped-hlcj",
+        product_id: "hlcj-6",
+        qbo_invoice_line_id: "qbo-hlcj",
+        approved_qty: 1,
+        fulfilled_qty: 0,
+        approval_status: "APPROVED",
+        fulfillment_status: "PENDING",
+      },
+      {
+        id: "unmapped-refresh-copy",
+        logical_demand_key: "qbo-hlcj",
+        approved_qty: 1,
+        fulfilled_qty: 0,
+        approval_status: "APPROVED",
+        fulfillment_status: "PENDING",
+      },
+    ];
+
+    expect(dedupeDemandLines(lines)).toMatchObject([{ id: "mapped-hlcj", product_id: "hlcj-6" }]);
+    expect(getCanonicalOpenDemandLines(lines, new Set(), new Set())).toMatchObject([{ id: "mapped-hlcj", product_id: "hlcj-6" }]);
+  });
+
   it("does not inherit In Warehouse from a conflicting duplicate representation", () => {
     const lines = [
       { id: "qbo", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, warehouse_status: "APPROVED", fulfillment_status: "PENDING" },

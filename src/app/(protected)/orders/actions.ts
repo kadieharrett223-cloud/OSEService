@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
+import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
 import { buildSafeQboProductIdByAlias, isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
@@ -19,6 +20,18 @@ import { syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
 function revalidateOrdersList() {
   revalidateOrdersProjection();
   revalidatePath("/orders");
+}
+
+/**
+ * Fulfillment changes customer demand, not just the order detail. Rebuild
+ * positions and expire the shared projection after a confirmed fulfillment.
+ * This is positions/cache work only; it never writes inventory transactions.
+ */
+async function refreshCustomerQueuesAfterFulfillment(productIds: Array<string | null | undefined>) {
+  const mappedProductIds = productIds.filter((productId): productId is string => Boolean(productId));
+  if (mappedProductIds.length > 0) await recalculateProductQueues(mappedProductIds);
+  revalidateCanonicalCustomerQueue();
+  revalidateErpHealth();
 }
 
 async function loadTableColumnSet(
@@ -1476,7 +1489,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   } as never);
   if (fulfillmentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(fulfillmentError.message)}`);
 
-  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
+  await refreshCustomerQueuesAfterFulfillment([lineRow.product_id]);
   await writeOrderActivity(adminClient, orderId, source === "DROPSHIP" ? "ORDER_LINE_DROPSHIP_COMPLETED" : "ORDER_LINE_OTHER_FULFILLMENT_COMPLETED", {
     line_id: lineId,
     fulfillment_source: source,
@@ -1571,8 +1584,6 @@ export async function markOrderLineShippedAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
   }
 
-  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
-
   const fulfilledAtIso = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;
 
@@ -1617,6 +1628,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
     shipment_date: shipmentDate,
   });
 
+  await refreshCustomerQueuesAfterFulfillment([lineRow.product_id]);
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -1785,6 +1797,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
     shipment_date: shipmentDate,
   });
 
+  await refreshCustomerQueuesAfterFulfillment(selectedLines.map((line) => line.product_id));
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -1849,6 +1862,7 @@ export async function completeOrderShipmentAction(formData: FormData) {
     .eq("shipping_order_id", orderId);
   if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
+  await refreshCustomerQueuesAfterFulfillment(shipmentSourceRows.map((line) => line.product_id));
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -1955,6 +1969,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     const warehouseCount = ownerLines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE")).length;
     await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: ownerLines.map((line) => line.id).join(","), warehouse_count: warehouseCount, non_warehouse_count: ownerLines.length - warehouseCount, fulfilled_at: fulfilledAtIso });
   }
+  await refreshCustomerQueuesAfterFulfillment(lines.map((line) => line.product_id));
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -2112,7 +2127,7 @@ export async function addOrderShipmentLineAction(formData: FormData) {
   } as never);
 
   await recordFulfillmentInventory(adminClient, lineId, lineRow.product_id, quantity, sourceEventKey, user.id);
-  if (lineRow.product_id) await recalculateProductQueues([lineRow.product_id]);
+  await refreshCustomerQueuesAfterFulfillment([lineRow.product_id]);
 
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_LINE_ADDED", {
     shipment_id: shipmentId,

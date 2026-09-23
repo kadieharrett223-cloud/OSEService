@@ -4,6 +4,7 @@ import type { ReviewedObligationResolution } from "./reviewed-obligation-resolut
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
+import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { cache } from "react";
 
@@ -85,24 +86,26 @@ async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseL
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonicalCustomerQueue> => {
   const supabase = getSupabaseAdmin();
-  const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows] = await Promise.all([
-    fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name").range(from, to)),
+  const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows, archivedIdentityBySourceRecordId] = await Promise.all([
+    fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").range(from, to)),
     fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").range(from, to)),
     fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,queue_position_override_at,queue_position_override_by,legacy_item_code,qbo_invoice_line_id,source_record_id,qbo_invoice_lines(qbo_line_id,qbo_sku),shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
     fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
     fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").range(from, to)),
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
+    getCachedOldErpProductIdentityBySourceRecordId(),
   ]);
 
+  const productRows = products as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
   const productIdByAlias = new Map<string, string>();
   const aliasesByProductId = new Map<string, string[]>();
-  for (const product of products as Array<{ id: string; sku: string | null }>) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
+  for (const product of productRows) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
   for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) {
     if (!alias.product_id || !alias.alias) continue;
     productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
-  const productQueueKeyById = new Map((products as Array<{ id: string; sku: string | null; canonical_name: string | null }>).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name)]));
+  const productQueueKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
   const manualMappingSkus = new Set(((mappingRows.data ?? []) as unknown as Array<{ source_sku: string | null }>).map((row) => normalizeSku(row.source_sku)));
 
   const fulfillmentEventsByLineId = new Map<string, Array<{ fulfilled_qty: number | null }>>();

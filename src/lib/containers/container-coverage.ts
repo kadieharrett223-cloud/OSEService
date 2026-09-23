@@ -3,6 +3,7 @@ import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queu
 import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { canonicalProductSkuKey, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
@@ -93,17 +94,19 @@ export function getExpectedQty(line: { ordered_qty: number | null; on_order_qty:
 }
 
 async function loadContainerForecast(supabase: SupabaseAdmin, containerId: string, containerLines: ContainerLineRow[]) {
-  const [canonicalQueue, { data: products }, { data: aliases }] = await Promise.all([
+  const [canonicalQueue, { data: products }, { data: aliases }, archivedIdentityBySourceRecordId] = await Promise.all([
     loadCanonicalCustomerQueue(),
-    supabase.from("products").select("id,sku,canonical_name"),
+    supabase.from("products").select("id,sku,canonical_name,source_record_id"),
     supabase.from("product_aliases").select("product_id,alias"),
+    getCachedOldErpProductIdentityBySourceRecordId(),
   ]);
+  const productRows = (products ?? []) as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
   const aliasesByProductId = new Map<string, string[]>();
   for (const alias of (aliases ?? []) as Array<{ product_id: string | null; alias: string | null }>) {
     if (!alias.product_id || !alias.alias) continue;
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
-  const productKeyById = new Map((products ?? []).map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name)]));
+  const productKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));
   const productIds = [...productKeyById.entries()].filter(([, key]) => containerKeys.has(key)).map(([id]) => id);
   if (!containerKeys.size || !productIds.length) return { rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };

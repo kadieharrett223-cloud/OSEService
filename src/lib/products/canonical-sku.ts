@@ -53,8 +53,9 @@ export function canonicalProductSkuKey(
   primarySku: string | null | undefined,
   aliases: Array<string | null | undefined> = [],
   canonicalName?: string | null,
+  authoritativeSku?: string | null,
 ) {
-  return canonicalSkuKey(preferredOperationalSku(primarySku, aliases, canonicalName));
+  return canonicalSkuKey(preferredOperationalSku(primarySku, aliases, canonicalName, authoritativeSku));
 }
 
 /** Generic accounting labels describe a line's role, not a reusable product identity. */

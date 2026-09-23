@@ -116,10 +116,18 @@ export function resolveKnownQboProductId(
 export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
   const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
   const description = String(line.source_description ?? "").trim().toLowerCase();
+  return isAlwaysNonInventoryQuickbooksLine(line)
+    || sku === "inspection"
+    || /\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
+}
+
+/** These rows cannot represent warehouse demand even when a stale mapping exists. */
+export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
+  const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
+  const description = String(line.source_description ?? "").trim().toLowerCase();
   return sku === "note"
     || sku.startsWith("note:")
-    || sku === "inspection"
-    || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
+    || /discount|shipping|freight|delivery|sales tax|tax adjustment/.test(`${sku} ${description}`);
 }
 
 export function planQuickbooksOrderRefresh(
@@ -133,10 +141,15 @@ export function planQuickbooksOrderRefresh(
   const attachedLegacyLineIds = new Set<string>();
 
   for (const invoiceLine of invoiceLines) {
-    if (isNonInventoryQuickbooksLine(invoiceLine)) continue;
     const rawOrderedQty = Number(invoiceLine.ordered_qty ?? Number.NaN);
     if (Number.isFinite(rawOrderedQty) && rawOrderedQty <= 0) continue;
     const productId = resolveKnownQboProductId(invoiceLine.qbo_sku, productIdByAlias, invoiceLine.product_id);
+    // QuickBooks occasionally carries a physical catalog item as a
+    // DescriptionOnly/service-style row. An exact approved product link is
+    // stronger evidence than that presentation metadata: retaining it keeps
+    // the customer's obligation and queue position intact. An unlinked note,
+    // freight, discount, or service row remains non-inventory.
+    if (isAlwaysNonInventoryQuickbooksLine(invoiceLine) || (isNonInventoryQuickbooksLine(invoiceLine) && !productId)) continue;
     const orderedQty = rawOrderedQty > 0 ? rawOrderedQty : 1;
     const existing = existingByInvoiceLine.get(invoiceLine.id);
 

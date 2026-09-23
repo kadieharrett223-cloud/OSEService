@@ -59,7 +59,7 @@ export async function reviewHistoricalQboIntakeAction(formData: FormData) {
   const terminal = (resolutions ?? []).length > 0 || existingLines.some((line) => CLOSED.has(upper(line.fulfillment_status)) || Number(line.fulfilled_qty ?? 0) >= Number(source.ordered_qty ?? 0));
   const open = existingLines.some((line) => Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0) && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status)) && !CLOSED.has(upper(line.fulfillment_status)));
   const voided = upper(invoice.raw_payload?.PrivateNote) === "VOIDED";
-  const canApprove = canApproveHistoricalQboIntakeLine({ isPaid: PAID.has(upper(invoice.payment_status)), isPhysicalLine: isInventoryDemandQuickbooksLine(source), hasMappedProduct: Boolean(productId), hasTerminalResolution: terminal, hasOpenRepresentation: open, hasOpenManualDuplicateReview: Boolean(duplicateReview), isVoided: voided });
+  const canApprove = canApproveHistoricalQboIntakeLine({ isPaid: PAID.has(upper(invoice.payment_status)), isPhysicalLine: isInventoryDemandQuickbooksLine({ ...source, product_id: productId }), hasMappedProduct: Boolean(productId), hasTerminalResolution: terminal, hasOpenRepresentation: open, hasOpenManualDuplicateReview: Boolean(duplicateReview), isVoided: voided });
   if (disposition === "APPROVED" && !canApprove) throw new Error("This QBO line no longer passes the historical intake approval guards.");
   if (disposition === "APPROVED") {
     if (!productId) throw new Error("This QBO line no longer has a mapped product.");

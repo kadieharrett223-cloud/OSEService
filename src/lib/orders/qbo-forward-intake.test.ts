@@ -30,6 +30,12 @@ describe("QBO forward intake classifier", () => {
     expect(classifyQboForwardIntakeLine({ ...cleanMappedPhysicalLine, isInventoryDemandLine: false })).toBe("NO_INVENTORY_DEMAND");
   });
 
+  it("keeps an exactly mapped physical product in demand despite QBO display metadata", () => {
+    const qboLine = { qbo_sku: "4PC-6", source_description: "Olympic 4PC-6 service entry", ordered_qty: 1 };
+    expect(isInventoryDemandQuickbooksLine({ ...qboLine, product_id: "product-4pc" })).toBe(true);
+    expect(isInventoryDemandQuickbooksLine(qboLine)).toBe(false);
+  });
+
   it("never duplicates an exact QBO line", () => {
     expect(classifyQboForwardIntakeLine({ ...cleanMappedPhysicalLine, hasExactExistingLine: true })).toBe("ALREADY_REPRESENTED");
   });

@@ -1,4 +1,4 @@
-import { isNonInventoryQuickbooksLine } from "./quickbooks-refresh";
+import { isAlwaysNonInventoryQuickbooksLine, isNonInventoryQuickbooksLine } from "./quickbooks-refresh";
 
 export type QboForwardIntakeDecision =
   | "AUTO_IMPORT"
@@ -19,10 +19,16 @@ export type QboForwardIntakeEvidence = {
 };
 
 /** Accounting and service rows never create inventory demand, even if an alias happens to exist. */
-export function isInventoryDemandQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null; ordered_qty?: number | null }) {
+export function isInventoryDemandQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null; ordered_qty?: number | null; product_id?: string | null }) {
   const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
+  const hasExactProductMapping = Boolean(line.product_id);
   return Number(line.ordered_qty ?? 0) > 0
-    && !isNonInventoryQuickbooksLine(line)
+    // A known product is an explicit operational decision. Do not let QBO's
+    // display-only/service metadata erase that customer's physical demand.
+    // Without that mapping we remain conservative and keep accounting rows
+    // outside the queue.
+    && !isAlwaysNonInventoryQuickbooksLine(line)
+    && (hasExactProductMapping || !isNonInventoryQuickbooksLine(line))
     && !/^misc(?:ellaneous)?\s+charge\b/.test(sku);
 }
 

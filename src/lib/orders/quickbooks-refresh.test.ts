@@ -97,6 +97,18 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.inserts[0]?.productId).toBe("product-jack");
   });
 
+  it("keeps an exactly mapped product when QBO describes it as a service-style row", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "inv-line-4pc", product_id: null, qbo_sku: "4PC-6", source_description: "Olympic 4PC-6 service entry" })],
+      [],
+      new Map([["4PC-6", "product-4pc"]]),
+    );
+
+    expect(plan.inserts).toEqual([
+      { qboInvoiceLineId: "inv-line-4pc", productId: "product-4pc", orderedQty: 2, qboSku: "4PC-6", qboLineId: "1" },
+    ]);
+  });
+
   it("maps a deleted QBO SKU variant to its live alias", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inv-line-deleted", product_id: null, qbo_sku: "4PXL-10-1 (deleted)" })],

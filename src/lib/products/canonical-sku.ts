@@ -58,6 +58,36 @@ export function canonicalProductSkuKey(
   return canonicalSkuKey(preferredOperationalSku(primarySku, aliases, canonicalName, authoritativeSku));
 }
 
+/**
+ * An exact, non-numeric catalog SKU owns the physical-stock ledger for its
+ * canonical product. Historical alias-only identities may share demand and
+ * customer-list placement, but they must never add their ledger balance to a
+ * live SKU with the same normalized name.
+ */
+export function authoritativeStockProductIds<T extends { id: string; sku: string | null | undefined }>(
+  products: T[],
+  canonicalKeyByProductId: Map<string, string>,
+) {
+  const directOwnersByKey = new Map<string, Set<string>>();
+  for (const product of products) {
+    const sku = String(product.sku ?? "").trim();
+    if (!sku || /^\d+$/.test(sku)) continue;
+    const key = canonicalSkuKey(sku);
+    if (!key) continue;
+    const owners = directOwnersByKey.get(key) ?? new Set<string>();
+    owners.add(product.id);
+    directOwnersByKey.set(key, owners);
+  }
+
+  const allowed = new Set<string>();
+  for (const product of products) {
+    const key = canonicalKeyByProductId.get(product.id) ?? product.id;
+    const directOwners = directOwnersByKey.get(key);
+    if (!directOwners || directOwners.has(product.id)) allowed.add(product.id);
+  }
+  return allowed;
+}
+
 /** Generic accounting labels describe a line's role, not a reusable product identity. */
 export function isUnsafeGlobalProductAlias(value: string | null | undefined) {
   return UNSAFE_GLOBAL_ALIAS_KEYS.has(canonicalSkuKey(value));

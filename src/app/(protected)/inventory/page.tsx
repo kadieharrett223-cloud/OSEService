@@ -20,7 +20,7 @@ import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
-import { canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
+import { authoritativeStockProductIds, canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -407,6 +407,7 @@ export default async function InventoryPage({
     product.id,
     canonicalSkuKey(operationalSkuByProduct.get(product.id) ?? product.sku ?? "") || product.id,
   ]));
+  const stockOwnerProductIds = authoritativeStockProductIds(productRows, canonicalInventoryKeyByProductId);
 
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
@@ -548,6 +549,7 @@ export default async function InventoryPage({
 
   const coverageFloorByProduct = new Map<string, number>();
   for (const [productId, onFloor] of onFloorByProduct) {
+    if (!stockOwnerProductIds.has(productId)) continue;
     const productKey = canonicalInventoryKeyByProductId.get(productId) ?? productId;
     coverageFloorByProduct.set(productKey, (coverageFloorByProduct.get(productKey) ?? 0) + onFloor);
   }
@@ -651,7 +653,7 @@ export default async function InventoryPage({
       customerQueue: [],
     };
 
-    group.onFloor += onFloorByProduct.get(product.id) ?? 0;
+    if (stockOwnerProductIds.has(product.id)) group.onFloor += onFloorByProduct.get(product.id) ?? 0;
     group.openDemand += openDemandByProduct.get(product.id) ?? 0;
     group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
     group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];

@@ -28,8 +28,18 @@ type ProductRow = {
   id: string;
   sku: string | null;
   canonical_name: string | null;
+  source_record_id?: string | null;
   inventory_group?: string | null;
   inventory_sort_order?: number | null;
+};
+
+type OldErpProductSourceRow = {
+  source_record_id: string | null;
+  raw_payload?: {
+    itemCode?: string | null;
+    sku?: string | null;
+    qbMatchText?: string | null;
+  } | null;
 };
 
 function isOperationalInventoryProduct(product: ProductRow) {
@@ -243,19 +253,20 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
 
 const getCachedInventoryBaseDataset = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
-  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult] = await Promise.all([
-    supabase.from("products").select("id, sku, canonical_name, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
+  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult, oldErpProductsResult] = await Promise.all([
+    supabase.from("products").select("id, sku, canonical_name, source_record_id, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
     supabase.from("product_aliases").select("product_id, alias"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
     supabase.from("inventory_display_groups").select("name, sort_order").order("sort_order", { ascending: true }),
+    supabase.from("old_erp_source_records").select("source_record_id, raw_payload").eq("source_container", "Products"),
   ]);
   let products = productsResult.data as unknown as ProductRow[] | null;
   if (productsResult.error) {
-    const fallback = await supabase.from("products").select("id, sku, canonical_name").neq("status", "Inactive").order("sku", { ascending: true });
+    const fallback = await supabase.from("products").select("id, sku, canonical_name, source_record_id").neq("status", "Inactive").order("sku", { ascending: true });
     products = fallback.data as unknown as ProductRow[] | null;
   }
-  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, displayGroupData: displayGroupResult.data };
+  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, displayGroupData: displayGroupResult.data, oldErpProducts: oldErpProductsResult.data };
 }, ["inventory-base-read-model"], { revalidate: 60 });
 
 function getAssignmentLabel(line: QueueLine) {
@@ -294,7 +305,7 @@ export default async function InventoryPage({
     getCachedPackageDimensionsBySku(),
     loadCanonicalCustomerQueue(),
   ]);
-  const { products, aliases, transactions, containerLines, displayGroupData } = inventoryBase;
+  const { products, aliases, transactions, containerLines, displayGroupData, oldErpProducts } = inventoryBase;
 
   const displayGroups = displayGroupData as unknown as Array<{ name: string | null; sort_order: number | null }> | null;
 
@@ -308,6 +319,7 @@ export default async function InventoryPage({
 
   const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
   const productAliasRows = (aliases ?? []) as ProductAliasRow[];
+  const oldErpProductSourceRows = (oldErpProducts ?? []) as OldErpProductSourceRow[];
   const transactionRows = (transactions ?? []) as InventoryTransactionRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
   const dedupedQueueLineRows = sharedCanonicalQueue.canonicalLines as QueueLine[];
@@ -358,7 +370,19 @@ export default async function InventoryPage({
       invoiceQtyByInvoiceProduct.set(qtyKey, (invoiceQtyByInvoiceProduct.get(qtyKey) ?? 0) + orderedQty);
     }
   }
+  const archivedItemCodeBySourceRecordId = new Map<string, string>();
+  for (const source of oldErpProductSourceRows) {
+    const sourceId = String(source.source_record_id ?? "").trim();
+    const itemCode = String(source.raw_payload?.itemCode ?? source.raw_payload?.qbMatchText ?? "").trim().toUpperCase();
+    if (sourceId && itemCode && !/^\d+$/.test(itemCode)) archivedItemCodeBySourceRecordId.set(sourceId, itemCode);
+  }
+
   const operationalSkuByProduct = new Map<string, string>();
+  for (const product of productRows) {
+    const archivedItemCode = archivedItemCodeBySourceRecordId.get(String(product.source_record_id ?? "").trim()) ?? null;
+    const candidate = preferredOperationalSku(product.sku, [], product.canonical_name, archivedItemCode);
+    if (candidate && !/^\d+$/.test(candidate)) operationalSkuByProduct.set(product.id, candidate);
+  }
   for (const alias of productAliasRows) {
     if (!alias.product_id || !alias.alias) continue;
     const candidate = preferredOperationalSku(null, [alias.alias]);

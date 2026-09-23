@@ -25,9 +25,16 @@ export function preferredOperationalSku(
   primarySku: string | null | undefined,
   aliases: Array<string | null | undefined> = [],
   canonicalName?: string | null,
+  authoritativeSku?: string | null,
 ) {
   const primary = String(primarySku ?? "").trim().toUpperCase();
   if (primary && !/^\d+$/.test(primary)) return primary;
+
+  // OLD_ERP reused numeric catalog IDs. When the archived product record gives
+  // us its item code, that is the product's source-of-truth identity; aliases
+  // may include a previous product that once shared the numeric ID.
+  const authoritative = String(authoritativeSku ?? "").trim().toUpperCase();
+  if (authoritative && !/^\d+$/.test(authoritative) && !GENERIC_ALIAS_KEYS.test(canonicalSkuKey(authoritative))) return authoritative;
 
   // Recycled QuickBooks item IDs are often numeric. In that case the canonical
   // product name is the explicit operational identity; aliases are merely

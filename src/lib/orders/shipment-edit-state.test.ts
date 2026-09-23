@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShipmentEditLineState } from "./shipment-edit-state";
+import { buildShipmentEditLineState, shipmentEditQuantityOnSelection } from "./shipment-edit-state";
 
 const orderLines = [
   { id: "a", sku: "000063", productName: "YZRCJ-7", approvedQty: 2, fulfilledQty: 2 },
@@ -45,5 +45,13 @@ describe("shipment editor saved-line reconstruction", () => {
     ]);
     const delta = state.reduce((sum, line) => sum + (line.currentQty - line.currentQty), 0);
     expect(delta).toBe(0);
+  });
+
+  it("defaults a newly selected shipment line to one unit", () => {
+    expect(shipmentEditQuantityOnSelection({ isSelected: true, currentValue: "", currentQty: 0, maxQty: 3 })).toBe("1");
+  });
+
+  it("keeps the saved quantity when an existing shipment line is selected", () => {
+    expect(shipmentEditQuantityOnSelection({ isSelected: true, currentValue: "", currentQty: 2, maxQty: 5 })).toBe("2");
   });
 });

@@ -19,6 +19,31 @@ export type ShipmentEditLineState = ShipmentEditOrderLine & {
 };
 
 /**
+ * A checked shipment line must always submit a positive quantity. New lines
+ * default to one unit; saved lines keep their stored quantity. This prevents a
+ * shipment edit from silently leaving a checked, but quantity-less, line out
+ * of the fulfillment ledger.
+ */
+export function shipmentEditQuantityOnSelection({
+  isSelected,
+  currentValue,
+  currentQty,
+  maxQty,
+}: {
+  isSelected: boolean;
+  currentValue: string;
+  currentQty: number;
+  maxQty: number;
+}) {
+  if (!isSelected) return currentValue;
+
+  const parsedCurrentValue = Number(currentValue);
+  if (Number.isFinite(parsedCurrentValue) && parsedCurrentValue > 0) return currentValue;
+
+  return String(Math.min(maxQty, Math.max(1, currentQty)));
+}
+
+/**
  * Reconstructs the editor from persisted shipment-line IDs. Current SKU, mapping, stock, and
  * remaining quantity cannot decide whether a line was already in this shipment.
  */

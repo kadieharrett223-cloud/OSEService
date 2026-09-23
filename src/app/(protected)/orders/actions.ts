@@ -1992,6 +1992,15 @@ export async function editOrderShipmentAction(formData: FormData) {
   if (!orderId || !shipmentId || !shipmentDate) redirect(`/orders/${orderId ?? ""}?error=Shipment+and+ship+date+are+required`);
   await assertOrderIsOperational(adminClient, orderId);
 
+  // Editing one shipment can add a line, remove a line, or change a quantity.
+  // Rebuild every product queue on this order afterward so completed demand is
+  // removed and restored demand re-enters exactly once.
+  const { data: orderLineRows, error: orderLineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("product_id")
+    .eq("shipping_order_id", orderId);
+  if (orderLineError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderLineError.message)}`);
+
   const lines = selectedIds.map((lineId) => ({ line_id: lineId, quantity: getPositiveNumber(formData, `quantity_${lineId}`) }));
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
 
@@ -2006,6 +2015,10 @@ export async function editOrderShipmentAction(formData: FormData) {
     p_lines: lines,
   } as never);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+
+  await refreshCustomerQueuesAfterFulfillment(
+    ((orderLineRows ?? []) as Array<{ product_id: string | null }>).map((line) => line.product_id),
+  );
 
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_EDITED", {
     shipment_id: editedShipmentId ?? shipmentId,

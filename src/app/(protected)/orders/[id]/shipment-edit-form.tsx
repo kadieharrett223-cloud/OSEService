@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { editOrderShipmentAction } from "../actions";
+import { shipmentEditQuantityOnSelection } from "@/lib/orders/shipment-edit-state";
 
 type EditableLine = {
   id: string;
@@ -65,7 +66,19 @@ export function ShipmentEditForm({
               name="selected_line_id"
               value={line.id}
               checked={Boolean(selected[line.id])}
-              onChange={(event) => setSelected((current) => ({ ...current, [line.id]: event.target.checked }))}
+              onChange={(event) => {
+                const isSelected = event.target.checked;
+                setSelected((current) => ({ ...current, [line.id]: isSelected }));
+                setQuantities((current) => ({
+                  ...current,
+                  [line.id]: shipmentEditQuantityOnSelection({
+                    isSelected,
+                    currentValue: current[line.id] ?? "",
+                    currentQty: line.currentQty,
+                    maxQty: line.maxQty,
+                  }),
+                }));
+              }}
               aria-label={`Include ${line.sku} in shipment`}
             />
             <span className="min-w-0 flex-1">

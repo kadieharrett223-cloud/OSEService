@@ -168,24 +168,14 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
     const summary = getCanonicalPhysicalOrderSummary({ rawPayload: payloadByInvoiceId.get(invoiceId), lines });
     if (summary.isComplete) completedInvoiceIds.add(invoiceId);
   }
-  // Never use a second matching pass to hide an accepted mapped line. Incorrect or duplicate
-  // obligations must be explicitly resolved; every remaining operational line belongs in queue.
+  // Canonical demand applies completion evidence before it rescues a mapped
+  // operational line. A completed QBO invoice may have an OLD_ERP bridge
+  // with stale fulfilled_qty, but it is not a live customer obligation.
   const bridgedWithQueueObligation = bridged.map((line) => isOpenCustomerQueueLine(line)
     ? { ...line, canonical_obligation_qty: customerQueueObligationQty(line) }
     : line);
   const resolvedCanonicalLines = getCanonicalOpenDemandLines(bridgedWithQueueObligation, completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
-  const canonicalDemandKeys = new Set(resolvedCanonicalLines.map(demandLineIdentity));
-  // This final projection guard is intentional: an operational line already
-  // marked APPROVED/PARTIAL and mapped to a product is active demand. Legacy
-  // bridge/review metadata may explain why a duplicate exists, but can never
-  // make that customer disappear from the product Customer List.
-  const canonicalLines = [
-    ...resolvedCanonicalLines,
-    ...bridgedWithQueueObligation.filter((line) => (
-      isOpenCustomerQueueLine(line)
-      && !canonicalDemandKeys.has(demandLineIdentity(line))
-    )),
-  ];
+  const canonicalLines = resolvedCanonicalLines;
   const queueRows: Array<ReturnType<typeof toCustomerQueueRow>> = [];
   const lineProductIdByLineId = new Map<string, string>();
   function toCustomerQueueRow(line: typeof canonicalLines[number]) {

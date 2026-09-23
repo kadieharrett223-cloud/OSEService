@@ -117,10 +117,15 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   completedQboInvoiceIds: ReadonlySet<string>,
   reviewedResolutions: readonly ReviewedObligationResolution[] = [],
 ) {
-  void completedQboLineIds;
-  void completedQboInvoiceIds;
   const terminalResolutions = reviewedResolutions.filter((resolution) => ["DUPLICATE", "REPLACED", "HISTORICAL_FULFILLMENT"].includes(resolution.resolution_type));
-  const activeParentLines = lines.filter(hasActiveDemandParent);
+  // A completed QBO record is proof that any bridged/legacy representation
+  // of that same obligation has no remaining customer demand. Apply this
+  // before the rescue path below so an old approved row cannot be added back
+  // merely because it still has a stale open quantity.
+  const activeParentLines = excludeCompletedQboOrderSiblings(
+    excludeCompletedQboSiblings(lines.filter(hasActiveDemandParent), completedQboLineIds),
+    completedQboInvoiceIds,
+  );
   const acceptedLiveQuickBooksLines = activeParentLines.filter((line) => (
     line.parent_source_type === "QBO_INVOICE"
     && Boolean(line.qbo_invoice_line_id)

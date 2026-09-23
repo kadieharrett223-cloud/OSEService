@@ -261,6 +261,16 @@ describe("shared active logical demand", () => {
     expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-fulfilled"]), new Set()).map((line) => line.id)).toEqual(["paid-qbo-only"]);
   });
 
+  it("does not restore a stale bridged row after its QBO invoice is complete", () => {
+    const rows = [
+      { id: "stale-old", product_id: "lift", logical_demand_key: "qbo-lift", parent_source_invoice_id: "invoice-complete", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+      { id: "completed-qbo", product_id: "lift", qbo_invoice_line_id: "qbo-lift", parent_source_invoice_id: "invoice-complete", approved_qty: 1, fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "FULFILLED" },
+      { id: "unrelated", product_id: "lift", qbo_invoice_line_id: "qbo-open", parent_source_invoice_id: "invoice-open", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },
+    ];
+
+    expect(getCanonicalOpenDemandLines(rows, new Set(["qbo-lift"]), new Set(["invoice-complete"])).map((line) => line.id)).toEqual(["unrelated"]);
+  });
+
   it("does not let fulfillment on a retired duplicate parent remove the live customer line", () => {
     const rows = [
       { id: "live", product_id: "product-1", qbo_invoice_line_id: "qbo-line", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },

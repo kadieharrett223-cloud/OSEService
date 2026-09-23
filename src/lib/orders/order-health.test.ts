@@ -13,6 +13,22 @@ describe("order health diagnostics", () => {
     expect(issues.some((issue) => issue.code === "QUEUE_COUNT_MISMATCH")).toBe(true);
   });
 
+  it("flags an open order line whose QBO mapping disagrees with its customer-list product", () => {
+    const issues = evaluateOrderHealth({
+      lines: [line({ qbo_invoice_lines: { product_id: "product-2" } })],
+    });
+
+    expect(issues.some((issue) => issue.code === "QBO_ORDER_PRODUCT_MISMATCH" && issue.severity === "ERROR")).toBe(true);
+  });
+
+  it("does not flag a completed historical line merely because the later QBO mapping changed", () => {
+    const issues = evaluateOrderHealth({
+      lines: [line({ fulfilled_qty: 1, fulfillment_status: "FULFILLED", qbo_invoice_lines: { product_id: "product-2" } })],
+    });
+
+    expect(issues.some((issue) => issue.code === "QBO_ORDER_PRODUCT_MISMATCH")).toBe(false);
+  });
+
   it("reports an active voided invoice", () => {
     const issues = evaluateOrderHealth({ lines: [line()], qboVoided: true, cancelled: false });
     expect(issues.some((issue) => issue.code === "VOIDED_ACTIVE" && issue.severity === "ERROR")).toBe(true);

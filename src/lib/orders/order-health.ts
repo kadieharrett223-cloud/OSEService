@@ -27,6 +27,7 @@ export type HealthLine = {
   warehouse_status?: string | null;
   queue_position_start?: number | null;
   queue_position_count?: number | null;
+  qbo_invoice_lines?: { qbo_line_id?: string | null; qbo_sku?: string | null; product_id?: string | null } | null;
   products?: { sku?: string | null; canonical_name?: string | null } | null;
   inventory_allocations?: Array<{ quantity?: number | null; source_type?: string | null }>;
   fulfillment_source?: string | null;
@@ -106,6 +107,18 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     if (upper(line.fulfillment_source) === "OTHER" && !line.fulfillment_notes) issues.push({ ...context, severity: "WARNING", code: "OTHER_SOURCE_NOTE_MISSING", product, issue: "Other fulfillment source has no note", expected: "Source note", actual: "Missing", cause: "Explain how this line will be fulfilled." });
     if (upper(line.fulfillment_source) === "WAREHOUSE" && !line.product_id) issues.push({ ...context, severity: "ERROR", code: "WAREHOUSE_SOURCE_UNMAPPED", product, issue: "Warehouse source has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Warehouse fulfillment cannot identify physical inventory." });
     if (!line.product_id && open > 0) issues.push({ ...context, severity: "ERROR", code: "UNMAPPED_PHYSICAL_LINE", product, issue: "Physical demand line has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Inventory and shipment actions cannot identify the product." });
+    if (open > 0 && line.product_id && line.qbo_invoice_lines?.product_id && line.product_id !== line.qbo_invoice_lines.product_id) {
+      issues.push({
+        ...context,
+        severity: "ERROR",
+        code: "QBO_ORDER_PRODUCT_MISMATCH",
+        product,
+        issue: "QuickBooks and the active order line point to different products",
+        expected: "One matching product identity",
+        actual: "Conflicting product mappings",
+        cause: "A mapping update reached only one representation of this invoice line. Reconcile the exact QBO line and order line before allocating or shipping.",
+      });
+    }
     if (line.queue_position_count != null && Number(line.queue_position_count) !== open) issues.push({ ...context, severity: "WARNING", code: "QUEUE_COUNT_MISMATCH", product, issue: "Queue range count does not match remaining quantity", expected: String(open), actual: String(line.queue_position_count), cause: "Queue metadata is stale or represents a different logical line." });
     if (open > 0 && line.queue_position_start == null && ["APPROVED", "PARTIAL"].includes(upper(line.approval_status))) issues.push({ ...context, severity: "WARNING", code: "QUEUE_POSITION_MISSING", product, issue: "Open approved line has no queue position", expected: "Assigned queue position", actual: "Missing", cause: "The positions-only queue calculation has not assigned this line." });
     const reserved = (line.inventory_allocations ?? []).reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);

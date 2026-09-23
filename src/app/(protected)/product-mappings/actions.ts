@@ -15,6 +15,11 @@ type MappingQueueEntry = {
   source_record_id: string | null;
 };
 
+type ProductMappedOrderLine = {
+  id: string;
+  product_id: string | null;
+};
+
 function value(formData: FormData, key: string) {
   const raw = formData.get(key);
   return typeof raw === "string" ? raw.trim() : "";
@@ -53,6 +58,43 @@ async function upsertManualAliases(
   if (error) throw error;
 }
 
+/**
+ * A QBO invoice-line mapping and its operational order-line mapping are one
+ * fact. Keeping only one side updated is what made an order sidebar disagree
+ * with the Customer List. This changes product identity only: it never writes
+ * quantities, fulfillment, allocations, or inventory transactions.
+ */
+async function reconcileOrderLinesForQboInvoiceLines(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  qboInvoiceLineIds: string[],
+  productId: string,
+) {
+  const ids = Array.from(new Set(qboInvoiceLineIds.filter(Boolean)));
+  if (ids.length === 0) return new Set<string>([productId]);
+
+  const { data, error } = await supabase
+    .from("shipping_order_lines")
+    .select("id, product_id")
+    .in("qbo_invoice_line_id", ids);
+  if (error) throw error;
+
+  const lines = (data ?? []) as ProductMappedOrderLine[];
+  const affectedProductIds = new Set<string>([productId]);
+  for (const line of lines) if (line.product_id) affectedProductIds.add(line.product_id);
+
+  const lineIdsToUpdate = lines
+    .filter((line) => line.product_id !== productId)
+    .map((line) => line.id);
+  if (lineIdsToUpdate.length > 0) {
+    const { error: updateError } = await supabase
+      .from("shipping_order_lines")
+      .update({ product_id: productId })
+      .in("id", lineIdsToUpdate);
+    if (updateError) throw updateError;
+  }
+  return affectedProductIds;
+}
+
 export async function resolveManualProductMappingAction(formData: FormData) {
   await requireUser();
   const queueId = value(formData, "queueId");
@@ -76,6 +118,7 @@ export async function resolveManualProductMappingAction(formData: FormData) {
     redirect(`/product-mappings?error=${encodeURIComponent(entryError?.message ?? "Mapping queue entry not found")}`);
   }
 
+  const affectedProductIds = new Set<string>([productId]);
   if (!isUnsafeGlobalProductAlias(entry.source_sku)) {
     const { error: aliasError } = await supabase.from("product_aliases").upsert({
       product_id: productId,
@@ -87,12 +130,20 @@ export async function resolveManualProductMappingAction(formData: FormData) {
     if (aliasError) {
       redirect(`/product-mappings?error=${encodeURIComponent(aliasError.message)}`);
     }
-  } else if (entry.source_system === "QBO_INVOICE" && entry.source_record_id) {
+  }
+  if (entry.source_system === "QBO_INVOICE" && entry.source_record_id) {
     const { error: sourceLineError } = await supabase
       .from("qbo_invoice_lines")
-      .update({ product_id: productId })
+      .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED" })
       .eq("id", entry.source_record_id);
     if (sourceLineError) redirect(`/product-mappings?error=${encodeURIComponent(sourceLineError.message)}`);
+    try {
+      for (const affectedProductId of await reconcileOrderLinesForQboInvoiceLines(supabase, [entry.source_record_id], productId)) {
+        affectedProductIds.add(affectedProductId);
+      }
+    } catch (error) {
+      redirect(`/product-mappings?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to reconcile the order line")}`);
+    }
   }
 
   const { error: updateError } = await queueTable
@@ -112,10 +163,11 @@ export async function resolveManualProductMappingAction(formData: FormData) {
   revalidatePath("/inventory");
   revalidateOrdersProjection();
   revalidatePath("/orders");
+  await recalculateProductQueues([...affectedProductIds]);
   if (returnTo.startsWith("/orders/")) {
     redirect(`${returnTo}?message=Product+mapping+saved`);
   }
-  redirect("/product-mappings?message=Mapping+saved.+Affected+orders+remain+pending+reconciliation");
+  redirect("/product-mappings?message=Mapping+saved+and+linked+order+lines+reconciled");
 }
 
 export async function createFocusedProductMappingAction(formData: FormData) {
@@ -160,16 +212,18 @@ export async function createFocusedProductMappingAction(formData: FormData) {
       : { data: null };
 
     if (invoiceLine) {
-      await supabase
+      const { error: invoiceUpdateError } = await supabase
         .from("qbo_invoice_lines")
-        .update({ product_id: productId })
+        .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED" })
         .eq("id", invoiceLine.id);
+      if (invoiceUpdateError) redirect(`${returnTo || "/product-mappings"}?error=${encodeURIComponent(invoiceUpdateError.message)}`);
       const { data: existingLine } = await supabase
         .from("shipping_order_lines")
-        .select("id")
+        .select("id, product_id")
         .eq("shipping_order_id", orderId)
         .eq("qbo_invoice_line_id", invoiceLine.id)
         .maybeSingle();
+      const affectedProductIds = new Set<string>([productId]);
       if (!existingLine) {
         const { error: insertError } = await supabase.from("shipping_order_lines").insert({
           shipping_order_id: orderId,
@@ -190,12 +244,21 @@ export async function createFocusedProductMappingAction(formData: FormData) {
         if (insertError && insertError.code !== "23505") {
           redirect(`/product-mappings?error=${encodeURIComponent(insertError.message)}`);
         }
+      } else {
+        try {
+          for (const affectedProductId of await reconcileOrderLinesForQboInvoiceLines(supabase, [invoiceLine.id], productId)) {
+            affectedProductIds.add(affectedProductId);
+          }
+        } catch (error) {
+          redirect(`${returnTo || "/product-mappings"}?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to reconcile the order line")}`);
+        }
       }
-      await recalculateProductQueues([productId]);
+      await recalculateProductQueues([...affectedProductIds]);
     }
   }
 
   revalidatePath("/product-mappings");
+  revalidatePath("/inventory");
   revalidateOrdersProjection();
   revalidatePath("/orders");
   if (returnTo.startsWith("/orders/")) {
@@ -243,12 +306,20 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
     .eq("source_sku", sourceSku);
   if (queueError) redirect(`/product-mappings?error=${encodeURIComponent(queueError.message)}`);
 
+  const { data: matchingInvoiceLines, error: invoiceLineLookupError } = await supabase
+    .from("qbo_invoice_lines")
+    .select("id")
+    .eq("qbo_sku", sourceSku);
+  if (invoiceLineLookupError) redirect(`/product-mappings?error=${encodeURIComponent(invoiceLineLookupError.message)}`);
+
   const { data: matchingLines, error: lineLookupError } = await supabase
     .from("shipping_order_lines")
-    .select("id")
+    .select("id, product_id")
     .eq("legacy_item_code", sourceSku);
   if (lineLookupError) redirect(`/product-mappings?error=${encodeURIComponent(lineLookupError.message)}`);
 
+  const affectedProductIds = new Set<string>([productId]);
+  for (const line of (matchingLines ?? []) as ProductMappedOrderLine[]) if (line.product_id) affectedProductIds.add(line.product_id);
   if (matchingLines?.length) {
     const { error: lineUpdateError } = await supabase
       .from("shipping_order_lines")
@@ -259,11 +330,23 @@ export async function resolveProductMappingForSkuAction(formData: FormData) {
 
   const { error: invoiceLineError } = await supabase
     .from("qbo_invoice_lines")
-    .update({ product_id: productId })
+    .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED" })
     .eq("qbo_sku", sourceSku);
   if (invoiceLineError) redirect(`/product-mappings?error=${encodeURIComponent(invoiceLineError.message)}`);
 
-  await recalculateProductQueues([productId]);
+  try {
+    for (const affectedProductId of await reconcileOrderLinesForQboInvoiceLines(
+      supabase,
+      (matchingInvoiceLines ?? []).map((line) => line.id),
+      productId,
+    )) {
+      affectedProductIds.add(affectedProductId);
+    }
+  } catch (error) {
+    redirect(`/product-mappings?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to reconcile linked order lines")}`);
+  }
+
+  await recalculateProductQueues([...affectedProductIds]);
   revalidatePath("/product-mappings");
   revalidatePath("/inventory");
   revalidateOrdersProjection();

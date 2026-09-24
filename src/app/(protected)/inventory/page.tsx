@@ -407,12 +407,17 @@ export default async function InventoryPage({
     product.id,
     canonicalSkuKey(operationalSkuByProduct.get(product.id) ?? product.sku ?? "") || product.id,
   ]));
-  const stockOwnerProductIds = authoritativeStockProductIds(productRows, canonicalInventoryKeyByProductId);
-
   const onFloorByProduct = toRecordMap(
     transactionRows.filter((row) => row.bucket === "ON_FLOOR"),
     (row) => row.product_id,
     (row) => Number(row.delta ?? 0),
+  );
+  // An on-floor ledger entry is meaningful even when its resulting balance is
+  // zero: it proves an operator explicitly set the current SKU's stock level.
+  const stockOwnerProductIds = authoritativeStockProductIds(
+    productRows,
+    canonicalInventoryKeyByProductId,
+    new Set(onFloorByProduct.keys()),
   );
 
   const openDemandByProduct = toRecordMap(

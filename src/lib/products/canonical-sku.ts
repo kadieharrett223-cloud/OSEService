@@ -67,6 +67,7 @@ export function canonicalProductSkuKey(
 export function authoritativeStockProductIds<T extends { id: string; sku: string | null | undefined }>(
   products: T[],
   canonicalKeyByProductId: Map<string, string>,
+  stockLedgerProductIds?: ReadonlySet<string>,
 ) {
   const directOwnersByKey = new Map<string, Set<string>>();
   for (const product of products) {
@@ -79,11 +80,44 @@ export function authoritativeStockProductIds<T extends { id: string; sku: string
     directOwnersByKey.set(key, owners);
   }
 
+  const productById = new Map(products.map((product) => [product.id, product]));
   const allowed = new Set<string>();
+  for (const [key, directOwners] of directOwnersByKey) {
+    const baseSkuOwners = [...directOwners].filter((productId) => {
+      const sku = String(productById.get(productId)?.sku ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+      return sku === key;
+    });
+    const baseOwnersWithLedger = baseSkuOwners.filter((productId) => stockLedgerProductIds?.has(productId));
+
+    // A current base SKU with its own on-floor ledger is authoritative. This
+    // rejects stale manufacturer-prefixed copies (for example HK-4PC-6) after
+    // an operator has corrected the live 4PC-6 balance to zero.
+    if (baseOwnersWithLedger.length > 0) {
+      for (const productId of baseOwnersWithLedger) allowed.add(productId);
+      continue;
+    }
+
+    // Some real stock was received only under the prior SKU. Do not turn that
+    // inventory into zero merely because a newer base catalog identity exists.
+    // In that case the ledger-bearing legacy identity is the only evidence of
+    // on-floor stock and remains visible in the merged product row.
+    if (stockLedgerProductIds) {
+      for (const product of products) {
+        if ((canonicalKeyByProductId.get(product.id) ?? product.id) === key && stockLedgerProductIds.has(product.id)) {
+          allowed.add(product.id);
+        }
+      }
+      continue;
+    }
+
+    for (const productId of directOwners) allowed.add(productId);
+  }
+
+  // Products with no exact, nonnumeric catalog owner are still standalone
+  // inventory identities and keep their own ledgers.
   for (const product of products) {
     const key = canonicalKeyByProductId.get(product.id) ?? product.id;
-    const directOwners = directOwnersByKey.get(key);
-    if (!directOwners || directOwners.has(product.id)) allowed.add(product.id);
+    if (!directOwnersByKey.has(key)) allowed.add(product.id);
   }
   return allowed;
 }

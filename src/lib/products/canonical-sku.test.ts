@@ -26,7 +26,23 @@ describe("canonicalSkuKey", () => {
     expect(authoritativeStockProductIds([
       { id: "live-4pc", sku: "4PC-6" },
       { id: "recycled-id", sku: "000011" },
-    ], keys)).toEqual(new Set(["live-4pc"]));
+    ], keys, new Set(["live-4pc", "recycled-id"]))).toEqual(new Set(["live-4pc"]));
+  });
+
+  it("retains a real legacy stock ledger until the current SKU has been explicitly stocked", () => {
+    const keys = new Map([["current", "2PCFXL10"], ["legacy", "2PCFXL10"]]);
+    expect(authoritativeStockProductIds([
+      { id: "current", sku: "2PCFXL-10" },
+      { id: "legacy", sku: "HL-2PCFXL-10" },
+    ], keys, new Set(["legacy"]))).toEqual(new Set(["legacy"]));
+  });
+
+  it("uses an explicit current-SKU zero balance instead of a stale prefixed ledger", () => {
+    const keys = new Map([["current", "4PC6"], ["legacy", "4PC6"]]);
+    expect(authoritativeStockProductIds([
+      { id: "current", sku: "4PC-6" },
+      { id: "legacy", sku: "HK-4PC-6" },
+    ], keys, new Set(["current", "legacy"]))).toEqual(new Set(["current"]));
   });
 
   it("never uses generic aliases to merge distinct product models", () => {

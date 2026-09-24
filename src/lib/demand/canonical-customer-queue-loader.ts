@@ -212,7 +212,27 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
     productQueueKeyById.get(lineProductIdByLineId.get(row.lineId) ?? "") || lineProductIdByLineId.get(row.lineId) || row.lineId
   ));
   const projectedByLogicalDemandKey = new Map(projected.map((row) => [row.logicalDemandKey, row]));
-  const queueEntryBySourceLineId = new Map(projected.map((row) => [row.lineId, row]));
+  const queueEntryBySourceLineId = new Map<string, ProjectedCustomerQueueRow>(projected.map((row) => [row.lineId, row]));
+
+  // The visible Customer List intentionally merges multiple lines from one invoice for the
+  // same physical product into one customer demand row.  Keep every constituent line pointed
+  // at that row as well.  Without this alias, only the first source line receives a position
+  // and equally real companion lines misleadingly display as unassigned.  This is display and
+  // position identity only: it does not add demand, allocate stock, or write any record.
+  const projectedByInvoiceProductKey = new Map<string, ProjectedCustomerQueueRow>();
+  for (const row of projected) {
+    const productId = lineProductIdByLineId.get(row.lineId);
+    const productKey = productQueueKeyById.get(productId ?? "") ?? productId;
+    if (!productKey) continue;
+    projectedByInvoiceProductKey.set(`${row.sourceInvoiceId ?? `ORDER:${row.orderId}`}|${productKey}`, row);
+  }
+  for (const line of canonicalLines) {
+    if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;
+    const productKey = productQueueKeyById.get(line.product_id) ?? line.product_id;
+    const invoiceKey = line.shipping_orders?.source_invoice_id ?? `ORDER:${line.shipping_orders?.id ?? ""}`;
+    const mergedInvoiceRow = projectedByInvoiceProductKey.get(`${invoiceKey}|${productKey}`);
+    if (mergedInvoiceRow) queueEntryBySourceLineId.set(line.id, mergedInvoiceRow);
+  }
 
   // The page may render a bridged historical line to preserve the exact QBO
   // invoice description.  Resolve that representation through its logical

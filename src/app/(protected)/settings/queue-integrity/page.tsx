@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { loadCanonicalCustomerQueue, type CanonicalQueueLine } from "@/lib/demand/canonical-customer-queue-loader";
 import { demandLineIdentity, isOpenCustomerQueueLine, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { persistAuditedQueuePositionsAction } from "./actions";
 
 type AuditRow = {
   line: CanonicalQueueLine;
@@ -64,7 +65,7 @@ function AuditTable({ rows }: { rows: AuditRow[] }) {
   );
 }
 
-export default async function QueueIntegrityPage({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
+export default async function QueueIntegrityPage({ searchParams }: { searchParams: Promise<{ run?: string; message?: string }> }) {
   await requireUser();
   if ((await searchParams).run !== "1") {
     return (
@@ -77,6 +78,7 @@ export default async function QueueIntegrityPage({ searchParams }: { searchParam
   }
 
   const { queue, canonicalLines, qboInvoiceLines, queueByLineId, queueByLogicalDemandKey } = await loadCanonicalCustomerQueue();
+  const { message } = await searchParams;
   const activeMappedLines = canonicalLines.filter(isOpenCustomerQueueLine);
   const activeUnmappedLines = canonicalLines.filter((line) => (
     !line.product_id
@@ -106,6 +108,7 @@ export default async function QueueIntegrityPage({ searchParams }: { searchParam
   }
 
   const unmappedRows = activeUnmappedLines.map((line) => ({ line, reason: "Active QBO obligation has no product identity", projectedPosition: null }));
+  const positionProductIds = [...new Set(noStoredPosition.map(({ line }) => line.product_id).filter((productId): productId is string => Boolean(productId)))];
 
   return (
     <div className="space-y-5">
@@ -113,6 +116,7 @@ export default async function QueueIntegrityPage({ searchParams }: { searchParam
         <h1 className="text-3xl">Customer List Integrity Audit</h1>
         <p className="mt-1 text-sm text-[#5a5a5a]">Read-only result from the same canonical queue used by Inventory and Orders. No business data was changed.</p>
       </div>
+      {message ? <p className="rounded-md border border-[#bfdcc5] bg-[#f3fff6] p-3 text-sm text-[#0f5b28]">{message}</p> : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="card p-3"><p className="text-sm text-[#5a5a5a]">Active Customer List obligations</p><p className="text-2xl font-semibold">{queue.length}</p></div>
         <div className="card p-3"><p className="text-sm text-[#5a5a5a]">Missing product identity</p><p className="text-2xl font-semibold">{unmappedRows.length}</p></div>
@@ -122,7 +126,7 @@ export default async function QueueIntegrityPage({ searchParams }: { searchParam
       <section className="card p-4"><h2 className="text-xl">Active QBO obligations without a product identity</h2><p className="mt-1 text-sm text-[#5a5a5a]">These are the only active QBO lines that cannot enter any Customer List because they have no product identity.</p><AuditTable rows={unmappedRows} /></section>
       <section className="card p-4"><h2 className="text-xl">Mapped obligations missing from the displayed Customer List</h2><p className="mt-1 text-sm text-[#5a5a5a]">Every listed line is active, mapped, and eligible, but has no projected queue row.</p><AuditTable rows={noProjectedPosition} /></section>
       <section className="card p-4"><h2 className="text-xl">Product identity disagreements</h2><p className="mt-1 text-sm text-[#5a5a5a]">The order line and its linked QBO invoice line point to different products. This is diagnostic only; it does not remap either record.</p><AuditTable rows={productDisagreements} /></section>
-      <section className="card p-4"><h2 className="text-xl">Source lines with a live-computed but unpersisted position</h2><p className="mt-1 text-sm text-[#5a5a5a]">These customers do appear in the live list. The row is included so stored-position gaps can be reconciled separately without altering inventory.</p><AuditTable rows={noStoredPosition} /></section>
+      <section className="card p-4"><h2 className="text-xl">Source lines with a live-computed but unpersisted position</h2><p className="mt-1 text-sm text-[#5a5a5a]">These customers do appear in the live list. The action below persists exactly the current projected positions; it changes no inventory, mapping, allocations, fulfillment, shipments, or orders.</p>{positionProductIds.length ? <form action={persistAuditedQueuePositionsAction} className="mt-3"><input type="hidden" name="product_ids" value={positionProductIds.join(",")} /><button className="btn-primary" type="submit">Save current positions for these lines</button></form> : null}<AuditTable rows={noStoredPosition} /></section>
       <Link href="/settings" className="btn-secondary">Back to Settings</Link>
     </div>
   );

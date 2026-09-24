@@ -1,6 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { requireUser } from "@/lib/auth";
 import { loadCanonicalCustomerQueue, type CanonicalQueueLine } from "@/lib/demand/canonical-customer-queue-loader";
 import { demandLineIdentity, isOpenCustomerQueueLine, isOpenDemandLine } from "@/lib/demand/product-demand";
@@ -67,8 +65,7 @@ function AuditTable({ rows }: { rows: AuditRow[] }) {
 }
 
 export default async function QueueIntegrityPage({ searchParams }: { searchParams: Promise<{ run?: string }> }) {
-  const user = await requireUser();
-  if (!await isAdminUnlockedForUser(user.id)) redirect("/settings?error=Admin+code+required");
+  await requireUser();
   if ((await searchParams).run !== "1") {
     return (
       <div className="space-y-4">

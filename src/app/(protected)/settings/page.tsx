@@ -212,6 +212,9 @@ export default async function SettingsPage({
           <a href="/settings/queue-priority-preview" className="btn-secondary">
             Preview Queue Priority
           </a>
+          <a href="/settings/queue-integrity" className="btn-secondary">
+            Audit Customer Lists
+          </a>
           <form action={disconnectQuickbooksAction}>
             <button type="submit" className="btn-danger" disabled={!isConnected || quickbooksTableMissing}>
               Disconnect

@@ -1228,11 +1228,17 @@ export async function remapOrderLineProductAction(formData: FormData) {
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, shipping_order_id, product_id")
+    .select("id, shipping_order_id, product_id, qbo_invoice_line_id, approval_status")
     .eq("id", lineId)
     .maybeSingle();
 
-  const lineRow = line as { id: string; shipping_order_id: string; product_id: string | null } | null;
+  const lineRow = line as {
+    id: string;
+    shipping_order_id: string;
+    product_id: string | null;
+    qbo_invoice_line_id: string | null;
+    approval_status: string | null;
+  } | null;
   if (lineError || !lineRow || lineRow.shipping_order_id !== orderId) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
   }
@@ -1247,6 +1253,39 @@ export async function remapOrderLineProductAction(formData: FormData) {
   }
 
   if (lineRow.product_id === productId) {
+    // A legacy/imported line can already point at the right catalog product
+    // while its approval flag is still PENDING_REVIEW.  Treating that as a
+    // no-op strands a real item outside its Customer List even though there
+    // is nothing left for an employee to choose.  Approving this exact,
+    // already-selected product changes queue eligibility only; it does not
+    // allocate, fulfill, ship, or move any inventory.
+    if (String(lineRow.approval_status ?? "").toUpperCase() !== "APPROVED") {
+      const { error: approvalError } = await adminClient
+        .from("shipping_order_lines")
+        .update({ approval_status: "APPROVED" } as never)
+        .eq("id", lineId);
+      if (approvalError) redirect(`/orders/${orderId}?error=${encodeURIComponent(approvalError.message)}`);
+
+      if (lineRow.qbo_invoice_line_id) {
+        const { error: qboApprovalError } = await adminClient
+          .from("qbo_invoice_lines")
+          .update({ mapping_status: "MAPPED", approval_status: "APPROVED" } as never)
+          .eq("id", lineRow.qbo_invoice_line_id);
+        if (qboApprovalError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboApprovalError.message)}`);
+      }
+
+      await recalculateProductQueues([productId]);
+      await writeOrderActivity(adminClient, orderId, "ORDER_LINE_MAPPING_APPROVED", {
+        line_id: lineId,
+        product_id: productId,
+        reason: "Existing product mapping approved for Customer List eligibility",
+      });
+      revalidatePath("/inventory");
+      revalidatePath("/order-queue");
+      revalidatePath("/product-mappings");
+      revalidatePath(`/orders/${orderId}`);
+      redirect(`/orders/${orderId}?message=Existing+product+mapping+approved+and+added+to+the+Customer+List`);
+    }
     redirect(`/orders/${orderId}?message=Line+already+mapped+to+selected+product`);
   }
 

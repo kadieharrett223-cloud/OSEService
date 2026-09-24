@@ -42,6 +42,16 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(resolveKnownQboProductId("UNKNOWN-DELETED", new Map([["4PML-9", "product-lift"]]), "old-product", true)).toBeNull();
   });
 
+  it("corrects a stale saved mapping when the current QBO SKU is an exact real product", () => {
+    expect(resolveKnownQboProductId("4PC-6", new Map([["4PC-6", "product-4pc"]]), "product-hpu")).toBe("product-4pc");
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ product_id: "product-hpu", qbo_sku: "4PC-6" })],
+      [orderLine({ product_id: "product-hpu" })],
+      new Map([["4PC-6", "product-4pc"]]),
+    );
+    expect(plan.updates[0]?.product_id).toBe("product-4pc");
+  });
+
   it("refreshes and approves an existing unshipped line instead of duplicating it", () => {
     const plan = planQuickbooksOrderRefresh([invoiceLine()], [orderLine()], aliases);
 

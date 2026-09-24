@@ -110,7 +110,13 @@ export function resolveKnownQboProductId(
   const aliasProductId = qboSkuCandidates(qboSku)
     .map((candidate) => productIdByAlias.get(candidate))
     .find(Boolean) ?? null;
-  return itemIdentityChanged ? aliasProductId : existingProductId ?? aliasProductId;
+  // A direct catalog SKU (or one unique, approved alias) is current source
+  // truth.  Retaining a stale saved product here previously let an old wrong
+  // link keep routing a real 4PC-6 line to a different product after every
+  // QBO sync.  Only an unknown/ambiguous QBO label may retain the existing
+  // identity; it is not safe to infer a replacement from that label.
+  if (aliasProductId) return aliasProductId;
+  return itemIdentityChanged ? null : existingProductId ?? null;
 }
 
 export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {

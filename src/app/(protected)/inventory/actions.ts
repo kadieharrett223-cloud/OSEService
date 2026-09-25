@@ -231,7 +231,7 @@ export async function updateProductTitleAction(formData: FormData) {
  * can never rewrite stock, fulfillment, or historical records.
  */
 export async function deleteUnusedProductAction(formData: FormData) {
-  const user = await requireInventoryAdmin();
+  const user = await requireUser();
   const productId = String(formData.get("product_id") ?? "").trim();
 
   if (!productId) {

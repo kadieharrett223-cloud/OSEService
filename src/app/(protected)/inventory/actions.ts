@@ -224,6 +224,77 @@ export async function updateProductTitleAction(formData: FormData) {
   redirect(`/inventory?mapMessage=${encodeURIComponent(`Renamed to ${title}.`)}`);
 }
 
+/**
+ * Permanently removes a catalog product only when it has never participated in
+ * operational data. This deliberately refuses to delete a product with any
+ * order, QBO, container, allocation, or ledger reference so a catalog cleanup
+ * can never rewrite stock, fulfillment, or historical records.
+ */
+export async function deleteUnusedProductAction(formData: FormData) {
+  const user = await requireInventoryAdmin();
+  const productId = String(formData.get("product_id") ?? "").trim();
+
+  if (!productId) {
+    redirect("/inventory?mapError=Product+is+required");
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("id,sku,canonical_name")
+    .eq("id", productId)
+    .maybeSingle();
+
+  if (productError || !product) {
+    redirect(`/inventory?mapError=${encodeURIComponent(productError?.message ?? "Product not found")}`);
+  }
+
+  const referenceTables = [
+    "qbo_invoice_lines",
+    "shipping_order_lines",
+    "container_lines",
+    "inventory_transactions",
+    "inventory_allocations",
+  ] as const;
+  const references = await Promise.all(referenceTables.map(async (table) => {
+    const { count, error } = await supabase
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .eq("product_id", product.id);
+    if (error) throw error;
+    return { table, count: count ?? 0 };
+  }));
+  const usedBy = references.filter((reference) => reference.count > 0);
+  if (usedBy.length > 0) {
+    redirect(`/inventory?mapError=${encodeURIComponent(`${product.sku} cannot be deleted because it is referenced by ${usedBy.map((reference) => `${reference.count} ${reference.table}`).join(", ")}. Historical and operational product records are never deleted by catalog cleanup.`)}`);
+  }
+
+  const { error: auditError } = await supabase.from("audit_log").insert({
+    entity_type: "PRODUCT",
+    entity_id: product.id,
+    action: "PRODUCT_DELETED_UNUSED",
+    actor_id: user.id,
+    details: {
+      sku: product.sku,
+      canonical_name: product.canonical_name,
+      reason: "Confirmed non-existent product catalog cleanup",
+    },
+  });
+  if (auditError) {
+    redirect(`/inventory?mapError=${encodeURIComponent(auditError.message)}`);
+  }
+
+  const { error: deleteError } = await supabase.from("products").delete().eq("id", product.id);
+  if (deleteError) {
+    redirect(`/inventory?mapError=${encodeURIComponent(deleteError.message)}`);
+  }
+
+  revalidateInventoryReadModel();
+  revalidateOrdersProjection();
+  revalidatePath("/product-mappings");
+  redirect(`/inventory?mapMessage=${encodeURIComponent(`Permanently deleted unused product ${product.sku}. No stock, shipment, allocation, or order records were changed.`)}`);
+}
+
 export async function adjustProductStockAction(formData: FormData) {
   const user = await requireInventoryAdmin();
 

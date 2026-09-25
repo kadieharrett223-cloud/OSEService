@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { adjustProductStockAction, updateProductTitleAction } from "@/app/(protected)/inventory/actions";
+import { adjustProductStockAction, deleteUnusedProductAction, updateProductTitleAction } from "@/app/(protected)/inventory/actions";
 
 type AdminRowEditorProps = {
   productId: string;
@@ -84,6 +84,14 @@ export function AdminRowEditor({ productId, sku, productName, storedName, onFloo
               <p className="text-xs text-[#6b7280]">Recorded as an adjustment against the current count of {onFloor}.</p>
               <button type="submit" className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937]">
                 Save stock
+              </button>
+            </form>
+
+            <form action={deleteUnusedProductAction} className="mt-6 border-t border-[#fecaca] pt-5">
+              <input type="hidden" name="product_id" value={productId} />
+              <p className="text-xs text-[#991b1b]">Delete is permanent. It is blocked automatically if this product has any order, QBO, container, allocation, or inventory-ledger history.</p>
+              <button type="submit" className="mt-3 rounded-lg border border-[#dc2626] px-4 py-2 text-sm font-semibold text-[#b91c1c] transition hover:bg-[#fff1f2]">
+                Permanently delete unused product
               </button>
             </form>
 

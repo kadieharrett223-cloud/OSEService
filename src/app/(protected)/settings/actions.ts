@@ -19,6 +19,7 @@ import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake
 import { isWithinAutomaticQboIntake } from "@/lib/orders/qbo-intake-policy";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 import {
+  appendQuickbooksInternalMemoForOrder,
   disconnectQuickbooksConnection,
   getQuickbooksFirstPaymentDates,
   syncQuickbooksInvoices,
@@ -141,6 +142,91 @@ export async function syncQuickbooksAction() {
     const message = error instanceof Error ? error.message : "QuickBooks sync failed.";
     redirect(`/settings?error=${encodeURIComponent(message)}`);
   }
+}
+
+type RecentLiftShipment = {
+  id: string;
+  shipping_order_id: string;
+  shipped_at: string;
+  tracking_number: string | null;
+  lines?: Array<{
+    quantity: number | null;
+    shipping_order_lines?: {
+      legacy_item_code?: string | null;
+      products?: { sku?: string | null; inventory_group?: string | null } | null;
+    } | null;
+  }>;
+};
+
+function isLiftShipment(shipment: RecentLiftShipment) {
+  return (shipment.lines ?? []).some((line) => /LIFTS$/i.test(String(line.shipping_order_lines?.products?.inventory_group ?? "").trim()));
+}
+
+function recentShipmentMemoItems(shipment: RecentLiftShipment) {
+  return (shipment.lines ?? [])
+    .map((line) => {
+      const quantity = Number(line.quantity ?? 0);
+      if (!Number.isFinite(quantity) || quantity <= 0) return null;
+      const item = line.shipping_order_lines;
+      const label = String(item?.products?.sku ?? item?.legacy_item_code ?? "Mapped item").trim().replace(/\s+/g, " ");
+      return `${quantity} × ${label || "Mapped item"}`;
+    })
+    .filter((item): item is string => Boolean(item))
+    .join(", ");
+}
+
+/**
+ * Historical QBO memo backfill only. It reads completed shipment records and
+ * writes QBO PrivateNote entries; it does not call fulfillment, inventory,
+ * allocation, queue, or order-status code.
+ */
+export async function syncRecentLiftShipmentMemosAction() {
+  await requireSettingsAdmin();
+  const supabase = getSupabaseAdmin();
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("order_shipments")
+    .select("id,shipping_order_id,shipped_at,tracking_number,lines:order_shipment_lines(quantity,shipping_order_lines(legacy_item_code,products(sku,inventory_group)))")
+    .gte("shipped_at", cutoff)
+    .order("shipped_at", { ascending: true });
+  if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);
+
+  const shipments = ((data ?? []) as unknown as RecentLiftShipment[]).filter(isLiftShipment);
+  let synced = 0;
+  let alreadySynced = 0;
+  const failures: string[] = [];
+
+  // Keep calls sequential so QBO's update-version protection is respected and
+  // an existing salesperson note is never overwritten by a racing request.
+  for (const shipment of shipments) {
+    try {
+      const items = recentShipmentMemoItems(shipment);
+      const result = await appendQuickbooksInternalMemoForOrder(shipment.shipping_order_id, {
+        eventKey: `shipment:${shipment.id}`,
+        message: `Shipment created in OCC${shipment.tracking_number ? ` (tracking ${shipment.tracking_number})` : ""}${items ? `; Items: ${items}` : ""}`,
+        occurredAt: shipment.shipped_at,
+      });
+      if (result.status === "synced") synced += 1;
+      if (result.status === "already_synced") alreadySynced += 1;
+      await supabase.from("audit_log").insert({
+        entity_type: "shipping_order",
+        entity_id: shipment.shipping_order_id,
+        action: "QBO_INTERNAL_MEMO_SYNCED",
+        details: { event_key: `shipment:${shipment.id}`, result: result.status, historical_lift_backfill: true } as never,
+      });
+    } catch (backfillError) {
+      failures.push(shipment.id);
+      await supabase.from("audit_log").insert({
+        entity_type: "shipping_order",
+        entity_id: shipment.shipping_order_id,
+        action: "QBO_INTERNAL_MEMO_SYNC_FAILED",
+        details: { event_key: `shipment:${shipment.id}`, historical_lift_backfill: true, error: backfillError instanceof Error ? backfillError.message : "QuickBooks internal memo sync failed." } as never,
+      });
+    }
+  }
+
+  const failureMessage = failures.length ? ` ${failures.length} shipment memo${failures.length === 1 ? "" : "s"} could not be synced; see activity history.` : "";
+  redirect(`/settings?message=${encodeURIComponent(`Historical lift shipment memo backfill complete: ${synced} added, ${alreadySynced} already present, ${shipments.length} lift shipment${shipments.length === 1 ? "" : "s"} reviewed.${failureMessage}`)}`);
 }
 
 export async function setQboForwardIntakeEnabledAction(formData: FormData) {

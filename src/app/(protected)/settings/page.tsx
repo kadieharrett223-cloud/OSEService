@@ -8,6 +8,7 @@ import {
   lockSettingsAdminAction,
   setAccessUserActiveAction,
   setQboForwardIntakeEnabledAction,
+  syncRecentLiftShipmentMemosAction,
   unlockSettingsAdminAction,
 } from "@/app/(protected)/settings/actions";
 import {
@@ -215,6 +216,11 @@ export default async function SettingsPage({
           <a href="/settings/queue-integrity" className="btn-secondary">
             Audit Customer Lists
           </a>
+          <form action={syncRecentLiftShipmentMemosAction}>
+            <button type="submit" className="btn-secondary" disabled={!isConnected || quickbooksTableMissing}>
+              Backfill Recent Lift Shipment Memos
+            </button>
+          </form>
           <form action={disconnectQuickbooksAction}>
             <button type="submit" className="btn-danger" disabled={!isConnected || quickbooksTableMissing}>
               Disconnect
@@ -232,6 +238,7 @@ export default async function SettingsPage({
             </button>
           </form>
         </div>
+        <p className="mt-3 text-xs text-[#5a5a5a]">The historical lift memo backfill reviews only saved shipments from the last 30 days whose product group is 2-Post, 4-Post, or Scissor Lifts. It appends only the hidden QBO invoice memo and never changes OCC inventory, allocations, fulfillment, queues, or order status.</p>
       </section>
 
       <section className="card p-4 overflow-x-auto">

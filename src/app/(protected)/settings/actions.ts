@@ -18,6 +18,7 @@ import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache
 import { isInventoryDemandQuickbooksLine } from "@/lib/orders/qbo-forward-intake";
 import { isWithinAutomaticQboIntake } from "@/lib/orders/qbo-intake-policy";
 import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
+import { shipmentMemoLabel } from "@/lib/orders/shipment-memo-label";
 import {
   appendQuickbooksInternalMemoForOrder,
   disconnectQuickbooksConnection,
@@ -153,7 +154,7 @@ type RecentLiftShipment = {
     quantity: number | null;
     shipping_order_lines?: {
       legacy_item_code?: string | null;
-      products?: { sku?: string | null; inventory_group?: string | null } | null;
+      products?: { sku?: string | null; canonical_name?: string | null; inventory_group?: string | null } | null;
     } | null;
   }>;
 };
@@ -168,8 +169,12 @@ function recentShipmentMemoItems(shipment: RecentLiftShipment) {
       const quantity = Number(line.quantity ?? 0);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
       const item = line.shipping_order_lines;
-      const label = String(item?.products?.sku ?? item?.legacy_item_code ?? "Mapped item").trim().replace(/\s+/g, " ");
-      return `${quantity} × ${label || "Mapped item"}`;
+      const label = shipmentMemoLabel({
+        sku: item?.products?.sku,
+        canonicalName: item?.products?.canonical_name,
+        legacyItemCode: item?.legacy_item_code,
+      });
+      return `${quantity} × ${label}`;
     })
     .filter((item): item is string => Boolean(item))
     .join(", ");
@@ -186,7 +191,7 @@ export async function syncRecentLiftShipmentMemosAction() {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("order_shipments")
-    .select("id,shipping_order_id,shipped_at,tracking_number,lines:order_shipment_lines(quantity,shipping_order_lines(legacy_item_code,products(sku,inventory_group)))")
+    .select("id,shipping_order_id,shipped_at,tracking_number,lines:order_shipment_lines(quantity,shipping_order_lines(legacy_item_code,products(sku,canonical_name,inventory_group)))")
     .gte("shipped_at", cutoff)
     .order("shipped_at", { ascending: true });
   if (error) redirect(`/settings?error=${encodeURIComponent(error.message)}`);

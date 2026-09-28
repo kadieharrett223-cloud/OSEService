@@ -16,6 +16,7 @@ import { findLogicalFulfillmentOverages, isActiveSameInvoiceSiblingOwner, resolv
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
 import { appendQuickbooksInternalMemoForOrder, syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
+import { shipmentMemoLabel } from "@/lib/orders/shipment-memo-label";
 
 function revalidateOrdersList() {
   revalidateOrdersProjection();
@@ -513,10 +514,12 @@ function describeShipmentItems(
       const quantity = quantityForLine(line);
       if (!Number.isFinite(quantity) || quantity <= 0) return null;
       const product = line.products;
-      const label = String(product?.sku ?? line.legacy_item_code ?? product?.canonical_name ?? "Mapped item")
-        .trim()
-        .replace(/\s+/g, " ");
-      return `${quantity} × ${label || "Mapped item"}`;
+      const label = shipmentMemoLabel({
+        sku: product?.sku,
+        canonicalName: product?.canonical_name,
+        legacyItemCode: line.legacy_item_code,
+      });
+      return `${quantity} × ${label}`;
     })
     .filter((item): item is string => Boolean(item));
 

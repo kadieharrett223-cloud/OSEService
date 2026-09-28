@@ -185,7 +185,7 @@ function recentShipmentMemoItems(shipment: RecentLiftShipment) {
  * writes QBO PrivateNote entries; it does not call fulfillment, inventory,
  * allocation, queue, or order-status code.
  */
-export async function syncRecentLiftShipmentMemosAction() {
+async function syncRecentLiftShipmentMemos(replaceExistingEvent: boolean) {
   await requireSettingsAdmin();
   const supabase = getSupabaseAdmin();
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -198,6 +198,7 @@ export async function syncRecentLiftShipmentMemosAction() {
 
   const shipments = ((data ?? []) as unknown as RecentLiftShipment[]).filter(isLiftShipment);
   let synced = 0;
+  let updated = 0;
   let alreadySynced = 0;
   const failures: string[] = [];
 
@@ -210,8 +211,10 @@ export async function syncRecentLiftShipmentMemosAction() {
         eventKey: `shipment:${shipment.id}`,
         message: `Shipment created in OCC${shipment.tracking_number ? ` (tracking ${shipment.tracking_number})` : ""}${items ? `; Items: ${items}` : ""}`,
         occurredAt: shipment.shipped_at,
+        replaceExistingEvent,
       });
       if (result.status === "synced") synced += 1;
+      if (result.status === "updated") updated += 1;
       if (result.status === "already_synced") alreadySynced += 1;
       await supabase.from("audit_log").insert({
         entity_type: "shipping_order",
@@ -231,7 +234,18 @@ export async function syncRecentLiftShipmentMemosAction() {
   }
 
   const failureMessage = failures.length ? ` ${failures.length} shipment memo${failures.length === 1 ? "" : "s"} could not be synced; see activity history.` : "";
-  redirect(`/settings?message=${encodeURIComponent(`Historical lift shipment memo backfill complete: ${synced} added, ${alreadySynced} already present, ${shipments.length} lift shipment${shipments.length === 1 ? "" : "s"} reviewed.${failureMessage}`)}`);
+  const action = replaceExistingEvent ? "Historical lift memo label correction complete" : "Historical lift shipment memo backfill complete";
+  redirect(`/settings?message=${encodeURIComponent(`${action}: ${synced} added, ${updated} corrected, ${alreadySynced} already current, ${shipments.length} lift shipment${shipments.length === 1 ? "" : "s"} reviewed.${failureMessage}`)}`);
+}
+
+export async function syncRecentLiftShipmentMemosAction() {
+  await requireSettingsAdmin();
+  return syncRecentLiftShipmentMemos(false);
+}
+
+export async function correctRecentLiftShipmentMemoLabelsAction() {
+  await requireSettingsAdmin();
+  return syncRecentLiftShipmentMemos(true);
 }
 
 export async function setQboForwardIntakeEnabledAction(formData: FormData) {

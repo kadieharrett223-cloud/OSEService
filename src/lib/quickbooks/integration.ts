@@ -43,6 +43,8 @@ export type QuickbooksInternalMemoEvent = {
   eventKey: string;
   occurredAt?: string | Date;
   message: string;
+  /** Replace this OCC event's own memo line when its generated text changed. */
+  replaceExistingEvent?: boolean;
 };
 
 const QUICKBOOKS_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
@@ -650,7 +652,30 @@ export async function appendQuickbooksInternalMemoForOrder(
       qboInvoiceId,
     });
     if (invoice.privateNote.includes(marker)) {
-      return { status: "already_synced" as const, qboInvoiceId };
+      if (!event.replaceExistingEvent) return { status: "already_synced" as const, qboInvoiceId };
+      const existingLine = invoice.privateNote.split(/\r?\n/).find((line) => line.includes(marker));
+      if (existingLine === entry) return { status: "already_synced" as const, qboInvoiceId };
+
+      // Only replace the exact OCC-generated line that carries this event's
+      // marker. Salesperson-authored note text remains untouched.
+      const privateNote = invoice.privateNote
+        .split(/\r?\n/)
+        .map((line) => line.includes(marker) ? entry : line)
+        .join("\n");
+      try {
+        await updateQuickbooksInvoice({
+          apiBase,
+          realmId: connection.realm_id,
+          accessToken,
+          invoiceId: invoice.id,
+          syncToken: invoice.syncToken,
+          privateNote,
+        });
+        return { status: "updated" as const, qboInvoiceId };
+      } catch (error) {
+        if (attempt === 1) throw error;
+        continue;
+      }
     }
 
     const privateNote = invoice.privateNote ? `${invoice.privateNote}\n${entry}` : entry;

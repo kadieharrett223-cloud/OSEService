@@ -3,6 +3,7 @@ import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   connectQuickbooksAction,
+  correctRecentLiftShipmentMemoLabelsAction,
   createAccessUserAction,
   disconnectQuickbooksAction,
   lockSettingsAdminAction,
@@ -219,6 +220,11 @@ export default async function SettingsPage({
           <form action={syncRecentLiftShipmentMemosAction}>
             <button type="submit" className="btn-secondary" disabled={!isConnected || quickbooksTableMissing}>
               Backfill Recent Lift Shipment Memos
+            </button>
+          </form>
+          <form action={correctRecentLiftShipmentMemoLabelsAction}>
+            <button type="submit" className="btn-secondary" disabled={!isConnected || quickbooksTableMissing}>
+              Correct Recent Lift Memo Labels
             </button>
           </form>
           <form action={disconnectQuickbooksAction}>

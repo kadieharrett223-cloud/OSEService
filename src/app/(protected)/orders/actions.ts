@@ -497,6 +497,32 @@ async function syncQuickbooksFullyShippedMemo(
   });
 }
 
+type ShipmentMemoLine = {
+  id: string;
+  legacy_item_code?: string | null;
+  products?: { sku?: string | null; canonical_name?: string | null } | null;
+};
+
+/** Builds display-only text for QBO; it never participates in fulfillment or inventory calculations. */
+function describeShipmentItems(
+  lines: ShipmentMemoLine[],
+  quantityForLine: (line: ShipmentMemoLine) => number,
+) {
+  const items = lines
+    .map((line) => {
+      const quantity = quantityForLine(line);
+      if (!Number.isFinite(quantity) || quantity <= 0) return null;
+      const product = line.products;
+      const label = String(product?.sku ?? line.legacy_item_code ?? product?.canonical_name ?? "Mapped item")
+        .trim()
+        .replace(/\s+/g, " ");
+      return `${quantity} × ${label || "Mapped item"}`;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  return items.length > 0 ? `; Items: ${items.join(", ")}` : "";
+}
+
 async function recordFulfillmentInventory(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   lineId: string,
@@ -1637,13 +1663,15 @@ export async function markOrderLineShippedAction(formData: FormData) {
 
   const { data: line, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source")
+    .select("id, product_id, legacy_item_code, approved_qty, fulfilled_qty, fulfillment_source, products(sku,canonical_name)")
     .eq("id", lineId)
     .maybeSingle();
 
   const lineRow = line as {
     id: string;
     product_id: string | null;
+    legacy_item_code?: string | null;
+    products?: { sku?: string | null; canonical_name?: string | null } | null;
     approved_qty: number | null;
     fulfilled_qty: number | null;
     fulfillment_source: string | null;
@@ -1721,7 +1749,7 @@ export async function markOrderLineShippedAction(formData: FormData) {
   });
   await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
     eventKey: `shipment:${shipmentNumber}`,
-    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}${describeShipmentItems([lineRow], () => shipQty)}`,
     occurredAt: fulfilledAtIso,
   });
   await syncQuickbooksFullyShippedMemo(adminClient, orderId, fulfilledAtIso);
@@ -1820,7 +1848,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const { data: lines, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, shipping_order_id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, fulfillment_source")
+    .select("id, shipping_order_id, product_id, legacy_item_code, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, fulfillment_source, products(sku,canonical_name)")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
 
@@ -1837,6 +1865,8 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
     approval_status: string | null;
     fulfillment_status: string | null;
     fulfillment_source: string | null;
+    legacy_item_code?: string | null;
+    products?: { sku?: string | null; canonical_name?: string | null } | null;
   }>;
 
   if (selectedLines.length !== selectedIds.length) redirect(`/orders/${orderId}?error=Selected+line+does+not+belong+to+this+order`);
@@ -1854,6 +1884,10 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
 
   const fulfilledAt = `${shipmentDate}T12:00:00.000Z`;
   const shipmentNumber = `SHIP-${Date.now()}`;
+  const shipmentQuantityByLineId = new Map(selectedLines.map((line) => [
+    line.id,
+    Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0)),
+  ]));
   for (const line of selectedLines) {
     const remaining = Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0));
     if (remaining <= 0) continue;
@@ -1897,7 +1931,7 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
   });
   await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
     eventKey: `shipment:${shipmentNumber}`,
-    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}${describeShipmentItems(selectedLines, (line) => shipmentQuantityByLineId.get(line.id) ?? 0)}`,
     occurredAt: fulfilledAt,
   });
   await syncQuickbooksFullyShippedMemo(adminClient, orderId, fulfilledAt);
@@ -1938,11 +1972,11 @@ export async function completeOrderShipmentAction(formData: FormData) {
   if (lines.some((line) => line.quantity <= 0)) redirect(`/orders/${orderId}?error=Shipment+quantities+must+be+greater+than+zero`);
   const { data: sourceRows, error: sourceError } = await adminClient
     .from("shipping_order_lines")
-    .select("id,shipping_order_id,product_id,qbo_invoice_line_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_source")
+    .select("id,shipping_order_id,product_id,legacy_item_code,qbo_invoice_line_id,ordered_qty,approved_qty,fulfilled_qty,fulfillment_source,products(sku,canonical_name)")
     .eq("shipping_order_id", orderId)
     .in("id", selectedIds);
   if (sourceError || sourceRows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
-  const shipmentSourceRows = (sourceRows ?? []) as unknown as Array<FulfillmentCapacityLine & { fulfillment_source?: string | null }>;
+  const shipmentSourceRows = (sourceRows ?? []) as unknown as Array<FulfillmentCapacityLine & ShipmentMemoLine & { fulfillment_source?: string | null }>;
   if (shipmentSourceRows.some((line) => !shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE"))) redirect(`/orders/${orderId}?error=Dropship+and+Other+lines+must+use+their+own+completion+action`);
   try {
     await assertLogicalFulfillmentCapacity(adminClient, shipmentSourceRows, new Map(lines.map((line) => [line.line_id, line.quantity])));
@@ -1969,7 +2003,7 @@ export async function completeOrderShipmentAction(formData: FormData) {
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
   await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
     eventKey: `shipment:${shipmentId}`,
-    message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}${describeShipmentItems(shipmentSourceRows, (line) => lines.find((selected) => selected.line_id === line.id)?.quantity ?? 0)}`,
     occurredAt: `${shipmentDate}T12:00:00.000Z`,
   });
   await syncQuickbooksFullyShippedMemo(adminClient, orderId, `${shipmentDate}T12:00:00.000Z`);
@@ -2019,11 +2053,11 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
 
   const { data: rows, error: lineError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, shipping_order_id, product_id, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes")
+    .select("id, shipping_order_id, product_id, legacy_item_code, qbo_invoice_line_id, ordered_qty, approved_qty, fulfilled_qty, fulfillment_status, fulfillment_source, fulfillment_supplier, fulfillment_reference, fulfillment_tracking, fulfillment_notes, products(sku,canonical_name)")
     .in("id", selectedIds);
   if (lineError || rows?.length !== selectedIds.length) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Selected+line+does+not+belong+to+this+order")}`);
 
-  const lines = (rows ?? []) as unknown as Array<{ id: string; shipping_order_id: string; product_id: string | null; qbo_invoice_line_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null }>;
+  const lines = (rows ?? []) as unknown as Array<{ id: string; shipping_order_id: string; product_id: string | null; legacy_item_code?: string | null; qbo_invoice_line_id: string | null; ordered_qty: number | null; approved_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null; fulfillment_source: string | null; fulfillment_supplier?: string | null; fulfillment_reference?: string | null; fulfillment_tracking?: string | null; fulfillment_notes?: string | null; products?: { sku?: string | null; canonical_name?: string | null } | null }>;
   if (lines.some((line) => ownerOrderIdByLineId.get(line.id) !== line.shipping_order_id)) redirect(`/orders/${orderId}?error=Selected+line+owner+does+not+match+its+operational+record`);
   if (lines.some((line) => !line.product_id)) redirect(`/orders/${orderId}?error=Cannot+fulfill+an+unmapped+product+line`);
   try {
@@ -2081,7 +2115,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: ownerLines.map((line) => line.id).join(","), warehouse_count: warehouseCount, non_warehouse_count: ownerLines.length - warehouseCount, fulfilled_at: fulfilledAtIso });
     await syncQuickbooksFulfillmentMemo(adminClient, fulfillmentOrderId, {
       eventKey: `shipment:${shipmentId}`,
-      message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+      message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}${describeShipmentItems(ownerLines, (line) => selectedQuantities.get(line.id) ?? 0)}`,
       occurredAt: fulfilledAtIso,
     });
     await syncQuickbooksFullyShippedMemo(adminClient, fulfillmentOrderId, fulfilledAtIso);

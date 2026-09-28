@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { syncOrderShipmentMemoAction } from "../actions";
 import { ShipmentEditForm } from "./shipment-edit-form";
 
 type HistoryLine = {
@@ -76,6 +77,7 @@ export function ShipmentHistoryCard({
       <div className="mt-3 flex flex-wrap gap-2">
         {shipment.tracking_number ? <a href={`https://www.google.com/search?q=${encodeURIComponent(shipment.tracking_number)}`} target="_blank" rel="noreferrer" className="btn-secondary text-xs">View Tracking</a> : null}
         {shipment.document_count ? <a href="#documents" className="btn-secondary text-xs">Documents: {shipment.document_count}</a> : null}
+        {!historical && !logicalGroup ? <form action={syncOrderShipmentMemoAction}><input type="hidden" name="orderId" value={orderId} /><input type="hidden" name="shipment_id" value={shipment.id} /><button type="submit" className="btn-secondary text-xs">Sync QuickBooks Memo</button></form> : null}
         {!historical && !logicalGroup ? <button type="button" className="btn-secondary text-xs" onClick={() => setEditing((value) => !value)}>{editing ? "Close Editor" : "Edit Shipment"}</button> : null}
       </div>
       {editing ? <ShipmentEditForm orderId={orderId} shipmentId={shipment.id} shippedAt={shipment.shipped_at} carrier={shipment.carrier} trackingNumber={shipment.tracking_number} notes={shipment.notes} lines={editableLines} onCancel={() => setEditing(false)} /> : null}

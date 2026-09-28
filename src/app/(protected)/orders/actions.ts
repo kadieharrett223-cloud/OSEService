@@ -2015,6 +2015,52 @@ export async function completeOrderShipmentAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Shipment+completed`);
 }
 
+/**
+ * Safe, manual backfill for one existing OCC shipment. It writes only the
+ * linked QBO invoice's PrivateNote, allowing staff to confirm the memo format
+ * on a historical shipment without re-running fulfillment or stock logic.
+ */
+export async function syncOrderShipmentMemoAction(formData: FormData) {
+  await requireUser();
+  const orderId = getString(formData, "orderId");
+  const shipmentId = getString(formData, "shipment_id");
+  const adminClient = getSupabaseAdmin();
+  if (!orderId || !shipmentId) redirect(`/orders/${orderId ?? ""}?error=Missing+shipment+reference`);
+
+  const { data: shipmentRow, error } = await adminClient
+    .from("order_shipments")
+    .select("id,shipment_number,shipped_at,tracking_number,lines:order_shipment_lines(quantity,shipping_order_lines(legacy_item_code,products(sku,canonical_name)))")
+    .eq("id", shipmentId)
+    .eq("shipping_order_id", orderId)
+    .maybeSingle();
+  const shipment = shipmentRow as unknown as {
+    id: string;
+    shipment_number: string;
+    shipped_at: string;
+    tracking_number: string | null;
+    lines?: Array<{ quantity: number | null; shipping_order_lines?: ShipmentMemoLine | null }>;
+  } | null;
+  if (error || !shipment) redirect(`/orders/${orderId}?error=${encodeURIComponent(error?.message ?? "Shipment not found")}`);
+
+  const shipmentLines = (shipment.lines ?? [])
+    .map((line) => ({ ...(line.shipping_order_lines ?? { id: "" }), quantity: Number(line.quantity ?? 0) }))
+    .filter((line) => line.id);
+  const shipmentQuantityByLineId = new Map(shipmentLines.map((line) => [line.id, line.quantity]));
+  const result = await appendQuickbooksInternalMemoForOrder(orderId, {
+    eventKey: `shipment:${shipment.id}`,
+    message: `Shipment created in OCC${shipment.tracking_number ? ` (tracking ${shipment.tracking_number})` : ""}${describeShipmentItems(shipmentLines, (line) => shipmentQuantityByLineId.get(line.id) ?? 0)}`,
+    occurredAt: shipment.shipped_at,
+  });
+  await writeOrderActivity(adminClient, orderId, "QBO_INTERNAL_MEMO_SYNCED", {
+    event_key: `shipment:${shipment.id}`,
+    result: result.status,
+    qbo_invoice_id: "qboInvoiceId" in result ? result.qboInvoiceId ?? null : null,
+    manual_backfill: true,
+  });
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=QuickBooks+shipment+memo+synced`);
+}
+
 export async function completeSelectedFulfillmentAction(formData: FormData) {
   const user = await requireUser();
   const orderId = getString(formData, "orderId");

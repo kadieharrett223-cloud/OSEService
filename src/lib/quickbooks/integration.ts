@@ -38,6 +38,13 @@ type TokenResponse = {
 
 type QuickbooksApiPayload = Record<string, unknown>;
 
+export type QuickbooksInternalMemoEvent = {
+  /** A stable OCC event identifier. It is embedded in the QBO note for idempotency. */
+  eventKey: string;
+  occurredAt?: string | Date;
+  message: string;
+};
+
 const QUICKBOOKS_AUTH_URL = "https://appcenter.intuit.com/connect/oauth2";
 const QUICKBOOKS_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 
@@ -216,6 +223,78 @@ async function fetchQuickbooksQuery(options: {
   }
 
   return payload ?? {};
+}
+
+async function updateQuickbooksInvoice(options: {
+  apiBase: string;
+  realmId: string;
+  accessToken: string;
+  invoiceId: string;
+  syncToken: string;
+  privateNote: string;
+}) {
+  const response = await fetch(
+    `${options.apiBase}/v3/company/${encodeURIComponent(options.realmId)}/invoice?minorversion=75`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${options.accessToken}`,
+        "Content-Type": "application/json",
+      },
+      // Sparse updates are intentionally limited to QBO's internal note. This
+      // cannot alter QBO quantities, payments, fulfillment, or invoice status.
+      body: JSON.stringify({
+        Id: options.invoiceId,
+        SyncToken: options.syncToken,
+        sparse: true,
+        PrivateNote: options.privateNote,
+      }),
+      cache: "no-store",
+    },
+  );
+
+  let payload: QuickbooksApiPayload | null = null;
+  try {
+    payload = await response.json() as QuickbooksApiPayload;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(parseQuickbooksFault(payload, `QuickBooks invoice note update failed with status ${response.status}.`));
+  }
+
+  return payload ?? {};
+}
+
+function formatQuickbooksInternalMemoTimestamp(value: string | Date | undefined) {
+  const date = value ? new Date(value) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(safeDate);
+}
+
+/**
+ * Returns the precise, stable marker stored with each OCC-generated QBO note.
+ * Keeping this marker in QuickBooks itself makes retries safe even if an OCC
+ * request is interrupted between the QBO write and any local follow-up work.
+ */
+export function quickbooksInternalMemoMarker(eventKey: string) {
+  return `[OCC:${eventKey}]`;
+}
+
+export function buildQuickbooksInternalMemoEntry(event: QuickbooksInternalMemoEvent) {
+  const marker = quickbooksInternalMemoMarker(event.eventKey);
+  return `OCC — ${event.message} — ${formatQuickbooksInternalMemoTimestamp(event.occurredAt)} ${marker}`;
 }
 
 async function exchangeAuthorizationCode(code: string, redirectUri: string, clientId: string, clientSecret: string) {
@@ -496,6 +575,107 @@ async function ensureAccessToken(connection: Awaited<ReturnType<typeof loadConne
   }
 
   return accessToken;
+}
+
+async function loadQuickbooksInvoiceForInternalMemo(options: {
+  apiBase: string;
+  realmId: string;
+  accessToken: string;
+  qboInvoiceId: string;
+}) {
+  const escapedInvoiceId = options.qboInvoiceId.replaceAll("'", "''");
+  const payload = await fetchQuickbooksQuery({
+    apiBase: options.apiBase,
+    realmId: options.realmId,
+    accessToken: options.accessToken,
+    query: `select Id, SyncToken, PrivateNote from Invoice where Id = '${escapedInvoiceId}'`,
+  });
+  const queryResponse = payload.QueryResponse as Record<string, unknown> | undefined;
+  const invoice = (queryResponse?.Invoice as Array<Record<string, unknown>> | undefined)?.[0];
+  if (!invoice) throw new Error("QuickBooks invoice was not found for internal memo sync.");
+
+  const id = String(invoice.Id ?? "").trim();
+  const syncToken = String(invoice.SyncToken ?? "").trim();
+  if (!id || !syncToken) throw new Error("QuickBooks invoice is missing its update version.");
+
+  return {
+    id,
+    syncToken,
+    privateNote: typeof invoice.PrivateNote === "string" ? invoice.PrivateNote : "",
+  };
+}
+
+/**
+ * Appends one OCC fulfillment event to QuickBooks' hidden invoice note.
+ *
+ * This is deliberately a one-way sparse QBO update: it reads the existing
+ * note, appends an idempotent marker, and writes only `PrivateNote`. It does
+ * not write to any OCC inventory, allocation, fulfillment, or order tables.
+ */
+export async function appendQuickbooksInternalMemoForOrder(
+  orderId: string,
+  event: QuickbooksInternalMemoEvent,
+) {
+  const supabase = getSupabaseAdmin();
+  const { data: order, error: orderError } = await supabase
+    .from("shipping_orders")
+    .select("source_invoice_id,qbo_invoices(qbo_invoice_id)")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (orderError) throw new Error(orderError.message);
+
+  const linkedInvoice = (order as unknown as {
+    source_invoice_id?: string | null;
+    qbo_invoices?: { qbo_invoice_id?: string | null } | null;
+  } | null)?.qbo_invoices;
+  const qboInvoiceId = String(linkedInvoice?.qbo_invoice_id ?? "").trim();
+  if (!qboInvoiceId) {
+    return { status: "skipped" as const, reason: "Order has no linked QuickBooks invoice." };
+  }
+
+  const connection = await loadConnectionForSync();
+  const accessToken = await ensureAccessToken(connection);
+  const apiBase = getQuickbooksApiBase(connection.environment);
+  const entry = buildQuickbooksInternalMemoEntry(event);
+  const marker = quickbooksInternalMemoMarker(event.eventKey);
+
+  // A conflict can mean another concurrent shipment note won the SyncToken.
+  // Re-read once: if that request already wrote this marker, do nothing;
+  // otherwise retry against the current SyncToken without replacing its note.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const invoice = await loadQuickbooksInvoiceForInternalMemo({
+      apiBase,
+      realmId: connection.realm_id,
+      accessToken,
+      qboInvoiceId,
+    });
+    if (invoice.privateNote.includes(marker)) {
+      return { status: "already_synced" as const, qboInvoiceId };
+    }
+
+    const privateNote = invoice.privateNote ? `${invoice.privateNote}\n${entry}` : entry;
+    // QBO PrivateNote has a 4,000-character maximum. Refuse to overwrite or
+    // truncate a salesperson's existing internal history.
+    if (privateNote.length > 4_000) {
+      throw new Error("QuickBooks internal memo is full; OCC did not modify it.");
+    }
+
+    try {
+      await updateQuickbooksInvoice({
+        apiBase,
+        realmId: connection.realm_id,
+        accessToken,
+        invoiceId: invoice.id,
+        syncToken: invoice.syncToken,
+        privateNote,
+      });
+      return { status: "synced" as const, qboInvoiceId };
+    } catch (error) {
+      if (attempt === 1) throw error;
+    }
+  }
+
+  throw new Error("QuickBooks internal memo sync did not complete.");
 }
 
 async function syncQuickbooksSnapshots(

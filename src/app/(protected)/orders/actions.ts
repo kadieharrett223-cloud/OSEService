@@ -15,7 +15,7 @@ import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { findLogicalFulfillmentOverages, isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
-import { syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
+import { appendQuickbooksInternalMemoForOrder, syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
 
 function revalidateOrdersList() {
   revalidateOrdersProjection();
@@ -294,6 +294,10 @@ export async function completeServiceOnlyOrderAction(formData: FormData) {
   const { error } = await adminClient.from("shipping_orders").update({ review_status: "FULFILLED" } as never).eq("id", orderId);
   if (error) redirect(`/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   await writeOrderActivity(adminClient, orderId, "SERVICE_ONLY_ORDER_COMPLETED", { message: "Service-only invoice completed without inventory movement" });
+  await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
+    eventKey: `order-archived:${orderId}`,
+    message: "Order completed / archived in OCC",
+  });
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Service+invoice+completed`);
@@ -447,6 +451,49 @@ async function writeOrderActivity(
     entity_id: orderId,
     action,
     details: details as never,
+  });
+}
+
+/**
+ * QBO memo syncing is intentionally outside the fulfillment transaction. A
+ * failed external note must never change, roll back, or duplicate OCC stock,
+ * allocations, shipments, line quantities, or order status.
+ */
+async function syncQuickbooksFulfillmentMemo(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+  event: { eventKey: string; message: string; occurredAt?: string | Date },
+) {
+  try {
+    const result = await appendQuickbooksInternalMemoForOrder(orderId, event);
+    await writeOrderActivity(supabase, orderId, "QBO_INTERNAL_MEMO_SYNCED", {
+      event_key: event.eventKey,
+      result: result.status,
+      qbo_invoice_id: "qboInvoiceId" in result ? result.qboInvoiceId ?? null : null,
+    });
+  } catch (error) {
+    await writeOrderActivity(supabase, orderId, "QBO_INTERNAL_MEMO_SYNC_FAILED", {
+      event_key: event.eventKey,
+      error: error instanceof Error ? error.message : "QuickBooks internal memo sync failed.",
+    });
+  }
+}
+
+async function syncQuickbooksFullyShippedMemo(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  orderId: string,
+  occurredAt?: string | Date,
+) {
+  const { data: rows, error } = await supabase
+    .from("shipping_order_lines")
+    .select("fulfillment_status")
+    .eq("shipping_order_id", orderId);
+  if (error || !rows?.length || !rows.every((line) => line.fulfillment_status === "FULFILLED")) return;
+
+  await syncQuickbooksFulfillmentMemo(supabase, orderId, {
+    eventKey: `order-fully-shipped:${orderId}`,
+    message: "Order fully shipped / archived in OCC",
+    occurredAt,
   });
 }
 
@@ -1539,6 +1586,12 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
     note: finalNotes,
     fulfilled_at: fulfilledAtIso,
   });
+  await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
+    eventKey: `shipment:${eventKey}`,
+    message: source === "DROPSHIP" ? "Dropship fulfillment recorded in OCC" : "External fulfillment recorded in OCC",
+    occurredAt: fulfilledAtIso,
+  });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, fulfilledAtIso);
 
   revalidateOrdersList();
   revalidatePath("/inventory");
@@ -1666,6 +1719,12 @@ export async function markOrderLineShippedAction(formData: FormData) {
     carrier: carrier || null,
     shipment_date: shipmentDate,
   });
+  await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
+    eventKey: `shipment:${shipmentNumber}`,
+    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    occurredAt: fulfilledAtIso,
+  });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, fulfilledAtIso);
 
   await refreshCustomerQueuesAfterFulfillment([lineRow.product_id]);
   revalidateOrdersList();
@@ -1728,6 +1787,7 @@ export async function markOrderLinesPickedUpAction(formData: FormData) {
   const pickup = await pickupTable.insert({ id: pickupId, shipping_order_id: orderId, pickup_person_name: pickupPersonName, pickup_at: pickedAt, completed_by: user.id, notes, acknowledgment_document_id: acknowledgmentDocumentId, drivers_license_document_id: driversLicenseDocumentId });
   if (pickup.error) redirect(`/orders/${orderId}?error=${encodeURIComponent(pickup.error.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_PICKUP_COMPLETED", { pickup_id: pickupId, pickup_person_name: pickupPersonName, line_count: lines?.length ?? 0, notes });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, pickedAt);
   revalidateOrdersList(); revalidatePath("/inventory"); revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}?message=Pickup+completed`);
 }
@@ -1835,6 +1895,12 @@ export async function shipSelectedOrderLinesAction(formData: FormData) {
     carrier: carrier || null,
     shipment_date: shipmentDate,
   });
+  await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
+    eventKey: `shipment:${shipmentNumber}`,
+    message: `Shipment recorded in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    occurredAt: fulfilledAt,
+  });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, fulfilledAt);
 
   await refreshCustomerQueuesAfterFulfillment(selectedLines.map((line) => line.product_id));
   revalidateOrdersList();
@@ -1901,6 +1967,12 @@ export async function completeOrderShipmentAction(formData: FormData) {
     .eq("shipping_order_id", orderId);
   if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
   await writeOrderActivity(adminClient, orderId, "ORDER_SHIPMENT_COMPLETED", { shipment_id: shipmentId, line_count: selectedIds.length, tracking_number: trackingNumber || null });
+  await syncQuickbooksFulfillmentMemo(adminClient, orderId, {
+    eventKey: `shipment:${shipmentId}`,
+    message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+    occurredAt: `${shipmentDate}T12:00:00.000Z`,
+  });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, `${shipmentDate}T12:00:00.000Z`);
   await refreshCustomerQueuesAfterFulfillment(shipmentSourceRows.map((line) => line.product_id));
   revalidateOrdersList();
   revalidatePath("/inventory");
@@ -2007,6 +2079,12 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     if (shipmentNoteError) redirect(`/orders/${orderId}?error=${encodeURIComponent(shipmentNoteError.message)}`);
     const warehouseCount = ownerLines.filter((line) => shouldMoveWarehouseInventory(line.fulfillment_source ?? "WAREHOUSE")).length;
     await writeOrderActivity(adminClient, fulfillmentOrderId, "ORDER_SELECTED_FULFILLMENT_COMPLETED", { line_ids: ownerLines.map((line) => line.id).join(","), warehouse_count: warehouseCount, non_warehouse_count: ownerLines.length - warehouseCount, fulfilled_at: fulfilledAtIso });
+    await syncQuickbooksFulfillmentMemo(adminClient, fulfillmentOrderId, {
+      eventKey: `shipment:${shipmentId}`,
+      message: `Shipment created in OCC${trackingNumber ? ` (tracking ${trackingNumber})` : ""}`,
+      occurredAt: fulfilledAtIso,
+    });
+    await syncQuickbooksFullyShippedMemo(adminClient, fulfillmentOrderId, fulfilledAtIso);
   }
   await refreshCustomerQueuesAfterFulfillment(lines.map((line) => line.product_id));
   revalidateOrdersList();
@@ -2064,6 +2142,7 @@ export async function editOrderShipmentAction(formData: FormData) {
     line_count: selectedIds.length,
     message: `Shipment edited by ${user.fullName ?? "employee"}`,
   });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, `${shipmentDate}T12:00:00.000Z`);
   revalidateOrdersList();
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -2186,6 +2265,7 @@ export async function addOrderShipmentLineAction(formData: FormData) {
     line_id: lineId,
     ship_qty: quantity,
   });
+  await syncQuickbooksFullyShippedMemo(adminClient, orderId, shipment.shipped_at);
 
   revalidateOrdersList();
   revalidatePath("/inventory");

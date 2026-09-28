@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { incrementalPaymentStartDate, selectPaymentLinkedInvoiceRefreshIds } from "./integration";
+import {
+  buildQuickbooksInternalMemoEntry,
+  incrementalPaymentStartDate,
+  quickbooksInternalMemoMarker,
+  selectPaymentLinkedInvoiceRefreshIds,
+} from "./integration";
 
 describe("payment-linked QBO invoice refresh", () => {
   it("refreshes a paid invoice that is missing from the local snapshot", () => {
@@ -37,5 +42,20 @@ describe("incremental QBO payment scans", () => {
   it("uses a full payment scan until there has been a completed sync", () => {
     expect(incrementalPaymentStartDate(null)).toBeUndefined();
     expect(incrementalPaymentStartDate("not-a-date")).toBeUndefined();
+  });
+});
+
+describe("OCC internal QuickBooks memos", () => {
+  it("uses a stable marker so retries cannot append the same fulfillment event twice", () => {
+    const eventKey = "shipment:4c2bb3b1-4914-40d1-8842-56896b0d6462";
+    const entry = buildQuickbooksInternalMemoEntry({
+      eventKey,
+      message: "Shipment created in OCC (tracking 1Z999)",
+      occurredAt: "2026-09-28T19:30:00.000Z",
+    });
+
+    expect(quickbooksInternalMemoMarker(eventKey)).toBe(`[OCC:${eventKey}]`);
+    expect(entry).toContain("Shipment created in OCC (tracking 1Z999)");
+    expect(entry).toContain(quickbooksInternalMemoMarker(eventKey));
   });
 });

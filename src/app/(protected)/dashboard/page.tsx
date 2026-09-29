@@ -54,7 +54,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
   ]);
 
   return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits };
-}, ["dashboard-read-model"], { revalidate: 10 });
+}, ["dashboard-read-model"], { revalidate: 60 });
 
 type InventoryTransactionRow = {
   product_id: string | null;

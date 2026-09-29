@@ -261,7 +261,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
 const getCachedCanonicalCustomerQueue = unstable_cache(
   loadCanonicalCustomerQueueFromDatabase,
   ["canonical-customer-queue-read-model"],
-  { revalidate: 10 },
+  { revalidate: 60 },
 );
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */

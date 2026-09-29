@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { clearAdminUnlock, isAdminUnlockedForUser, isValidAdminCode, unlockAdminForUser } from "@/lib/admin-access";
 import { requireUser } from "@/lib/auth";
 import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
+import { revalidateInventoryReadModelCache } from "@/lib/inventory/inventory-read-cache";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -23,6 +24,7 @@ async function requireInventoryAdmin() {
 }
 
 function revalidateInventoryReadModel() {
+  revalidateInventoryReadModelCache();
   revalidateCanonicalCustomerQueue();
   revalidatePath("/inventory");
 }

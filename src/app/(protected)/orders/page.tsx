@@ -314,7 +314,7 @@ async function getOrdersDatasetFromDatabase() {
 const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
   ["orders-list-read-model"],
-  { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] },
+  { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG] },
 );
 
 export default async function OrdersPage({

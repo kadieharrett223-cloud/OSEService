@@ -1366,6 +1366,39 @@ export default async function OrderDetailPage({
     fulfilledByProductId.set(line.product_id, (fulfilledByProductId.get(line.product_id) ?? 0) + Number(line.fulfilled_qty ?? 0));
   }
 
+  // A fulfillment belongs to its exact operational line.  Do not let a
+  // fuzzy/canonical match for one invoice row make a different product look
+  // shipped.  When QBO has intentionally split one product into multiple
+  // invoice rows, distribute that one line's fulfilled quantity across those
+  // rows in invoice order so the displayed total still remains accurate.
+  const remainingFulfilledByIdentity = new Map<string, number>();
+  const fulfilledByVisibleItemKey = new Map<string, number>();
+  for (const item of visibleItems) {
+    const fallbackLine = item.shippingLine
+      ? null
+      : (item.sku ? bestCanonicalLineMatch(normalizeSkuKey(item.sku), item.description) : null);
+    const fulfillmentIdentity = item.shippingLine?.id
+      ? `line:${item.shippingLine.id}`
+      : item.productId
+        ? `product:${item.productId}`
+        : fallbackLine?.id
+          ? `line:${fallbackLine.id}`
+          : null;
+    const sourceFulfilled = item.shippingLine
+      ? Number(item.shippingLine.fulfilled_qty ?? 0)
+      : item.productId
+        ? fulfilledByProductId.get(item.productId) ?? 0
+        : Number(fallbackLine?.fulfilled_qty ?? 0);
+    const remainingFulfilled = fulfillmentIdentity
+      ? (remainingFulfilledByIdentity.get(fulfillmentIdentity) ?? Math.max(0, sourceFulfilled))
+      : 0;
+    const fulfilled = Math.min(Math.max(0, item.orderedQty), remainingFulfilled);
+    fulfilledByVisibleItemKey.set(item.key, fulfilled);
+    if (fulfillmentIdentity) {
+      remainingFulfilledByIdentity.set(fulfillmentIdentity, Math.max(0, remainingFulfilled - fulfilled));
+    }
+  }
+
   const visibleLineCount = visibleItems.length;
   const visibleOrderedTotal = visibleItems.reduce((sum, item) => sum + item.orderedQty, 0);
 
@@ -1508,12 +1541,7 @@ export default async function OrderDetailPage({
       coverage: null,
     } : activeSupply;
     const orderedQty = item.isNonInventory ? 0 : Math.max(0, item.orderedQty);
-    const canonicalMatch = item.sku ? bestCanonicalLineMatch(normalizeSkuKey(item.sku), item.description) : null;
-    const fulfilled = Math.min(orderedQty, Math.max(
-      Number(item.shippingLine?.fulfilled_qty ?? 0),
-      item.productId ? fulfilledByProductId.get(item.productId) ?? 0 : 0,
-      Number(canonicalMatch?.fulfilled_qty ?? 0),
-    ));
+    const fulfilled = Math.min(orderedQty, fulfilledByVisibleItemKey.get(item.key) ?? 0);
     const needed = isCancelled ? 0 : Math.max(0, orderedQty - fulfilled);
     const floorAvailable = item.productId ? Math.max(0, Number(onFloorAvailableByProduct.get(item.productId) ?? 0)) : 0;
     const inStock = Math.min(needed, floorAvailable);

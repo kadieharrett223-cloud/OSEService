@@ -786,7 +786,10 @@ export default async function InventoryPage({
   const matchingRows = selectedGroup && !q
     ? displayRows.filter((row) => row.group === selectedGroup)
     : displayRows;
-  const pageSize = 75;
+  // Inventory rows include customer-list controls and several availability
+  // calculations. A smaller default keeps ordinary navigation responsive;
+  // search and the group picker still expose the entire catalog.
+  const pageSize = 25;
   const pageCount = Math.max(1, Math.ceil(matchingRows.length / pageSize));
   const currentPage = Math.min(requestedPage, pageCount);
   const visibleRows = matchingRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);

@@ -135,14 +135,25 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
     const parent = line.shipping_orders;
     const parentFields = { parent_duplicate_of_order_id: parent?.duplicate_of_order_id ?? null, parent_cancellation_status: parent?.cancellation_status ?? null, parent_review_status: parent?.review_status ?? null, parent_qbo_voided: String(payloadByInvoiceId.get(sourceInvoiceId ?? "")?.PrivateNote ?? "").toUpperCase() === "VOIDED", parent_source_invoice_id: sourceInvoiceId ?? null, parent_source_type: parent?.source_type ?? null };
-    if (line.qbo_invoice_line_id || !line.product_id) {
-      const sourceQty = qboOrderedQtyByLineId.get(line.qbo_invoice_line_id ?? "") ?? 0;
-      return { ...line, ...parentFields, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) };
+    const linkedSourceQty = qboOrderedQtyByLineId.get(line.qbo_invoice_line_id ?? "") ?? 0;
+    if (line.qbo_invoice_line_id && linkedSourceQty > 0) {
+      return { ...line, ...parentFields, ...(Number(line.approved_qty ?? 0) > 0 ? { canonical_obligation_qty: linkedSourceQty } : {}) };
     }
+    if (!line.product_id) return { ...line, ...parentFields };
     const qboParents = activeQboParentsByNumber.get(String(parent?.order_number ?? "")) ?? [];
     const qboParent = qboParents.find((candidate) => normalizeSku(candidate.customers?.company_name ?? candidate.customers?.full_name) === normalizeSku(customerName(line)));
     const bridgeInvoiceId = qboParent?.source_invoice_id ?? sourceInvoiceId;
-    const candidates = allQboLines.filter((candidate) => candidate.qbo_invoice_id === bridgeInvoiceId && (candidate.product_id === line.product_id || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key))));
+    // A QBO edit can retire the original line-id and create a replacement
+    // line.  A stale foreign key must not hide genuine open demand from the
+    // Customer List. Bridge only to one *live*, positive-quantity invoice
+    // line for the same product/alias; multiple matches remain unqueued for
+    // review rather than guessing or changing any operational data.
+    const candidates = allQboLines.filter((candidate) => (
+      candidate.qbo_invoice_id === bridgeInvoiceId
+      && Number(candidate.ordered_qty ?? 0) > 0
+      && (candidate.product_id === line.product_id
+        || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key)))
+    ));
     const sourceQty = candidates.length === 1 ? qboOrderedQtyByLineId.get(candidates[0].id) ?? 0 : 0;
     return candidates.length === 1
       ? { ...line, ...parentFields, logical_demand_key: candidates[0].id, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) }

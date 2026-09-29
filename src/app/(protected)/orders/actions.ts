@@ -1295,6 +1295,82 @@ export async function addOrderNoteAction(formData: FormData) {
   redirect(`/orders/${orderId}`);
 }
 
+/**
+ * Repairs a legacy shipment-ledger row that has no actual shipment parent.
+ * This is intentionally a compensating fulfillment event only: it does not
+ * touch stock, allocations, shipment records, or order status.
+ */
+export async function restoreOrphanedFulfillmentToQueueAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const lineId = getString(formData, "lineId");
+  if (!orderId || !lineId) redirect(`/orders/${orderId ?? ""}?error=Order+line+not+found`);
+
+  const adminClient = getSupabaseAdmin();
+  await assertOrderIsOperational(adminClient, orderId);
+  const { data: line, error: lineError } = await adminClient
+    .from("shipping_order_lines")
+    .select("id,shipping_order_id,product_id,fulfilled_qty")
+    .eq("id", lineId)
+    .maybeSingle();
+  if (lineError || !line || line.shipping_order_id !== orderId) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
+  }
+  if (Number(line.fulfilled_qty ?? 0) > 0) {
+    redirect(`/orders/${orderId}?error=This+line+is+currently+recorded+as+shipped+and+cannot+be+restored+automatically`);
+  }
+
+  const [{ data: events, error: eventsError }, { data: shipments, error: shipmentsError }] = await Promise.all([
+    adminClient
+      .from("fulfillments")
+      .select("id,fulfilled_qty,shipment_number,fulfillment_type,source_event_key")
+      .eq("shipping_order_line_id", lineId),
+    adminClient
+      .from("order_shipments")
+      .select("shipment_number")
+      .eq("shipping_order_id", orderId),
+  ]);
+  if (eventsError || shipmentsError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(eventsError?.message ?? shipmentsError?.message ?? "Unable to inspect fulfillment history")}`);
+  }
+  const shipmentRows = (shipments ?? []) as unknown as Array<{ shipment_number: string | null }>;
+  const shipmentNumbers = new Set(shipmentRows.map((shipment) => String(shipment.shipment_number ?? "").trim()).filter(Boolean));
+  const orphanedEvents = (events ?? []).filter((event) => (
+    Number(event.fulfilled_qty ?? 0) > 0
+    && String(event.fulfillment_type ?? "SHIPMENT").toUpperCase() === "SHIPMENT"
+    && !shipmentNumbers.has(String(event.shipment_number ?? "").trim())
+    && !String(event.source_event_key ?? "").startsWith("QUEUE_REPAIR:ORPHANED_FULFILLMENT:")
+  ));
+  const orphanedQty = orphanedEvents.reduce((total, event) => total + Number(event.fulfilled_qty ?? 0), 0);
+  if (orphanedQty <= 0) {
+    redirect(`/orders/${orderId}?error=No+orphaned+shipment+ledger+entry+was+found+for+this+line`);
+  }
+
+  const actorId = await safeAccessUserId(adminClient, user.id);
+  const { error: repairError } = await adminClient.from("fulfillments").insert({
+    shipping_order_line_id: lineId,
+    fulfilled_qty: -orphanedQty,
+    fulfilled_at: new Date().toISOString(),
+    reason: "Orphaned historical shipment ledger reversed; no shipment record exists",
+    source_event_key: `QUEUE_REPAIR:ORPHANED_FULFILLMENT:${lineId}:${orphanedEvents.map((event) => event.id).join(",")}`,
+    fulfillment_type: "SHIPMENT",
+    actor_id: actorId,
+  } as never);
+  if (repairError) redirect(`/orders/${orderId}?error=${encodeURIComponent(repairError.message)}`);
+
+  await recalculateProductQueues(line.product_id ? [line.product_id] : []);
+  revalidateCanonicalCustomerQueue();
+  revalidateOrdersList();
+  revalidatePath("/inventory");
+  revalidatePath(`/orders/${orderId}`);
+  await writeOrderActivity(adminClient, orderId, "ORPHANED_FULFILLMENT_REVERSED", {
+    line_id: lineId,
+    reversed_quantity: orphanedQty,
+    reason: "No matching order shipment exists",
+  });
+  redirect(`/orders/${orderId}?message=Orphaned+shipment+ledger+reversed%3B+line+returned+to+Customer+List`);
+}
+
 export async function remapOrderLineProductAction(formData: FormData) {
   await requireUser();
 

@@ -29,6 +29,7 @@ import {
   markOrderLineShippedAction,
   moveOrderLineBackToOrdersAction,
   remapOrderLineProductAction,
+  restoreOrphanedFulfillmentToQueueAction,
   updateOrderLineAssignmentAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
@@ -1017,6 +1018,19 @@ export default async function OrderDetailPage({
   }, {});
 
   const loggedShipmentNumbers = new Set(shipments.map((shipment) => shipment.shipment_number));
+  // A positive shipment ledger event without an order_shipment parent can be
+  // left behind when QBO replaces an invoice line. It must not silently make
+  // an otherwise-open, zero-shipped line disappear from its Customer List.
+  const orphanedShipmentLedgerQtyByLineId = new Map<string, number>();
+  for (const fulfillment of fulfillments) {
+    if (Number(fulfillment.fulfilled_qty ?? 0) <= 0) continue;
+    if (String(fulfillment.fulfillment_type ?? "SHIPMENT").toUpperCase() !== "SHIPMENT") continue;
+    if (fulfillment.shipment_number && loggedShipmentNumbers.has(fulfillment.shipment_number)) continue;
+    orphanedShipmentLedgerQtyByLineId.set(
+      fulfillment.shipping_order_line_id,
+      (orphanedShipmentLedgerQtyByLineId.get(fulfillment.shipping_order_line_id) ?? 0) + Number(fulfillment.fulfilled_qty ?? 0),
+    );
+  }
   const historicalShipments = new Map<string, ShipmentEntry>();
   for (const line of operationalLines) {
     for (const fulfillment of fulfillmentsByLine[line.id] ?? []) {
@@ -1869,6 +1883,14 @@ export default async function OrderDetailPage({
                               </select>
                               <button type="submit" className="btn-secondary">Save Product Mapping For This Order</button>
                             </form>
+                            {Number(line.fulfilled_qty ?? 0) <= 0 && (orphanedShipmentLedgerQtyByLineId.get(line.id) ?? 0) > 0 ? (
+                              <form action={restoreOrphanedFulfillmentToQueueAction} className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                                <input type="hidden" name="orderId" value={lineOwnerOrderId} />
+                                <input type="hidden" name="lineId" value={line.id} />
+                                <p className="text-sm text-amber-900">A historical shipment ledger entry exists, but this order has no matching shipment and the line is currently unshipped.</p>
+                                <button type="submit" className="btn-secondary mt-2">Restore open line to Customer List</button>
+                              </form>
+                            ) : null}
                             {(line.inventory_allocations?.length ?? 0) === 0 && (supply.coverage?.warehouseQty ?? 0) > 0 ? (
                               <div className="mt-4 rounded-lg border border-[#dbe5f0] bg-[#f8fbff] p-3 text-sm text-[#334155]">
                                 <p><span className="font-semibold">Suggested:</span> Warehouse</p>

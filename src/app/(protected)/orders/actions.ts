@@ -1335,6 +1335,19 @@ export async function remapOrderLineProductAction(formData: FormData) {
   }
 
   if (lineRow.product_id === productId) {
+    // Keep the linked QuickBooks line aligned even when the visible order line
+    // was already mapped. QBO refreshes use that linked identity to rebuild
+    // the canonical Customer List; leaving an old/deleted QBO product here
+    // can strand a real open line as "Queue assignment pending". This is
+    // strictly product identity and approval metadata—never stock,
+    // allocations, fulfillment, shipment history, or order status.
+    if (lineRow.qbo_invoice_line_id) {
+      const { error: qboMappingError } = await adminClient
+        .from("qbo_invoice_lines")
+        .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED" } as never)
+        .eq("id", lineRow.qbo_invoice_line_id);
+      if (qboMappingError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboMappingError.message)}`);
+    }
     // A legacy/imported line can already point at the right catalog product
     // while its approval flag is still PENDING_REVIEW.  Treating that as a
     // no-op strands a real item outside its Customer List even though there

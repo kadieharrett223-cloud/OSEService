@@ -175,6 +175,34 @@ describe("shared active logical demand", () => {
     expect(openQtyOf(overcounted[0])).toBe(6);
   });
 
+  it("keeps a currently open QBO line in the queue when a historical bridge has stale fulfillment", () => {
+    const rows = [
+      {
+        id: "current-qbo-line",
+        product_id: "4pml-9",
+        qbo_invoice_line_id: "12482-lift",
+        parent_source_type: "QBO_INVOICE",
+        approved_qty: 1,
+        fulfilled_qty: 0,
+        approval_status: "APPROVED",
+        fulfillment_status: "PENDING",
+      },
+      {
+        id: "historical-bridge",
+        product_id: "4pml-9",
+        logical_demand_key: "12482-lift",
+        approved_qty: 1,
+        fulfilled_qty: 1,
+        approval_status: "APPROVED",
+        fulfillment_status: "FULFILLED",
+      },
+    ];
+
+    const [canonical] = getCanonicalOpenDemandLines(rows, new Set(), new Set());
+    expect(canonical).toMatchObject({ id: "current-qbo-line", fulfilled_qty: 0 });
+    expect(openQtyOf(canonical!)).toBe(1);
+  });
+
   it("keeps an approved bridged obligation on the Customer List while its QBO sibling awaits mapping", () => {
     const activeDemand = getCanonicalOpenDemandLines([
       {

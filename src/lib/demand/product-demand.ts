@@ -93,6 +93,36 @@ export function isOpenDemandLine(line: DemandLineLike) {
   return !["FULFILLED", "SHIPPED", "CANCELLED", "REPLACED"].includes(String(line.fulfillment_status ?? "").toUpperCase());
 }
 
+/**
+ * A current QBO line is the authoritative fulfillment state for its invoice
+ * obligation.  OLD_ERP bridge rows can carry historical shipment events from
+ * an earlier version of the order; those events must not make a live QBO line
+ * disappear from the Customer List after a QBO refresh says it is still open.
+ *
+ * We still share fulfillment between legacy-only representations.  We also
+ * keep using the current QBO record when it is shipped, so this changes only
+ * a stale historical override—not inventory, allocations, shipments, or any
+ * stored fulfillment record.
+ */
+export function withCurrentQuickBooksFulfillmentTruth<T extends DemandLineLike>(lines: T[]): T[] {
+  const currentQboFulfilledByIdentity = new Map<string, number>();
+  for (const line of lines) {
+    if (line.parent_source_type !== "QBO_INVOICE" || !line.qbo_invoice_line_id) continue;
+    const identity = demandLineIdentity(line);
+    currentQboFulfilledByIdentity.set(identity, Math.max(
+      currentQboFulfilledByIdentity.get(identity) ?? 0,
+      Math.max(0, Number(line.fulfilled_qty ?? 0)),
+    ));
+  }
+  const sharedFulfillment = withLogicalFulfilledQty(lines);
+  return sharedFulfillment.map((line) => {
+    const currentQboFulfilled = currentQboFulfilledByIdentity.get(demandLineIdentity(line));
+    return currentQboFulfilled == null
+      ? line
+      : withProvenFulfilledQty({ ...line, fulfilled_qty: currentQboFulfilled }, currentQboFulfilled);
+  });
+}
+
 /** A retired parent must not contribute fulfillment or demand to its surviving active sibling. */
 export function hasActiveDemandParent(line: DemandLineLike) {
   return !line.parent_duplicate_of_order_id
@@ -152,7 +182,7 @@ export function getCanonicalOpenDemandLines<T extends DemandLineLike>(
   // suppress the current mapped line on an active QuickBooks order. QuickBooks is the current
   // invoice truth after a refresh; the local line status and fulfilled quantity decide when that
   // live obligation leaves the Customer List.
-  return dedupeDemandLines(withLogicalFulfilledQty([
+  return dedupeDemandLines(withCurrentQuickBooksFulfillmentTruth([
     ...canonicalCandidates,
     ...rescuedMappedLines,
   ])).filter(isOpenDemandLine);

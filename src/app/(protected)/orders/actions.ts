@@ -1335,14 +1335,15 @@ export async function remapOrderLineProductAction(formData: FormData) {
   }
 
   // Some older imports have the right product on the operational line but
-  // lost the foreign-key link to its QBO invoice row.  That disconnects the
-  // line from the canonical Customer List after a refresh.  Repair only an
-  // exact, unique SKU match on this invoice; ambiguous matches remain
-  // untouched for review.  This writes identity/approval metadata only — it
-  // never changes inventory, allocations, fulfillment, shipments, or status.
+  // either lost its foreign-key link to the QBO invoice row or still point at
+  // a QBO row that was replaced during a later refresh. Either disconnects
+  // the line from the canonical Customer List. Repair only an exact, unique
+  // SKU match on this invoice; ambiguous matches remain untouched for review.
+  // This writes identity/approval metadata only — it never changes inventory,
+  // allocations, fulfillment, shipments, or status.
   let linkedQboInvoiceLineId = lineRow.qbo_invoice_line_id;
   const mappedSku = getString(formData, "mappedSku")?.trim() || null;
-  if (!linkedQboInvoiceLineId && mappedSku) {
+  if (mappedSku) {
     const { data: orderParent, error: orderParentError } = await adminClient
       .from("shipping_orders")
       .select("source_invoice_id")

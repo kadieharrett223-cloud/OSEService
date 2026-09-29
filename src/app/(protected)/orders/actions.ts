@@ -940,6 +940,12 @@ async function activateExistingQuickbooksOrder(
     ...(activeOrderLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)),
   ]));
   if (queueProductIds.length > 0) await recalculateProductQueues(queueProductIds);
+  // Queue positions are calculated from fresh data above. Expire the shared
+  // Customer List projection too, otherwise this order can render its
+  // pre-refresh "assignment pending" result until the cache naturally ages.
+  // This is display/position invalidation only; it cannot alter stock,
+  // allocations, fulfillment, or shipment records.
+  revalidateCanonicalCustomerQueue();
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
@@ -1351,6 +1357,7 @@ export async function remapOrderLineProductAction(formData: FormData) {
       }
 
       await recalculateProductQueues([productId]);
+      revalidateCanonicalCustomerQueue();
       await writeOrderActivity(adminClient, orderId, "ORDER_LINE_MAPPING_APPROVED", {
         line_id: lineId,
         product_id: productId,
@@ -1362,7 +1369,16 @@ export async function remapOrderLineProductAction(formData: FormData) {
       revalidatePath(`/orders/${orderId}`);
       redirect(`/orders/${orderId}?message=Existing+product+mapping+approved+and+added+to+the+Customer+List`);
     }
-    redirect(`/orders/${orderId}?message=Line+already+mapped+to+selected+product`);
+    // The mapping may already be correct after a QuickBooks refresh while the
+    // shared projection is still stale. Rebuild and expire it on this safe
+    // no-op retry so an operator can immediately recover the queue position.
+    await recalculateProductQueues([productId]);
+    revalidateCanonicalCustomerQueue();
+    revalidatePath("/inventory");
+    revalidatePath("/order-queue");
+    revalidatePath("/product-mappings");
+    revalidatePath(`/orders/${orderId}`);
+    redirect(`/orders/${orderId}?message=Existing+product+mapping+queue+refreshed`);
   }
 
   const lineColumnSet = await loadTableColumnSet(adminClient, "shipping_order_lines", ["legacy_matched_item_code"]);
@@ -1383,6 +1399,7 @@ export async function remapOrderLineProductAction(formData: FormData) {
     await recalculateProductQueues([lineRow.product_id]);
   }
   await recalculateProductQueues([productId]);
+  revalidateCanonicalCustomerQueue();
 
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_PRODUCT_REASSIGNED", {
     line_id: lineId,

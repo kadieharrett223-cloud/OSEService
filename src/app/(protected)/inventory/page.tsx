@@ -292,12 +292,14 @@ function getAssignmentLabel(line: QueueLine) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; mapError?: string; mapMessage?: string }>;
+  searchParams: Promise<{ q?: string; group?: string; page?: string; mapError?: string; mapMessage?: string }>;
 }) {
   const currentUser = await requireUser();
   const adminMode = await isAdminUnlockedForUser(currentUser.id);
   const params = await searchParams;
   const q = String(params.q ?? "").trim().toLowerCase();
+  const selectedGroup = String(params.group ?? "").trim();
+  const requestedPage = Math.max(1, Number.parseInt(String(params.page ?? "1"), 10) || 1);
   const mapError = String(params.mapError ?? "").trim();
   const mapMessage = String(params.mapMessage ?? "").trim();
   const [inventoryBase, packageDimensionsBySku, sharedCanonicalQueue] = await Promise.all([
@@ -769,12 +771,38 @@ export default async function InventoryPage({
       return left.sku.localeCompare(right.sku, undefined, { numeric: true });
     });
 
-  const sections: Array<{ name: string; rows: typeof displayRows }> = [];
+  const allSections: Array<{ name: string; rows: typeof displayRows }> = [];
   for (const row of displayRows) {
-    const current = sections[sections.length - 1];
+    const current = allSections[allSections.length - 1];
     if (current && current.name === row.group) current.rows.push(row);
-    else sections.push({ name: row.group, rows: [row] });
+    else allSections.push({ name: row.group, rows: [row] });
   }
+
+  // Rendering every catalog row also serializes every open customer list into the browser.
+  // Keep all stock arithmetic above intact, but render a bounded slice until the user chooses
+  // a group or searches. This removes thousands of hidden interactive nodes from normal page
+  // navigation without excluding any product from lookup.
+  const matchingRows = selectedGroup && !q
+    ? displayRows.filter((row) => row.group === selectedGroup)
+    : displayRows;
+  const pageSize = 75;
+  const pageCount = Math.max(1, Math.ceil(matchingRows.length / pageSize));
+  const currentPage = Math.min(requestedPage, pageCount);
+  const visibleRows = matchingRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const visibleSections: Array<{ name: string; rows: typeof visibleRows }> = [];
+  for (const row of visibleRows) {
+    const current = visibleSections[visibleSections.length - 1];
+    if (current && current.name === row.group) current.rows.push(row);
+    else visibleSections.push({ name: row.group, rows: [row] });
+  }
+  const inventoryHref = (next: { group?: string; page?: number }) => {
+    const query = new URLSearchParams();
+    if (q) query.set("q", q);
+    if (next.group) query.set("group", next.group);
+    if (next.page && next.page > 1) query.set("page", String(next.page));
+    const value = query.toString();
+    return value ? `/inventory?${value}` : "/inventory";
+  };
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -815,11 +843,11 @@ export default async function InventoryPage({
       <nav aria-label="Inventory groups" className="rounded-2xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <span className="mr-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">Groups</span>
-          {sections.map((section) => (
+          {allSections.map((section) => (
             <a
               key={section.name}
-              href={`#group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
-              className="rounded-full border border-[#dbe3ee] bg-[#f8fafc] px-3 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#93c5fd] hover:bg-[#eff6ff]"
+              href={inventoryHref({ group: section.name })}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${selectedGroup === section.name && !q ? "border-[#93c5fd] bg-[#eff6ff] text-[#1d4ed8]" : "border-[#dbe3ee] bg-[#f8fafc] text-[#334155] hover:border-[#93c5fd] hover:bg-[#eff6ff]"}`}
             >
               {section.name} <span className="font-normal text-[#64748b]">({section.rows.length})</span>
             </a>
@@ -856,12 +884,12 @@ export default async function InventoryPage({
               </tr>
             </thead>
             <tbody>
-              {displayRows.length === 0 ? (
+              {visibleRows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-2 py-10 text-center text-[#6b7280]">No products match this search.</td>
                 </tr>
               ) : (
-                sections.map((section) => (
+                visibleSections.map((section) => (
                   <Fragment key={section.name}>
                     <tr id={`group-${section.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="scroll-mt-24 border-b border-[#e2e8f0] bg-[#f8fafc]">
                       <th colSpan={8} scope="colgroup" className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-[0.08em] text-[#475569]">
@@ -936,6 +964,18 @@ export default async function InventoryPage({
           </table>
         </div>
       </section>
+
+      <nav aria-label="Inventory pagination" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm shadow-sm">
+        <p className="text-[#64748b]">
+          Showing {matchingRows.length ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, matchingRows.length)} of {matchingRows.length} items{selectedGroup && !q ? ` in ${selectedGroup}` : ""}.
+        </p>
+        <div className="flex items-center gap-2">
+          {selectedGroup && !q ? <Link className="btn-ghost" href="/inventory">All groups</Link> : null}
+          {currentPage > 1 ? <Link className="btn-secondary" href={inventoryHref({ group: selectedGroup || undefined, page: currentPage - 1 })}>Previous</Link> : null}
+          <span className="text-xs font-semibold text-[#475569]">Page {currentPage} of {pageCount}</span>
+          {currentPage < pageCount ? <Link className="btn-secondary" href={inventoryHref({ group: selectedGroup || undefined, page: currentPage + 1 })}>Next</Link> : null}
+        </div>
+      </nav>
     </div>
   );
 }

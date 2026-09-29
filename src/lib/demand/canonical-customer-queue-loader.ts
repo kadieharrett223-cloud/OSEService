@@ -272,7 +272,11 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
 // truth. Write paths below always ask for a fresh projection before persisting positions.
 const getCachedCanonicalCustomerQueue = unstable_cache(
   loadCanonicalCustomerQueueFromDatabase,
-  ["canonical-customer-queue-read-model"],
+  // Version this key when the read-model's identity rules change.  Vercel's
+  // data cache can survive a deployment, so reusing the old key would keep
+  // projecting a stale pre-fix queue for up to five minutes after a safe
+  // identity-only correction ships.
+  ["canonical-customer-queue-read-model-v2"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

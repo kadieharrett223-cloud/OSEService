@@ -161,7 +161,8 @@ export async function recalculateProductQueuePositions(productIds: string[]) {
 
   // Persist exactly the queue the Inventory page and order sidebar render. This preserves one
   // customer obligation across QBO refresh copies, legacy bridges, and merged product aliases.
-  const canonicalQueue = await loadCanonicalCustomerQueue();
+  // Queue persistence must never calculate from a cached display projection.
+  const canonicalQueue = await loadCanonicalCustomerQueue({ fresh: true });
   let linesUpdated = 0;
   const updates: Array<PromiseLike<{ error: { message: string } | null }>> = [];
   for (const rawLine of data ?? []) {

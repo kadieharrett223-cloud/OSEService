@@ -6,7 +6,7 @@ import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { cache } from "react";
+import { unstable_cache } from "next/cache";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -84,7 +84,7 @@ async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseL
 }
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
-const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonicalCustomerQueue> => {
+async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonicalCustomerQueue> {
   const supabase = getSupabaseAdmin();
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows, archivedIdentityBySourceRecordId] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").range(from, to)),
@@ -251,11 +251,23 @@ const loadCanonicalCustomerQueueUncached = cache(async (): Promise<CachedCanonic
     queueEntryBySourceLineId: [...queueEntryBySourceLineId.entries()],
     lineProductIdEntries: [...lineProductIdByLineId.entries()],
   };
-});
+}
+
+// The same canonical projection powers the Inventory screen, order sidebars, and queue
+// integrity views. Rebuilding it means reading every operational line and fulfillment event,
+// which made ordinary navigation unnecessarily slow. This is deliberately a short-lived,
+// read-only cache: it improves repeated page loads without becoming a source of inventory
+// truth. Write paths below always ask for a fresh projection before persisting positions.
+const getCachedCanonicalCustomerQueue = unstable_cache(
+  loadCanonicalCustomerQueueFromDatabase,
+  ["canonical-customer-queue-read-model"],
+  { revalidate: 10 },
+);
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
-export async function loadCanonicalCustomerQueue(): Promise<CanonicalCustomerQueueLoaderResult> {
-  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueEntryBySourceLineId, lineProductIdEntries } = await loadCanonicalCustomerQueueUncached();
+export async function loadCanonicalCustomerQueue(options?: { fresh?: boolean }): Promise<CanonicalCustomerQueueLoaderResult> {
+  const loader = options?.fresh ? loadCanonicalCustomerQueueFromDatabase : getCachedCanonicalCustomerQueue;
+  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueEntryBySourceLineId, lineProductIdEntries } = await loader();
   const lineProductIdByLineId = new Map(lineProductIdEntries);
   const queueByLineId = new Map(queueEntryBySourceLineId);
   const queueByLogicalDemandKey = new Map(queue.map((row) => [row.logicalDemandKey, row]));

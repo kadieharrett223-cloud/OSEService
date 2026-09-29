@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
@@ -132,7 +133,7 @@ async function fetchRowsByIds<T>(
   return rows;
 }
 
-async function getOrdersDataset() {
+async function getOrdersDatasetFromDatabase() {
     const supabase = getSupabaseAdmin();
     const { error: duplicateParentColumnError } = await supabase.from("shipping_orders").select("duplicate_of_order_id").limit(1);
     const ordersSelect = buildOrdersSelect(!duplicateParentColumnError);
@@ -306,6 +307,15 @@ async function getOrdersDataset() {
   return { projectedOrders, tabCounts };
 }
 
+// The list page used to re-read every order line, allocation, and on-floor ledger event for
+// every navigation. Cache only the derived read model briefly; actions already revalidate the
+// orders route, and the source records remain the sole inventory and fulfillment authority.
+const getCachedOrdersDataset = unstable_cache(
+  getOrdersDatasetFromDatabase,
+  ["orders-list-read-model"],
+  { revalidate: 10 },
+);
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -321,7 +331,7 @@ export default async function OrdersPage({
   let tabCounts = { orders: 0, new: 0, warehouse: 0, partial: 0, archived: 0, cancelled: 0 };
   let ordersLoadError: Error | null = null;
   try {
-    const dataset = await getOrdersDataset();
+    const dataset = await getCachedOrdersDataset();
     projectedOrders = dataset.projectedOrders;
     tabCounts = dataset.tabCounts;
   } catch (error) {

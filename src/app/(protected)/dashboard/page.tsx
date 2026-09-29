@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -22,6 +23,38 @@ async function loadAllInventoryTransactions() {
     if ((data ?? []).length < 1000) return rows;
   }
 }
+
+const getCachedDashboardDataset = unstable_cache(async () => {
+  const supabase = getSupabaseAdmin();
+  const [
+    { data: products },
+    { data: inventoryTransactions },
+    allInventoryTransactions,
+    { data: containers },
+    { data: containerLines },
+    { data: orders },
+    { data: cases },
+    { data: installations },
+    { data: audits },
+  ] = await Promise.all([
+    supabase.from("products").select("id, sku, canonical_name"),
+    supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("created_at", { ascending: false }).limit(120),
+    loadAllInventoryTransactions(),
+    supabase.from("containers").select("id, container_number, lifecycle_status, created_at, updated_at, entered_date, eta_confirmed_date, eta_estimated_date").order("updated_at", { ascending: false }).limit(120),
+    supabase.from("container_lines").select("container_id, on_order_qty"),
+    supabase.from("shipping_orders").select(`
+      id,
+      review_status,
+      qbo_invoices (payment_status, invoice_date, raw_payload),
+      shipping_order_lines (approval_status, warehouse_status, fulfillment_status)
+    `).order("created_at", { ascending: false }).limit(220),
+    supabase.from("customer_service_cases").select("id, case_number, status, priority, updated_at").order("updated_at", { ascending: false }).limit(120),
+    supabase.from("installation_jobs").select("id, status").order("updated_at", { ascending: false }).limit(120),
+    supabase.from("audit_log").select("id, entity_type, entity_id, action, created_at").order("created_at", { ascending: false }).limit(120),
+  ]);
+
+  return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits };
+}, ["dashboard-read-model"], { revalidate: 10 });
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -143,42 +176,7 @@ function getContainerEtaDate(container: ContainerRow) {
 
 export default async function DashboardPage() {
   await requireUser();
-  const supabase = getSupabaseAdmin();
-
-  const [
-    { data: products },
-    { data: inventoryTransactions },
-    allInventoryTransactions,
-    { data: containers },
-    { data: containerLines },
-    { data: orders },
-    { data: cases },
-    { data: installations },
-    { data: audits },
-  ] = await Promise.all([
-    supabase.from("products").select("id, sku, canonical_name"),
-    supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("created_at", { ascending: false }).limit(120),
-    loadAllInventoryTransactions(),
-    supabase
-      .from("containers")
-      .select("id, container_number, lifecycle_status, created_at, updated_at, entered_date, eta_confirmed_date, eta_estimated_date")
-      .order("updated_at", { ascending: false })
-      .limit(120),
-    supabase.from("container_lines").select("container_id, on_order_qty"),
-    supabase
-      .from("shipping_orders")
-      .select(`
-        id,
-        review_status,
-        qbo_invoices (payment_status, invoice_date, raw_payload),
-        shipping_order_lines (approval_status, warehouse_status, fulfillment_status)
-      `)
-      .order("created_at", { ascending: false })
-      .limit(220),
-    supabase.from("customer_service_cases").select("id, case_number, status, priority, updated_at").order("updated_at", { ascending: false }).limit(120),
-    supabase.from("installation_jobs").select("id, status").order("updated_at", { ascending: false }).limit(120),
-    supabase.from("audit_log").select("id, entity_type, entity_id, action, created_at").order("created_at", { ascending: false }).limit(120),
-  ]);
+  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits } = await getCachedDashboardDataset();
 
   const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
   const operationalProductIds = new Set(productRows.map((product) => product.id));

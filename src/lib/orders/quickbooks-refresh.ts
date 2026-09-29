@@ -73,6 +73,27 @@ export function qboSkuCandidates(value: string | null | undefined) {
 }
 
 /**
+ * Returns the positive-quantity line identities currently present in the
+ * authoritative QBO invoice payload.  Snapshot tables retain historical
+ * records after an invoice is edited, so their rows alone cannot decide
+ * which same-SKU line is still live.
+ */
+export function liveQuickBooksLineQuantities(rawPayload: { Line?: unknown[] } | null | undefined) {
+  const quantities = new Map<string, number>();
+  for (const rawLine of rawPayload?.Line ?? []) {
+    if (!rawLine || typeof rawLine !== "object") continue;
+    const line = rawLine as {
+      Id?: string | number | null;
+      SalesItemLineDetail?: { Qty?: number | string | null } | null;
+    };
+    const id = String(line.Id ?? "").trim();
+    const quantity = Number(line.SalesItemLineDetail?.Qty ?? 0);
+    if (id && Number.isFinite(quantity) && quantity > 0) quantities.set(id, quantity);
+  }
+  return quantities;
+}
+
+/**
  * Builds the safe lookup used by both QBO snapshot sync and forward intake.
  * A direct catalog SKU is authoritative. An alias is usable only when it
  * points to one product, so an old duplicate alias cannot silently route a

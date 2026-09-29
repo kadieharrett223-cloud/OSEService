@@ -2,7 +2,7 @@ import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueue
 import { customerQueueObligationQty, demandLineIdentity, getCanonicalOpenDemandLines, isOpenCustomerQueueLine, netRecordedFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
-import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { liveQuickBooksLineQuantities, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -38,6 +38,7 @@ export type CanonicalCustomerQueueLoaderResult = {
 export type CanonicalQboInvoiceLine = {
   id: string;
   qbo_invoice_id: string;
+  qbo_line_id: string | null;
   qbo_sku: string | null;
   product_id: string | null;
   ordered_qty: number | null;
@@ -119,13 +120,27 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
   const orderNumbers = [...new Set(queueLines.map((line) => line.shipping_orders?.order_number).filter((value): value is string => Boolean(value)))];
   const [qboInvoices, qboLines, qboParents, sourceOrders] = await Promise.all([
     fetchByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids)),
-    fetchByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids)),
+    fetchByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids)),
     fetchByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select("id,order_number,source_invoice_id,duplicate_of_order_id,cancellation_status,qbo_invoices(raw_payload,customers(company_name,full_name)),customers(company_name,full_name)").in("order_number", numbers).eq("source_type", "QBO_INVOICE")),
     fetchByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select("source_invoice_id,review_status,duplicate_of_order_id,cancellation_status").in("source_invoice_id", ids)),
   ]);
   const payloadByInvoiceId = new Map((qboInvoices as Array<{ id: string; raw_payload: { PrivateNote?: string | null; Line?: unknown[] } | null }>).map((invoice) => [invoice.id, invoice.raw_payload]));
   const allQboLines = qboLines as CanonicalQboInvoiceLine[];
-  const qboOrderedQtyByLineId = new Map(allQboLines.map((line) => [line.id, Math.max(0, Number(line.ordered_qty ?? 0))]));
+  const qboLineById = new Map(allQboLines.map((line) => [line.id, line]));
+  const liveQboLineQtyByInvoiceId = new Map(
+    (qboInvoices as Array<{ id: string; raw_payload: { Line?: unknown[] } | null }>)
+      .map((invoice) => [invoice.id, liveQuickBooksLineQuantities(invoice.raw_payload)]),
+  );
+  // When QBO supplies line identities in its current invoice payload, those
+  // identities are authoritative.  Fall back to the snapshot quantity only
+  // for old payloads that genuinely do not expose line IDs.
+  const qboSourceQty = (line: CanonicalQboInvoiceLine) => {
+    const liveQuantities = liveQboLineQtyByInvoiceId.get(line.qbo_invoice_id);
+    if (liveQuantities && liveQuantities.size > 0) {
+      return liveQuantities.get(String(line.qbo_line_id ?? "")) ?? 0;
+    }
+    return Math.max(0, Number(line.ordered_qty ?? 0));
+  };
   const activeQboParentsByNumber = new Map<string, Array<{ source_invoice_id: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>>();
   for (const parent of qboParents as unknown as Array<{ order_number: string | null; source_invoice_id: string | null; duplicate_of_order_id?: string | null; cancellation_status?: string | null; customers?: { company_name?: string | null; full_name?: string | null } | null; qbo_invoices?: { raw_payload?: { PrivateNote?: string | null } | null; customers?: { company_name?: string | null; full_name?: string | null } | null } | null }>) {
     if (parent.duplicate_of_order_id || String(parent.cancellation_status ?? "").toUpperCase() === "CANCELLED" || String(parent.qbo_invoices?.raw_payload?.PrivateNote ?? "").toUpperCase() === "VOIDED") continue;
@@ -135,7 +150,8 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     const sourceInvoiceId = line.shipping_orders?.source_invoice_id;
     const parent = line.shipping_orders;
     const parentFields = { parent_duplicate_of_order_id: parent?.duplicate_of_order_id ?? null, parent_cancellation_status: parent?.cancellation_status ?? null, parent_review_status: parent?.review_status ?? null, parent_qbo_voided: String(payloadByInvoiceId.get(sourceInvoiceId ?? "")?.PrivateNote ?? "").toUpperCase() === "VOIDED", parent_source_invoice_id: sourceInvoiceId ?? null, parent_source_type: parent?.source_type ?? null };
-    const linkedSourceQty = qboOrderedQtyByLineId.get(line.qbo_invoice_line_id ?? "") ?? 0;
+    const linkedQboLine = line.qbo_invoice_line_id ? qboLineById.get(line.qbo_invoice_line_id) : null;
+    const linkedSourceQty = linkedQboLine ? qboSourceQty(linkedQboLine) : 0;
     if (line.qbo_invoice_line_id && linkedSourceQty > 0) {
       return { ...line, ...parentFields, ...(Number(line.approved_qty ?? 0) > 0 ? { canonical_obligation_qty: linkedSourceQty } : {}) };
     }
@@ -150,11 +166,11 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     // review rather than guessing or changing any operational data.
     const candidates = allQboLines.filter((candidate) => (
       candidate.qbo_invoice_id === bridgeInvoiceId
-      && Number(candidate.ordered_qty ?? 0) > 0
+      && qboSourceQty(candidate) > 0
       && (candidate.product_id === line.product_id
         || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key)))
     ));
-    const sourceQty = candidates.length === 1 ? qboOrderedQtyByLineId.get(candidates[0].id) ?? 0 : 0;
+    const sourceQty = candidates.length === 1 ? qboSourceQty(candidates[0]!) : 0;
     return candidates.length === 1
       ? { ...line, ...parentFields, logical_demand_key: candidates[0].id, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) }
       : { ...line, ...parentFields };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getCanonicalOpenDemandLines, isOpenCustomerQueueLine } from "@/lib/demand/product-demand";
-import { buildSafeQboProductIdByAlias, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, resolveKnownQboProductId, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, liveQuickBooksLineQuantities, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder, resolveKnownQboProductId, type RefreshInvoiceLine, type RefreshOrderLine } from "./quickbooks-refresh";
 
 const aliases = new Map([["JVCJ-6", "product-jack"]]);
 
@@ -13,6 +13,18 @@ function orderLine(overrides: Partial<RefreshOrderLine> = {}): RefreshOrderLine 
 }
 
 describe("re-entering a QuickBooks invoice", () => {
+  it("uses only the current positive QBO item lines when an invoice has historical snapshots", () => {
+    const quantities = liveQuickBooksLineQuantities({
+      Line: [
+        { Id: "live-lift", SalesItemLineDetail: { Qty: 1 } },
+        { Id: "zero-quantity", SalesItemLineDetail: { Qty: 0 } },
+        { Id: "note", Description: "Customer note" },
+      ],
+    });
+
+    expect([...quantities.entries()]).toEqual([["live-lift", 1]]);
+  });
+
   it("keeps an exact catalog SKU ahead of stale duplicate aliases", () => {
     const lookup = buildSafeQboProductIdByAlias(
       [{ id: "exact-product", sku: "4PC-6" }],

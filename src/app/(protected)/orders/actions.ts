@@ -9,7 +9,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { revalidateCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-cache";
 import { normalizeFulfillmentSource, shouldCreateWarehouseReservation, shouldMoveWarehouseInventory } from "@/lib/orders/fulfillment-source";
-import { buildSafeQboProductIdByAlias, isNonInventoryQuickbooksLine, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, isNonInventoryQuickbooksLine, liveQuickBooksLineQuantities, planQuickbooksOrderRefresh, qboSkuCandidates, resolveInvoiceOrder } from "@/lib/orders/quickbooks-refresh";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { revalidateErpHealth } from "@/lib/orders/erp-health-cache";
 import { findLogicalFulfillmentOverages, isActiveSameInvoiceSiblingOwner, resolveSingleFulfillmentOwner } from "@/lib/orders/fulfillment-owner";
@@ -1352,14 +1352,25 @@ export async function remapOrderLineProductAction(formData: FormData) {
     if (orderParentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderParentError.message)}`);
 
     if (orderParent?.source_invoice_id) {
-      const { data: qboCandidates, error: qboCandidatesError } = await adminClient
+      const [{ data: qboCandidates, error: qboCandidatesError }, { data: qboInvoice, error: qboInvoiceError }] = await Promise.all([
+        adminClient
         .from("qbo_invoice_lines")
-        .select("id,qbo_sku")
-        .eq("qbo_invoice_id", orderParent.source_invoice_id);
+        .select("id,qbo_line_id,qbo_sku")
+        .eq("qbo_invoice_id", orderParent.source_invoice_id),
+        adminClient
+          .from("qbo_invoices")
+          .select("raw_payload")
+          .eq("id", orderParent.source_invoice_id)
+          .maybeSingle(),
+      ]);
       if (qboCandidatesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboCandidatesError.message)}`);
+      if (qboInvoiceError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboInvoiceError.message)}`);
 
       const mappedSkuCandidates = new Set(qboSkuCandidates(mappedSku));
+      const liveQuantities = liveQuickBooksLineQuantities(qboInvoice?.raw_payload as { Line?: unknown[] } | null | undefined);
       const exactCandidates = (qboCandidates ?? []).filter((candidate) => (
+        (liveQuantities.size === 0 || liveQuantities.has(String(candidate.qbo_line_id ?? "")))
+        &&
         qboSkuCandidates(candidate.qbo_sku).some((candidateSku) => mappedSkuCandidates.has(candidateSku))
       ));
       if (exactCandidates.length === 1) linkedQboInvoiceLineId = exactCandidates[0]!.id;

@@ -8,6 +8,7 @@ import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillm
 import { cancellationAwareOperationalTotals } from "@/lib/orders/cancellation-presentation";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine } from "@/lib/fulfillment/suggested-allocation";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
+import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { OrdersBrowser } from "./orders-browser";
 
@@ -313,7 +314,7 @@ async function getOrdersDatasetFromDatabase() {
 const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
   ["orders-list-read-model"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: [ORDERS_PROJECTION_CACHE_TAG] },
 );
 
 export default async function OrdersPage({

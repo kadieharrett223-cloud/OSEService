@@ -6,6 +6,7 @@ import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { unstable_cache } from "next/cache";
 
 export type CanonicalQueueLine = {
@@ -261,7 +262,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
 const getCachedCanonicalCustomerQueue = unstable_cache(
   loadCanonicalCustomerQueueFromDatabase,
   ["canonical-customer-queue-read-model"],
-  { revalidate: 60 },
+  { revalidate: 60, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */

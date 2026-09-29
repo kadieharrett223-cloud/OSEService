@@ -1334,6 +1334,37 @@ export async function remapOrderLineProductAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(productError?.message ?? "Selected product was not found")}`);
   }
 
+  // Some older imports have the right product on the operational line but
+  // lost the foreign-key link to its QBO invoice row.  That disconnects the
+  // line from the canonical Customer List after a refresh.  Repair only an
+  // exact, unique SKU match on this invoice; ambiguous matches remain
+  // untouched for review.  This writes identity/approval metadata only — it
+  // never changes inventory, allocations, fulfillment, shipments, or status.
+  let linkedQboInvoiceLineId = lineRow.qbo_invoice_line_id;
+  const mappedSku = getString(formData, "mappedSku")?.trim() || null;
+  if (!linkedQboInvoiceLineId && mappedSku) {
+    const { data: orderParent, error: orderParentError } = await adminClient
+      .from("shipping_orders")
+      .select("source_invoice_id")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (orderParentError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderParentError.message)}`);
+
+    if (orderParent?.source_invoice_id) {
+      const { data: qboCandidates, error: qboCandidatesError } = await adminClient
+        .from("qbo_invoice_lines")
+        .select("id,qbo_sku")
+        .eq("qbo_invoice_id", orderParent.source_invoice_id);
+      if (qboCandidatesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboCandidatesError.message)}`);
+
+      const mappedSkuCandidates = new Set(qboSkuCandidates(mappedSku));
+      const exactCandidates = (qboCandidates ?? []).filter((candidate) => (
+        qboSkuCandidates(candidate.qbo_sku).some((candidateSku) => mappedSkuCandidates.has(candidateSku))
+      ));
+      if (exactCandidates.length === 1) linkedQboInvoiceLineId = exactCandidates[0]!.id;
+    }
+  }
+
   if (lineRow.product_id === productId) {
     // Keep the linked QuickBooks line aligned even when the visible order line
     // was already mapped. QBO refreshes use that linked identity to rebuild
@@ -1341,12 +1372,19 @@ export async function remapOrderLineProductAction(formData: FormData) {
     // can strand a real open line as "Queue assignment pending". This is
     // strictly product identity and approval metadata—never stock,
     // allocations, fulfillment, shipment history, or order status.
-    if (lineRow.qbo_invoice_line_id) {
+    if (linkedQboInvoiceLineId) {
       const { error: qboMappingError } = await adminClient
         .from("qbo_invoice_lines")
         .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED" } as never)
-        .eq("id", lineRow.qbo_invoice_line_id);
+        .eq("id", linkedQboInvoiceLineId);
       if (qboMappingError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboMappingError.message)}`);
+    }
+    if (linkedQboInvoiceLineId !== lineRow.qbo_invoice_line_id) {
+      const { error: linkError } = await adminClient
+        .from("shipping_order_lines")
+        .update({ qbo_invoice_line_id: linkedQboInvoiceLineId, approval_status: "APPROVED" } as never)
+        .eq("id", lineId);
+      if (linkError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linkError.message)}`);
     }
     // A legacy/imported line can already point at the right catalog product
     // while its approval flag is still PENDING_REVIEW.  Treating that as a
@@ -1361,11 +1399,11 @@ export async function remapOrderLineProductAction(formData: FormData) {
         .eq("id", lineId);
       if (approvalError) redirect(`/orders/${orderId}?error=${encodeURIComponent(approvalError.message)}`);
 
-      if (lineRow.qbo_invoice_line_id) {
+      if (linkedQboInvoiceLineId) {
         const { error: qboApprovalError } = await adminClient
           .from("qbo_invoice_lines")
           .update({ mapping_status: "MAPPED", approval_status: "APPROVED" } as never)
-          .eq("id", lineRow.qbo_invoice_line_id);
+          .eq("id", linkedQboInvoiceLineId);
         if (qboApprovalError) redirect(`/orders/${orderId}?error=${encodeURIComponent(qboApprovalError.message)}`);
       }
 
@@ -1395,7 +1433,6 @@ export async function remapOrderLineProductAction(formData: FormData) {
   }
 
   const lineColumnSet = await loadTableColumnSet(adminClient, "shipping_order_lines", ["legacy_matched_item_code"]);
-  const mappedSku = getString(formData, "mappedSku")?.trim() || null;
   const payload = lineColumnSet.has("legacy_matched_item_code")
     ? { product_id: productId, legacy_matched_item_code: mappedSku }
     : { product_id: productId };

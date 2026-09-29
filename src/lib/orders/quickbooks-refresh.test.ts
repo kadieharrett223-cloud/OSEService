@@ -141,6 +141,29 @@ describe("re-entering a QuickBooks invoice", () => {
     expect(plan.inserts[0]?.productId).toBe("product-lift");
   });
 
+  it("reconnects a vendor-prefixed legacy lift line to its QBO model code", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "qbo-4pml", qbo_sku: "4PML-9", product_id: "product-4pml", ordered_qty: 1 })],
+      [orderLine({ id: "legacy-4pml", qbo_invoice_line_id: null, legacy_item_code: "HL-4PML-9", product_id: "product-4pml", ordered_qty: 1, approved_qty: 1 })],
+      new Map([["4PML-9", "product-4pml"]]),
+    );
+
+    expect(qboSkuCandidates("HL-4PML-9")).toContain("4PML-9");
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toEqual([{
+      lineId: "legacy-4pml",
+      qboInvoiceLineId: "qbo-4pml",
+      ordered_qty: 1,
+      approved_qty: 1,
+      approval_status: "APPROVED",
+      product_id: "product-4pml",
+    }]);
+  });
+
+  it("does not strip the HL prefix from an actual jack SKU", () => {
+    expect(qboSkuCandidates("HLCJ-6")).toEqual(["HLCJ-6"]);
+  });
+
   it("maps a deleted packaged SKU variant to its exact operational component", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine({ id: "inv-line-package", product_id: null, qbo_sku: "HPU1103-PKG-1 (deleted)" })],

@@ -62,6 +62,13 @@ export function qboSkuCandidates(value: string | null | undefined) {
     liveSku = liveSku.replace(/-PKG$/, "").trim();
     if (liveSku && !candidates.includes(liveSku)) candidates.push(liveSku);
   }
+  // Historical import rows often retain a vendor prefix (for example
+  // "HL-4PML-9") while the current QBO catalog uses the actual model code
+  // ("4PML-9").  Those are the same item, not separate inventory.  Strip
+  // only the known prefix when the remaining code starts with a model digit;
+  // this deliberately leaves real names such as HLCJ-6 and HPU1103 intact.
+  const withoutVendorPrefix = liveSku.match(/^(?:HL|HK|YZ)-([0-9].*)$/)?.[1] ?? null;
+  if (withoutVendorPrefix && !candidates.includes(withoutVendorPrefix)) candidates.push(withoutVendorPrefix);
   return candidates;
 }
 

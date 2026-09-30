@@ -2089,14 +2089,18 @@ export default async function OrderDetailPage({
                   && !["CANCELLED", "REMOVED", "DENIED", "FULFILLED"].includes(String(line?.fulfillment_status ?? "").toUpperCase());
               }).map(({ item }, index) => {
                 const queueLine = item.shippingLine;
-                const queueSku = item.sku ?? queueLine?.products?.sku ?? "Line item";
+                // Queue labels must describe the operational product, not a
+                // historical/deleted QuickBooks SKU. The original QBO item is
+                // still preserved in the line detail for audit history.
+                const queueSku = queueLine?.products?.sku ?? item.sku ?? "Line item";
+                const queueDescription = queueLine?.products?.canonical_name ?? item.description;
                 const queuePosition = queueLine ? canonicalQueuePositionByLineId.get(queueLine.id) : null;
                 const requiresQueueApproval = queueLine
                   && !["APPROVED", "PARTIAL"].includes(String(queueLine.approval_status ?? "").toUpperCase());
                 return (
                   <div key={`${item.key}-queue`} className="border-b border-[#eef2f7] pb-3 last:border-0 last:pb-0">
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
-                    <p className="mt-1 text-xs text-[#64748b]">{truncateText(item.description, 30)}</p>
+                    <p className="mt-1 text-xs text-[#64748b]">{truncateText(queueDescription, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
                       {queuePosition
                         ? `Customer list position: #${queuePosition}`

@@ -63,16 +63,25 @@ async function reconcileConfirmedShipmentEvidenceForOrder(
   const lineIds = lines.map((line) => line.id);
   const [{ data: rawEvents, error: eventsError }, { data: shipments, error: shipmentsError }] = await Promise.all([
     supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty,shipment_number").in("shipping_order_line_id", lineIds),
-    supabase.from("order_shipments").select("shipment_number").eq("shipping_order_id", orderId),
+    supabase.from("order_shipments").select("id,shipment_number").eq("shipping_order_id", orderId),
   ]);
   if (eventsError) throw new Error(eventsError.message);
   if (shipmentsError) throw new Error(shipmentsError.message);
-  const shipmentRows = (shipments ?? []) as Array<{ shipment_number: string | null }>;
+  const shipmentRows = (shipments ?? []) as Array<{ id: string; shipment_number: string | null }>;
+  const shipmentIds = shipmentRows.map((shipment) => shipment.id);
+  const { data: rawShipmentLines, error: shipmentLinesError } = shipmentIds.length > 0
+    ? await supabase
+      .from("order_shipment_lines")
+      .select("shipping_order_line_id,quantity")
+      .in("shipment_id", shipmentIds)
+    : { data: [], error: null };
+  if (shipmentLinesError) throw new Error(shipmentLinesError.message);
 
   const repairs = findShipmentEvidenceRepairs(
     lines,
     (rawEvents ?? []) as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null; shipment_number: string | null }>,
     shipmentRows.map((shipment) => shipment.shipment_number),
+    (rawShipmentLines ?? []) as Array<{ shipping_order_line_id: string; quantity: number | null }>,
   );
   for (const repair of repairs) {
     const { error } = await supabase

@@ -301,6 +301,17 @@ describe("re-entering a QuickBooks invoice", () => {
     ]);
   });
 
+  it("never turns a Synchrony refund balance adjustment into customer demand", () => {
+    const plan = planQuickbooksOrderRefresh(
+      [invoiceLine({ id: "balance-adjustment", qbo_sku: "Misc Charge", source_description: "Synchrony Balance adjustment from refund error", product_id: "product-stale" })],
+      [],
+      aliases,
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.skippedUnmapped).toEqual([]);
+  });
+
   it("reports every product whose queue needs renumbering", () => {
     const plan = planQuickbooksOrderRefresh(
       [invoiceLine(), invoiceLine({ id: "inv-line-2", product_id: "product-2" })],

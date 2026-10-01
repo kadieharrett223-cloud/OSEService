@@ -161,7 +161,11 @@ export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | nu
   const description = String(line.source_description ?? "").trim().toLowerCase();
   return sku === "note"
     || sku.startsWith("note:")
-    || /discount|shipping|freight|delivery|sales tax|tax adjustment/.test(`${sku} ${description}`);
+    // A miscellaneous charge can stand in for a real product on older
+    // invoices, so it is not globally non-inventory.  A Synchrony/refund
+    // balance correction, however, is accounting-only and must never become
+    // customer demand or block a completed shipment.
+    || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error/.test(`${sku} ${description}`);
 }
 
 export function planQuickbooksOrderRefresh(

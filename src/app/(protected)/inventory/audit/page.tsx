@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
+import { isAdminUnlockedForUser } from "@/lib/admin-access";
 import { canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -27,7 +29,10 @@ function displayDate(value: string) {
 }
 
 export default async function InventoryAuditPage({ searchParams }: { searchParams: Promise<{ sku?: string }> }) {
-  await requireUser();
+  const user = await requireUser();
+  if (!await isAdminUnlockedForUser(user.id)) {
+    redirect("/inventory?mapError=Admin+mode+is+required+to+view+inventory+audit+history");
+  }
   const requestedSku = String((await searchParams).sku ?? "2PBP-8").trim().toUpperCase();
   const targetKey = canonicalSkuKey(requestedSku);
   const supabase = getSupabaseAdmin();

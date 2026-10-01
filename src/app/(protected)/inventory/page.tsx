@@ -923,13 +923,21 @@ export default async function InventoryPage({
                         );
                       })()}
                       {adminMode ? (
-                        <AdminRowEditor
-                          productId={row.productId}
-                          sku={row.sku}
-                          productName={row.productName}
-                          storedName={row.storedName}
-                          onFloor={row.onFloor}
-                        />
+                        <>
+                          <AdminRowEditor
+                            productId={row.productId}
+                            sku={row.sku}
+                            productName={row.productName}
+                            storedName={row.storedName}
+                            onFloor={row.onFloor}
+                          />
+                          <Link
+                            href={`/inventory/audit?sku=${encodeURIComponent(row.sku)}`}
+                            className="mt-2 inline-flex rounded border border-[#bfdbfe] bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8] hover:bg-[#dbeafe]"
+                          >
+                            View audit history
+                          </Link>
+                        </>
                       ) : null}
                       <DisplayOrderButton
                         productIds={row.productIds}

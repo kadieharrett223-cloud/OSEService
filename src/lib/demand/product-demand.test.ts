@@ -10,6 +10,22 @@ describe("shared active logical demand", () => {
     expect(isOpenCustomerQueueLine({ ...line, product_id: null })).toBe(false);
     expect(isOpenCustomerQueueLine({ ...line, approval_status: "PENDING_REVIEW" })).toBe(false);
   });
+
+  it("never creates customer demand from a legacy item absent from its authoritative QBO invoice", () => {
+    const ghost = {
+      id: "legacy-ghost-hlcj",
+      product_id: "hlcj-6",
+      approved_qty: 1,
+      fulfilled_qty: 0,
+      approval_status: "APPROVED",
+      fulfillment_status: "PENDING",
+      qbo_authoritative_absent: true,
+    };
+
+    expect(isOpenDemandLine(ghost)).toBe(false);
+    expect(isOpenCustomerQueueLine(ghost)).toBe(false);
+    expect(getCanonicalOpenDemandLines([ghost], new Set(), new Set())).toEqual([]);
+  });
   it("dedupes deterministic cross-source representations by QBO logical key", () => {
     const lines = [
       { id: "old", logical_demand_key: "qbo-line-1", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" },

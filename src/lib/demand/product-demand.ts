@@ -31,6 +31,8 @@ export type DemandLineLike = {
   parent_qbo_voided?: boolean;
   parent_source_invoice_id?: string | null;
   parent_source_type?: string | null;
+  /** A legacy row names an item that the current linked QBO invoice explicitly does not contain. */
+  qbo_authoritative_absent?: boolean;
 };
 
 export function openQtyOf(line: DemandLineLike) {
@@ -88,6 +90,11 @@ export function withLogicalFulfilledQty<T extends DemandLineLike>(lines: T[]): T
 
 /** Customer List demand includes every remaining physical obligation that has not been cancelled, voided, duplicated, or shipped. */
 export function isOpenDemandLine(line: DemandLineLike) {
+  // When a legacy record is linked to a live QBO invoice, the current QBO
+  // line identities are the authoritative list of what was bought. A
+  // leftover OLD_ERP-only line must never manufacture customer demand for an
+  // item that is absent from that invoice.
+  if (line.qbo_authoritative_absent) return false;
   if (openQtyOf(line) <= 0) return false;
   if (!hasActiveDemandParent(line)) return false;
   return !["FULFILLED", "SHIPPED", "CANCELLED", "REPLACED"].includes(String(line.fulfillment_status ?? "").toUpperCase());

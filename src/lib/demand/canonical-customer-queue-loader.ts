@@ -15,6 +15,7 @@ export type CanonicalQueueLine = {
   approval_status: string | null; fulfillment_status: string | null; queue_position_start: number | null;
   queue_position_count: number | null; queue_position_override?: number | null; queue_position_override_reason?: string | null; queue_position_override_at?: string | null; queue_position_override_by?: string | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
   source_record_id: string | null; logical_demand_key?: string | null;
+  qbo_authoritative_absent?: boolean;
   qbo_invoice_lines?: { qbo_line_id?: string | null; qbo_sku?: string | null } | null;
   shipping_orders?: { id: string; source_invoice_id?: string | null; source_type?: string | null; order_number?: string | null;
     duplicate_of_order_id?: string | null; cancellation_status?: string | null; review_status?: string | null;
@@ -171,9 +172,21 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
         || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key)))
     ));
     const sourceQty = candidates.length === 1 ? qboSourceQty(candidates[0]!) : 0;
+    // An OLD_ERP line can be linked to a QBO invoice by source ID while
+    // retaining an item that was removed or never belonged to that invoice.
+    // If the current QBO payload supplies live line identities and none is a
+    // one-to-one product/SKU match, QBO is authoritative: do not let the
+    // historical orphan create a Customer List obligation. This is a
+    // read-model exclusion only; no stock, allocation, fulfillment, or order
+    // record is changed.
+    const currentQboPayloadHasLineIds = (liveQboLineQtyByInvoiceId.get(bridgeInvoiceId ?? "")?.size ?? 0) > 0;
+    const legacyLineAbsentFromCurrentQbo = parent?.source_type !== "QBO_INVOICE"
+      && !line.qbo_invoice_line_id
+      && currentQboPayloadHasLineIds
+      && candidates.length === 0;
     return candidates.length === 1
       ? { ...line, ...parentFields, logical_demand_key: candidates[0].id, ...(Number(line.approved_qty ?? 0) > 0 && sourceQty > 0 ? { canonical_obligation_qty: sourceQty } : {}) }
-      : { ...line, ...parentFields };
+      : { ...line, ...parentFields, ...(legacyLineAbsentFromCurrentQbo ? { qbo_authoritative_absent: true } : {}) };
   });
 
   const completedInvoiceIds = new Set<string>();

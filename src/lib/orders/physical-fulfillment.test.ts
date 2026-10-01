@@ -221,6 +221,18 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("never treats an unmapped QuickBooks finance fee as an unshipped product", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["LIFT", 1], ["Misc Charge", 1]], { descriptions: { LIFT: "Lift", "Misc Charge": "In house finance fee" } }),
+      lines: [
+        line({ id: "lift", legacy_item_code: "LIFT", fulfilled_qty: 1, fulfillment_status: "FULFILLED", qbo_invoice_lines: { qbo_line_id: "1", qbo_sku: "LIFT" } }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expectInvariant(summary);
+  });
+
   it("keeps a mapped physical SKU when QuickBooks marks its row as non-sales detail", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: {

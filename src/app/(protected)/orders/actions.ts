@@ -542,14 +542,16 @@ export async function reopenCancelledOrderAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=This+QuickBooks+invoice+is+voided+and+cannot+be+reopened`);
   }
 
-  // Clear the terminal parent state before restoring QBO-backed operational
-  // lines.  The cancellation guard intentionally prevents line restoration
-  // while a parent is still cancelled.
-  const { error: parentUpdateError } = await adminClient
-    .from("shipping_orders")
-    .update({ cancellation_status: null, cancellation_reason: null, cancelled_at: null, review_status: "PENDING_REVIEW" } as never)
-    .in("id", logicalOrderIds);
-  if (parentUpdateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(parentUpdateError.message)}`);
+  // The database restoration RPC is the only approved path through the
+  // immutable-cancellation guard. It restores no allocation and records a
+  // durable audit entry that stock and shipment evidence stayed untouched.
+  for (const logicalOrderId of logicalOrderIds) {
+    const { error: restoreError } = await adminClient.rpc("restore_cancelled_order", {
+      p_order_id: logicalOrderId,
+      p_reason: "Manual OCC reopen confirmed by an administrator",
+    } as never);
+    if (restoreError) redirect(`/orders/${orderId}?error=${encodeURIComponent(restoreError.message)}`);
+  }
 
   // The live-in-system QBO snapshot is the source of truth for line identity
   // and quantity.  This restores cancelled, unshipped lines to PENDING and

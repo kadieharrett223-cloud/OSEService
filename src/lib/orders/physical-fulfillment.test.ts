@@ -208,6 +208,19 @@ describe("physical fulfillment totals", () => {
     expectInvariant(summary);
   });
 
+  it("never treats a mapped QuickBooks discount as an unshipped product", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["LIFT", 1], ["Discount-1", 1]], { descriptions: { LIFT: "Lift", "Discount-1": "-- Discount Promotional Sale" } }),
+      lines: [
+        line({ id: "lift", legacy_item_code: "LIFT", fulfilled_qty: 1, fulfillment_status: "FULFILLED", qbo_invoice_lines: { qbo_line_id: "1", qbo_sku: "LIFT" } }),
+        line({ id: "discount", legacy_item_code: "Discount-1", products: { sku: "Discount Product", canonical_name: "Discount Product" }, qbo_invoice_lines: { qbo_line_id: "2", qbo_sku: "Discount-1" } }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 1, ordered: 1, fulfilled: 1, remaining: 0, isComplete: true });
+    expectInvariant(summary);
+  });
+
   it("keeps a mapped physical SKU when QuickBooks marks its row as non-sales detail", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: {

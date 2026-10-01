@@ -127,11 +127,17 @@ function parseInvoicePhysicalItems(
     const detailType = typeof item.DetailType === "string" ? item.DetailType : "";
     if (!sku && !description && detailType !== "SalesItemLineDetail") return null;
     const text = `${sku ?? ""} ${description}`;
+    const isCommercialNonInventory = description.startsWith("--")
+      || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b/i.test(text);
+    // A discount, freight, tax, or service row must never become a physical
+    // obligation just because QBO represents it as a SalesItemLineDetail or a
+    // stale mapping happens to link it to a product. "Note" is intentionally
+    // handled below: QBO occasionally uses that placeholder for a real mapped
+    // component such as a motor.
+    if (isCommercialNonInventory) return null;
     const isNonInventory = detailType !== "SalesItemLineDetail"
-      || description.startsWith("--")
       || String(sku ?? "").trim().toLowerCase() === "note"
-      || String(sku ?? "").trim().toLowerCase().startsWith("note:")
-      || NON_INVENTORY_TEXT.test(text);
+      || String(sku ?? "").trim().toLowerCase().startsWith("note:");
     const detailQtyRaw = item.SalesItemLineDetail?.Qty;
     const topLevelQtyRaw = item.Qty;
     const hasExplicitQty = detailQtyRaw !== undefined || topLevelQtyRaw !== undefined;

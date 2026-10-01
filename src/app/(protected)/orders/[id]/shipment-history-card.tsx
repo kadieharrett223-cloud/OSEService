@@ -18,6 +18,17 @@ type EditableLine = {
   maxQty: number;
 };
 
+function formatShipmentTimestamp(value: string) {
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Los_Angeles",
+  });
+}
+
 export function ShipmentHistoryCard({
   orderId,
   shipment,
@@ -47,7 +58,7 @@ export function ShipmentHistoryCard({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="font-semibold text-[#111827]">{shipment.shipment_number}</h3>
-          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">Shipped {new Date(shipment.shipped_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#1b7a43]">Shipped {formatShipmentTimestamp(shipment.shipped_at)}</p>
           {shipment.creator?.full_name ? <p className="mt-1 text-xs text-[#64748b]">Recorded by {shipment.creator.full_name}</p> : null}
         </div>
         <div className="text-right text-sm">

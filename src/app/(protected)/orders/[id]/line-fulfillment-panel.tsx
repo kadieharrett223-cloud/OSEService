@@ -25,6 +25,12 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function formatFulfillmentTimestamp(value: string) {
+  return new Date(value).toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles",
+  });
+}
+
 export function LineFulfillmentPanel({
   orderId,
   lineId,
@@ -111,7 +117,7 @@ export function LineFulfillmentPanel({
 
       <div className="mt-4 border-t border-[#eef2f7] pt-3">
         <p className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Fulfillment history</p>
-        {history.length === 0 ? <p className="mt-2 text-sm text-[#64748b]">No fulfillment recorded yet.</p> : <div className="mt-2 space-y-2">{history.map((entry) => <div key={entry.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs text-[#475569]"><p>{new Date(entry.fulfilled_at).toLocaleString()} · Qty {entry.fulfilled_qty ?? 0} · {entry.fulfillment_type ?? "SHIPMENT"}</p><p>{entry.carrier ?? ""}{entry.tracking_number ? ` · ${entry.tracking_number}` : ""}</p></div>)}</div>}
+        {history.length === 0 ? <p className="mt-2 text-sm text-[#64748b]">No fulfillment recorded yet.</p> : <div className="mt-2 space-y-2">{history.map((entry) => <div key={entry.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-2 text-xs text-[#475569]"><p>{formatFulfillmentTimestamp(entry.fulfilled_at)} · Qty {entry.fulfilled_qty ?? 0} · {entry.fulfillment_type ?? "SHIPMENT"}</p><p>{entry.carrier ?? ""}{entry.tracking_number ? ` · ${entry.tracking_number}` : ""}</p></div>)}</div>}
       </div>
     </div>
   );

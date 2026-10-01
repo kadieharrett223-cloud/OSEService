@@ -311,7 +311,7 @@ function formatDate(value: string | null | undefined) {
   if (!value) return "Pending";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Pending";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -324,6 +324,7 @@ function formatDateTime(value: string | null | undefined) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "America/Los_Angeles",
   });
 }
 

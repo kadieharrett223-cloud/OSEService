@@ -497,6 +497,91 @@ export async function cancelOrderManuallyAction(formData: FormData) {
   redirect("/orders?tab=cancelled&message=Order+cancelled+and+removed+from+active+customer+queues");
 }
 
+/**
+ * Reopens a manually cancelled logical invoice from its already-imported QBO
+ * snapshot.  This deliberately does not restore released allocations or make
+ * an inventory movement: reopening demand affects customer queues only.
+ */
+export async function reopenCancelledOrderAction(formData: FormData) {
+  const user = await requireUser();
+  const orderId = getString(formData, "orderId");
+  const confirmation = getString(formData, "confirmation");
+  if (!orderId) redirect("/orders?error=Missing+order+reference");
+  if (!(await isAdminUnlockedForUser(user.id))) {
+    redirect(`/orders/${orderId}?error=Admin+mode+is+required+to+reopen+an+order`);
+  }
+  if (confirmation !== "CONFIRM_REOPEN_ORDER") {
+    redirect(`/orders/${orderId}?error=Reopen+confirmation+is+required`);
+  }
+
+  const adminClient = getSupabaseAdmin();
+  const { data: orderData, error: orderError } = await adminClient
+    .from("shipping_orders")
+    .select("id,source_invoice_id,cancellation_status")
+    .eq("id", orderId)
+    .maybeSingle();
+  const order = orderData as unknown as { id: string; source_invoice_id: string | null; cancellation_status: string | null } | null;
+  if (orderError) redirect(`/orders/${orderId}?error=${encodeURIComponent(orderError.message)}`);
+  if (!order) redirect("/orders?error=Order+not+found");
+  if (String(order.cancellation_status ?? "").toUpperCase() !== "CANCELLED") {
+    redirect(`/orders/${orderId}?message=Order+is+already+active`);
+  }
+
+  const logicalOrderIds = await getLogicalOrderIds(adminClient, orderId);
+  const { data: invoice, error: invoiceError } = order.source_invoice_id
+    ? await adminClient
+      .from("qbo_invoices")
+      .select("id,qbo_invoice_id,invoice_number,raw_payload")
+      .eq("id", order.source_invoice_id)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (invoiceError || !invoice) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(invoiceError?.message ?? "This cancelled order is not linked to a QuickBooks invoice")}`);
+  }
+  if (String((invoice.raw_payload as { PrivateNote?: string } | null)?.PrivateNote ?? "").trim().toUpperCase() === "VOIDED") {
+    redirect(`/orders/${orderId}?error=This+QuickBooks+invoice+is+voided+and+cannot+be+reopened`);
+  }
+
+  // Clear the terminal parent state before restoring QBO-backed operational
+  // lines.  The cancellation guard intentionally prevents line restoration
+  // while a parent is still cancelled.
+  const { error: parentUpdateError } = await adminClient
+    .from("shipping_orders")
+    .update({ cancellation_status: null, cancellation_reason: null, cancelled_at: null, review_status: "PENDING_REVIEW" } as never)
+    .in("id", logicalOrderIds);
+  if (parentUpdateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(parentUpdateError.message)}`);
+
+  // The live-in-system QBO snapshot is the source of truth for line identity
+  // and quantity.  This restores cancelled, unshipped lines to PENDING and
+  // rebuilds their queues; it never restores an allocation or writes stock.
+  await activateExistingQuickbooksOrder(adminClient, orderId, invoice);
+  const { error: siblingReviewError } = await adminClient
+    .from("shipping_orders")
+    .update({ review_status: "APPROVED" })
+    .in("id", logicalOrderIds);
+  if (siblingReviewError) redirect(`/orders/${orderId}?error=${encodeURIComponent(siblingReviewError.message)}`);
+
+  const { data: restoredLines, error: restoredLinesError } = await adminClient
+    .from("shipping_order_lines")
+    .select("product_id")
+    .in("shipping_order_id", logicalOrderIds)
+    .not("product_id", "is", null);
+  if (restoredLinesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(restoredLinesError.message)}`);
+  await recalculateProductQueues((restoredLines ?? []).map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
+  await writeOrderActivity(adminClient, orderId, "ORDER_REOPENED_MANUAL", {
+    reopened_by: user.id,
+    source: "existing_quickbooks_snapshot",
+    physical_inventory_changed: false,
+    allocations_restored: false,
+  });
+  revalidateErpHealth();
+  revalidateOrdersList();
+  revalidatePath("/inventory");
+  revalidatePath("/order-queue");
+  revalidatePath(`/orders/${orderId}`);
+  redirect(`/orders/${orderId}?message=Order+reopened+and+customer+queues+rebuilt+without+changing+stock`);
+}
+
 function getFileExtension(fileName: string) {
   if (!fileName.includes(".")) return "";
   return fileName.split(".").pop()?.toLowerCase() ?? "";

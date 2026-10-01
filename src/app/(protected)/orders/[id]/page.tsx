@@ -37,6 +37,7 @@ import {
   overrideProductQueuePositionAction,
   completeServiceOnlyOrderAction,
   cancelOrderManuallyAction,
+  reopenCancelledOrderAction,
   uploadOrderAttachmentAction,
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
@@ -765,7 +766,16 @@ function ManualOrderCancellation({
   const isCancelled = String(cancellationStatus ?? "").toUpperCase() === "CANCELLED";
 
   if (isCancelled) {
-    return <p className="mt-6 text-xs text-[#64748b]">This order is cancelled{cancellationReason ? ` · ${cancellationReason}` : ""}.</p>;
+    return <div className="mt-6 text-xs text-[#64748b]">
+      <p>This order is cancelled{cancellationReason ? ` · ${cancellationReason}` : ""}.</p>
+      {!adminUnlocked ? <p className="mt-2">Admin mode is required to reopen it.</p> : <form action={reopenCancelledOrderAction} className="mt-3 max-w-xl rounded-lg border border-[#bfdbfe] bg-[#f0f7ff] p-3">
+        <input type="hidden" name="orderId" value={orderId} />
+        <p className="font-semibold text-[#1d4f91]">Reopen this order</p>
+        <p className="mt-1 text-[#315b8d]">Restores the current QuickBooks line items to active customer queues. It does not restore allocations or change inventory counts.</p>
+        <label className="mt-3 flex items-start gap-2 text-[#315b8d]"><input type="checkbox" name="confirmation" value="CONFIRM_REOPEN_ORDER" className="mt-0.5" required /><span>I confirm this order should be reopened and returned to its customer lists.</span></label>
+        <button type="submit" className="mt-3 rounded-md border border-[#2563eb] px-3 py-1.5 font-semibold text-[#1d4ed8] hover:bg-[#dbeafe]">Reopen and rebuild customer lists</button>
+      </form>}
+    </div>;
   }
   return (
     <details className="mt-6 w-full border-t border-[#e5e7eb] pt-4 text-xs text-[#64748b]">

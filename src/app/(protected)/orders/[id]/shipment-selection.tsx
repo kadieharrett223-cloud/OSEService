@@ -127,9 +127,11 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
         aria-label={`Include ${line.sku} in fulfillment`}
         onPointerDown={(event) => {
           event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
           toggle(line);
         }}
-        onClick={(event) => event.stopPropagation()}
         className={`inline-flex h-4 w-4 items-center justify-center rounded-sm border text-[11px] font-bold leading-none ${selectedLine ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#94a3b8] bg-white text-transparent"}`}
       >
         {selectedLine ? "✓" : ""}

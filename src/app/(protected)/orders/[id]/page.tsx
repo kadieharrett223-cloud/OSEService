@@ -13,7 +13,7 @@ import {
 } from "@/lib/fulfillment/suggested-allocation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
-import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { isAlwaysNonInventoryQuickbooksLine, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
@@ -1370,6 +1370,14 @@ export default async function OrderDetailPage({
         ?? operationalLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
         ?? null
       : item.description === "Invoice line" ? null : orderLines[index] ?? null;
+    // A saved alias can be useful for a genuine historical Misc Charge item,
+    // but it must not make a documented accounting-only adjustment look like
+    // product demand.  The same strict classifier drives QBO intake and the
+    // canonical fulfillment totals.
+    const accountingOnlyItem = isAlwaysNonInventoryQuickbooksLine({
+      qbo_sku: item.sku,
+      source_description: item.description,
+    });
     return {
       key: `${skuKey ?? "line"}-${index}`,
       sku: item.sku,
@@ -1381,7 +1389,7 @@ export default async function OrderDetailPage({
       // A mapped product or matched operational line is authoritative. QBO can
       // label a real item as a DescriptionOnly/non-sales row, but that metadata
       // must not hide an already-mapped physical customer obligation as N/A.
-      isNonInventory: item.isNonInventory && !shippingLine?.product_id && !resolvedProduct?.id,
+      isNonInventory: accountingOnlyItem || (item.isNonInventory && !shippingLine?.product_id && !resolvedProduct?.id),
     };
   });
 

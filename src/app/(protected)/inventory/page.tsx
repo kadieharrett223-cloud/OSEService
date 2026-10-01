@@ -51,7 +51,6 @@ type InventoryTransactionRow = {
   product_id: string | null;
   bucket: string | null;
   delta: number | null;
-  source_type: string | null;
 };
 
 type ContainerLineRow = {
@@ -258,7 +257,7 @@ const getCachedInventoryBaseDataset = unstable_cache(async () => {
   const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult, oldErpProductsResult] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name, source_record_id, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
     supabase.from("product_aliases").select("product_id, alias"),
-    supabase.from("inventory_transactions").select("product_id, bucket, delta, source_type"),
+    supabase.from("inventory_transactions").select("product_id, bucket, delta"),
     supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
     supabase.from("inventory_display_groups").select("name, sort_order").order("sort_order", { ascending: true }),
     supabase.from("old_erp_source_records").select("source_record_id, raw_payload").eq("source_container", "Products"),
@@ -416,19 +415,12 @@ export default async function InventoryPage({
     (row) => row.product_id,
     (row) => Number(row.delta ?? 0),
   );
-  const explicitStockOwnerProductIds = new Set(
-    transactionRows
-      .filter((row) => row.bucket === "ON_FLOOR" && ["ADJUSTMENT", "CONTAINER_RECEIVED", "RECOUNT"].includes(String(row.source_type ?? "").toUpperCase()))
-      .map((row) => row.product_id)
-      .filter((productId): productId is string => Boolean(productId)),
-  );
-  // A zero balance remains authoritative when an operator counted/recounted it.
-  // Shipment rows alone must never replace the physical stock owner.
+  // An on-floor ledger entry is meaningful even when its resulting balance is
+  // zero: it proves an operator explicitly set the current SKU's stock level.
   const stockOwnerProductIds = authoritativeStockProductIds(
     productRows,
     canonicalInventoryKeyByProductId,
     new Set(onFloorByProduct.keys()),
-    explicitStockOwnerProductIds,
   );
 
   const openDemandByProduct = toRecordMap(

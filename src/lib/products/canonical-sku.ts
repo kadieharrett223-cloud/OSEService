@@ -68,7 +68,6 @@ export function authoritativeStockProductIds<T extends { id: string; sku: string
   products: T[],
   canonicalKeyByProductId: Map<string, string>,
   stockLedgerProductIds?: ReadonlySet<string>,
-  explicitlyCountedStockProductIds?: ReadonlySet<string>,
 ) {
   const directOwnersByKey = new Map<string, Set<string>>();
   for (const product of products) {
@@ -88,22 +87,13 @@ export function authoritativeStockProductIds<T extends { id: string; sku: string
       const sku = String(productById.get(productId)?.sku ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
       return sku === key;
     });
-    // Shipment events belong on the stock ledger, but they are evidence that an
-    // order was completed—not that this catalog identity owns the physical
-    // stock baseline.  Only a count, receipt, or recount may supersede a
-    // legacy ledger for the same operational SKU.
-    const baseOwnersWithAuthoritativeStock = baseSkuOwners.filter((productId) => (
-      explicitlyCountedStockProductIds
-        ? explicitlyCountedStockProductIds.has(productId)
-        : stockLedgerProductIds?.has(productId)
-    ));
+    const baseOwnersWithLedger = baseSkuOwners.filter((productId) => stockLedgerProductIds?.has(productId));
 
-    // A current base SKU with an explicit physical-stock event is
-    // authoritative. This rejects stale manufacturer-prefixed copies (for
-    // example HK-4PC-6) after an operator has corrected the live 4PC-6
-    // balance to zero.
-    if (baseOwnersWithAuthoritativeStock.length > 0) {
-      for (const productId of baseOwnersWithAuthoritativeStock) allowed.add(productId);
+    // A current base SKU with its own on-floor ledger is authoritative. This
+    // rejects stale manufacturer-prefixed copies (for example HK-4PC-6) after
+    // an operator has corrected the live 4PC-6 balance to zero.
+    if (baseOwnersWithLedger.length > 0) {
+      for (const productId of baseOwnersWithLedger) allowed.add(productId);
       continue;
     }
 
@@ -112,17 +102,10 @@ export function authoritativeStockProductIds<T extends { id: string; sku: string
     // In that case the ledger-bearing legacy identity is the only evidence of
     // on-floor stock and remains visible in the merged product row.
     if (stockLedgerProductIds) {
-      const legacyOwnersWithLedger = products.filter((product) => (
-        (canonicalKeyByProductId.get(product.id) ?? product.id) === key
-        && !baseSkuOwners.includes(product.id)
-        && stockLedgerProductIds.has(product.id)
-      ));
-      if (legacyOwnersWithLedger.length > 0) {
-        for (const product of legacyOwnersWithLedger) allowed.add(product.id);
-        continue;
-      }
-      for (const productId of baseSkuOwners) {
-        if (stockLedgerProductIds.has(productId)) allowed.add(productId);
+      for (const product of products) {
+        if ((canonicalKeyByProductId.get(product.id) ?? product.id) === key && stockLedgerProductIds.has(product.id)) {
+          allowed.add(product.id);
+        }
       }
       continue;
     }

@@ -42,15 +42,7 @@ describe("canonicalSkuKey", () => {
     expect(authoritativeStockProductIds([
       { id: "current", sku: "4PC-6" },
       { id: "legacy", sku: "HK-4PC-6" },
-    ], keys, new Set(["current", "legacy"]), new Set(["current"]))).toEqual(new Set(["current"]));
-  });
-
-  it("does not let a shipment-only current ledger hide the legacy physical stock", () => {
-    const keys = new Map([["current", "2PBP8"], ["legacy", "2PBP8"]]);
-    expect(authoritativeStockProductIds([
-      { id: "current", sku: "2PBP-8" },
-      { id: "legacy", sku: "HL-2PBP-8" },
-    ], keys, new Set(["current", "legacy"]), new Set())).toEqual(new Set(["legacy"]));
+    ], keys, new Set(["current", "legacy"]))).toEqual(new Set(["current"]));
   });
 
   it("never uses generic aliases to merge distinct product models", () => {

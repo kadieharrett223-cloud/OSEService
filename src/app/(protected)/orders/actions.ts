@@ -1684,9 +1684,15 @@ export async function remapOrderLineProductAction(formData: FormData) {
   }
 
   const lineColumnSet = await loadTableColumnSet(adminClient, "shipping_order_lines", ["legacy_matched_item_code"]);
+  // A new manual mapping is an approval of this exact QBO line as well as of
+  // its operational representation.  Leaving either record in
+  // PENDING_REVIEW made a successful selection look like "Needs mapping" on
+  // the next load, and could strand a real customer outside the Customer
+  // List.  This is identity/queue eligibility only: it never creates an
+  // allocation, shipment, fulfillment, or inventory transaction.
   const payload = lineColumnSet.has("legacy_matched_item_code")
-    ? { product_id: productId, legacy_matched_item_code: mappedSku }
-    : { product_id: productId };
+    ? { product_id: productId, legacy_matched_item_code: mappedSku, approval_status: "APPROVED", warehouse_status: "APPROVED" }
+    : { product_id: productId, approval_status: "APPROVED", warehouse_status: "APPROVED" };
 
   const { error: updateError } = await adminClient
     .from("shipping_order_lines")
@@ -1694,6 +1700,16 @@ export async function remapOrderLineProductAction(formData: FormData) {
     .eq("id", lineId);
   if (updateError) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
+  }
+
+  if (linkedQboInvoiceLineId) {
+    const { error: qboMappingError } = await adminClient
+      .from("qbo_invoice_lines")
+      .update({ product_id: productId, mapping_status: "MAPPED", approval_status: "APPROVED", warehouse_status: "APPROVED" } as never)
+      .eq("id", linkedQboInvoiceLineId);
+    if (qboMappingError) {
+      redirect(`/orders/${orderId}?error=${encodeURIComponent(qboMappingError.message)}`);
+    }
   }
 
   if (lineRow.product_id) {

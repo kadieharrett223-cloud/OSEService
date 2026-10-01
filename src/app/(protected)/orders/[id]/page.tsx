@@ -564,7 +564,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
         || normalizedDescription.startsWith("--")
         || normalizedSku === "note"
         || normalizedSku.startsWith("note:")
-        || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
+        || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error|\bnote\b|\bservice\b|\binstall(?:ation)?\b/.test(normalizedLineText);
 
       if (!isNonInventory && hasExplicitQty && Number.isFinite(qty) && qty <= 0) return null;
 

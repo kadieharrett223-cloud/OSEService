@@ -1,7 +1,7 @@
 import { canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { qboSkuCandidates } from "./quickbooks-refresh";
 
-const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
+const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
 
 export type PhysicalFulfillmentLine = {
@@ -128,7 +128,7 @@ function parseInvoicePhysicalItems(
     if (!sku && !description && detailType !== "SalesItemLineDetail") return null;
     const text = `${sku ?? ""} ${description}`;
     const isCommercialNonInventory = description.startsWith("--")
-      || /discount|shipping|freight|delivery|sales tax|tax adjustment|\bservice\b|\binstall(?:ation)?\b|\bfinance fee\b|\bfinancing fee\b/i.test(text);
+      || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error|\bservice\b|\binstall(?:ation)?\b|\bfinance fee\b|\bfinancing fee\b/i.test(text);
     // A discount, freight, tax, or service row must never become a physical
     // obligation just because QBO represents it as a SalesItemLineDetail or a
     // stale mapping happens to link it to a product. "Note" is intentionally

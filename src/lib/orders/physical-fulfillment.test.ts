@@ -64,6 +64,22 @@ describe("physical fulfillment totals", () => {
     expect(isNonInventoryPhysicalLine(line({ products: { sku: "SKU-1", canonical_name: "Service call" } }))).toBe(true);
   });
 
+  it("excludes Synchrony refund balance adjustments while preserving real misc-charge products", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([
+        ["4PXL-10B", 1],
+        ["HPU2203", 1],
+        ["Misc Charge", 1],
+      ], { descriptions: { "Misc Charge": "Synchrony Balance adjustment from refund error" } }),
+      lines: [
+        line({ id: "lift", legacy_item_code: "4PXL-10B", fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+        line({ id: "motor", legacy_item_code: "HPU2203", fulfilled_qty: 1, fulfillment_status: "FULFILLED" }),
+      ],
+    });
+
+    expect(summary).toMatchObject({ lineCount: 2, ordered: 2, fulfilled: 2, remaining: 0, isComplete: true });
+  });
+
   it("summarizes 12310 as 4 ordered, 3 fulfilled, 1 remaining despite orphan 4PHR row", () => {
     const summary = getCanonicalPhysicalOrderSummary({
       rawPayload: invoicePayload([

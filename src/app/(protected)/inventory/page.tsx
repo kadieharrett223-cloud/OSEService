@@ -130,6 +130,7 @@ type QueueLine = {
 
 type InventoryViewRow = {
   productId: string;
+  stockProductIds: string[];
   productIds: string[];
   sku: string;
   productName: string;
@@ -648,6 +649,7 @@ export default async function InventoryPage({
 
     const group = canonicalGroups.get(canonicalKey) ?? {
       productId: product.id,
+      stockProductIds: [],
       productIds: [],
       sku: displaySku,
       productName: preferredDemandSku ?? title ?? "Unnamed Product",
@@ -669,7 +671,10 @@ export default async function InventoryPage({
       customerQueue: [],
     };
 
-    if (stockOwnerProductIds.has(product.id)) group.onFloor += onFloorByProduct.get(product.id) ?? 0;
+    if (stockOwnerProductIds.has(product.id)) {
+      group.stockProductIds.push(product.id);
+      group.onFloor += onFloorByProduct.get(product.id) ?? 0;
+    }
     group.openDemand += openDemandByProduct.get(product.id) ?? 0;
     group.floorCommitted += floorCommittedByProduct.get(product.id) ?? 0;
     group.customerQueue = [...group.customerQueue, ...(queueByProduct.get(product.id) ?? [])];
@@ -926,6 +931,7 @@ export default async function InventoryPage({
                         <>
                           <AdminRowEditor
                             productId={row.productId}
+                            stockProductId={row.stockProductIds.length === 1 ? row.stockProductIds[0] : null}
                             sku={row.sku}
                             productName={row.productName}
                             storedName={row.storedName}

@@ -53,6 +53,12 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
     canonicalSkuKey(product.sku) === targetKey || aliasKeysByProduct.get(product.id)?.has(targetKey)
   ));
   const productIds = matchedProducts.map((product) => product.id);
+  const { data: attempts, error: attemptError } = productIds.length
+    ? await supabase.from("audit_log").select("id,entity_id,created_at,details")
+      .eq("entity_type", "product").eq("action", "STOCK_EDIT_ATTEMPT")
+      .in("entity_id", productIds).order("created_at", { ascending: false })
+    : { data: [], error: null };
+  if (attemptError) throw new Error(attemptError.message);
   const { data: transactions, error: transactionError } = productIds.length
     ? await supabase
       .from("inventory_transactions")
@@ -86,6 +92,21 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
         <input id="sku" name="sku" defaultValue={requestedSku} className="min-w-0 flex-1 rounded border px-3 py-2" />
         <button className="rounded bg-slate-900 px-4 py-2 font-medium text-white">Trace SKU</button>
       </form>
+
+      <section className="mb-6 rounded border bg-white p-5 shadow-sm">
+        <h2 className="text-xl font-semibold">Stock edit attempts (including no changes)</h2>
+        <p className="mt-1 text-sm text-slate-600">These are audit records, not stock movements. They never add to or subtract from inventory.</p>
+        {(attempts ?? []).map((attempt) => {
+          const details = attempt.details as { actor_name?: string; displayed_qty?: number | null; current_qty?: number; requested_qty?: number; reason?: string; outcome?: string } | null;
+          return <article key={attempt.id} className="mt-3 rounded border p-3 text-sm">
+            <p>{displayDate(attempt.created_at)} · {details?.actor_name ?? "Admin"} · {details?.outcome ?? "Unknown"}</p>
+            <p>Displayed: {details?.displayed_qty ?? "unknown"} · Ledger: {details?.current_qty} · Requested: {details?.requested_qty}</p>
+            <p>{details?.reason}</p>
+            <p className="font-mono text-xs text-slate-500">Product ID: {attempt.entity_id}</p>
+          </article>;
+        })}
+        {!attempts?.length ? <p className="mt-3 text-sm text-slate-500">No recorded edit attempts. Earlier no-change attempts were not logged and cannot be reconstructed.</p> : null}
+      </section>
 
       <section className="rounded border bg-white p-5 shadow-sm">
         <h2 className="text-xl font-semibold">{requestedSku}</h2>

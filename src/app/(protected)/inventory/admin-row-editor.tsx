@@ -5,13 +5,14 @@ import { adjustProductStockAction, deleteUnusedProductAction, updateProductTitle
 
 type AdminRowEditorProps = {
   productId: string;
+  stockProductId: string | null;
   sku: string;
   productName: string;
   storedName: string;
   onFloor: number;
 };
 
-export function AdminRowEditor({ productId, sku, productName, storedName, onFloor }: AdminRowEditorProps) {
+export function AdminRowEditor({ productId, stockProductId, sku, productName, storedName, onFloor }: AdminRowEditorProps) {
   const [open, setOpen] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,7 +63,8 @@ export function AdminRowEditor({ productId, sku, productName, storedName, onFloo
             </form>
 
             <form action={adjustProductStockAction} className="mt-6 space-y-2 border-t border-[#e5e7eb] pt-5">
-              <input type="hidden" name="product_id" value={productId} />
+              <input type="hidden" name="product_id" value={stockProductId ?? ""} />
+              <input type="hidden" name="expected_on_floor_qty" value={onFloor} />
               <label className="label" htmlFor={`stock-${productId}`}>On floor quantity</label>
               <input
                 id={`stock-${productId}`}
@@ -82,7 +84,8 @@ export function AdminRowEditor({ productId, sku, productName, storedName, onFloo
                 required
               />
               <p className="text-xs text-[#6b7280]">Recorded as an adjustment against the current count of {onFloor}.</p>
-              <button type="submit" className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937]">
+              {!stockProductId ? <p role="alert" className="text-xs text-red-700">Stock has no single authoritative record. Editing is blocked to prevent changing the wrong ledger.</p> : null}
+              <button type="submit" disabled={!stockProductId} className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-50">
                 Save stock
               </button>
             </form>

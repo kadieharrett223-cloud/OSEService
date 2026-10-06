@@ -331,10 +331,26 @@ export async function adjustProductStockAction(formData: FormData) {
   }
 
   const current = (existing ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
+  const expectedRaw = String(formData.get("expected_on_floor_qty") ?? "").trim();
+  const expected = expectedRaw === "" ? NaN : Number(expectedRaw);
+  // Never apply a recount against a different ledger/count than the operator saw.
+  const outcome = !Number.isFinite(expected) || current !== expected ? "STALE_COUNT" : current === target ? "ALREADY_MATCHES" : "ADJUSTMENT_REQUESTED";
+  const { error: attemptError } = await supabase.from("audit_log").insert({
+    entity_type: "product",
+    entity_id: productId,
+    action: "STOCK_EDIT_ATTEMPT",
+    details: { actor_id: user.id, actor_name: user.fullName ?? "admin", displayed_qty: Number.isFinite(expected) ? expected : null, current_qty: current, requested_qty: target, reason: note, outcome },
+  });
+  if (attemptError) redirect(`/inventory?mapError=${encodeURIComponent(attemptError.message)}`);
+  if (outcome === "STALE_COUNT") {
+    revalidateInventoryReadModel();
+    redirect("/inventory?mapError=Stock+count+changed+or+the+editor+is+outdated.+Refresh+and+review+the+count+before+saving.+Attempt+recorded+in+audit.");
+  }
   const delta = target - current;
 
   if (delta === 0) {
-    redirect("/inventory?mapMessage=On+floor+quantity+already+matches");
+    revalidatePath("/inventory/audit");
+    redirect("/inventory?mapMessage=On+floor+quantity+already+matches.+No+stock+changed%3B+attempt+recorded+in+audit.");
   }
 
   const { error: insertError } = await supabase.from("inventory_transactions").insert({
@@ -346,6 +362,7 @@ export async function adjustProductStockAction(formData: FormData) {
     reason: `Manual adjustment by ${user.fullName ?? "admin"}: ${note}`,
     source_type: "ADJUSTMENT",
     source_event_key: `manual:${productId}:${Date.now()}`,
+    actor_id: user.id,
   });
 
   if (insertError) {

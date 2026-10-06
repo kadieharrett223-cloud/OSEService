@@ -362,7 +362,9 @@ export async function adjustProductStockAction(formData: FormData) {
     reason: `Manual adjustment by ${user.fullName ?? "admin"}: ${note}`,
     source_type: "ADJUSTMENT",
     source_event_key: `manual:${productId}:${Date.now()}`,
-    actor_id: user.id,
+    // Shared-code login generates a session UUID, not an access_users row.
+    // Preserve the operator in the reason and attempt audit, not this FK.
+    actor_id: null,
   });
 
   if (insertError) {

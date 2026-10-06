@@ -29,4 +29,12 @@ describe("stock editor identity and audit preservation", () => {
     expect(action.indexOf('from("inventory_transactions").insert')).toBeGreaterThan(action.indexOf("if (delta === 0)"));
     expect(source("src/app/(protected)/inventory/audit/page.tsx")).toContain('eq("action", "STOCK_EDIT_ATTEMPT")');
   });
+
+  it("does not send the synthetic shared-login session UUID to the stock actor foreign key", () => {
+    const action = source("src/app/(protected)/inventory/actions.ts").split("export async function adjustProductStockAction")[1].split("export async function moveCustomerQueuePositionAction")[0];
+    const movement = action.split('from("inventory_transactions").insert')[1];
+    expect(movement).toContain("actor_id: null");
+    expect(movement).not.toContain("actor_id: user.id");
+    expect(action).toContain("actor_name: user.fullName");
+  });
 });

@@ -8,6 +8,7 @@ import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/o
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { unstable_cache } from "next/cache";
+import { fetchQueuePages } from "./queue-query-pages";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -67,15 +68,7 @@ const customerName = (line: CanonicalQueueLine) => line.shipping_orders?.qbo_inv
   ?? line.shipping_orders?.legacy_customer_name
   ?? "Customer pending";
 
-async function fetchAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
-  const rows: T[] = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await fetchPage(from, from + 999);
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if ((data ?? []).length < 1000) return rows;
-  }
-}
+const fetchAll = fetchQueuePages;
 
 async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
   const batches = Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) => ids.slice(index * 100, index * 100 + 100));
@@ -90,11 +83,11 @@ async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseL
 async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonicalCustomerQueue> {
   const supabase = getSupabaseAdmin();
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows, archivedIdentityBySourceRecordId] = await Promise.all([
-    fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").range(from, to)),
-    fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").range(from, to)),
-    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,queue_position_override_at,queue_position_override_by,legacy_item_code,qbo_invoice_line_id,source_record_id,qbo_invoice_lines(qbo_line_id,qbo_sku),shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").range(from, to)),
-    fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").range(from, to)),
-    fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").range(from, to)),
+    fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").order("id", { ascending: true }).range(from, to)),
+    fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").order("id", { ascending: true }).range(from, to)),
+    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,queue_position_override_at,queue_position_override_by,legacy_item_code,qbo_invoice_line_id,source_record_id,qbo_invoice_lines(qbo_line_id,qbo_sku),shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").order("id", { ascending: true }).range(from, to)),
+    fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").order("id", { ascending: true }).range(from, to)),
+    fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").order("id", { ascending: true }).range(from, to)),
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
     getCachedOldErpProductIdentityBySourceRecordId(),
   ]);

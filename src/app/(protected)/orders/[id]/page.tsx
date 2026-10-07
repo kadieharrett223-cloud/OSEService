@@ -16,7 +16,7 @@ import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { isAlwaysNonInventoryQuickbooksLine, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
-import { getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { canonicalInvoiceDisplayLineIds, getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
@@ -526,7 +526,7 @@ function getQuickbooksLineDescriptions(rawPayload: unknown) {
 }
 
 function parseQuickbooksInvoiceItems(rawPayload: unknown) {
-  if (!rawPayload || typeof rawPayload !== "object") return [] as Array<{ sku: string | null; description: string; qty: number; amount: number | null; isNonInventory: boolean }>;
+  if (!rawPayload || typeof rawPayload !== "object") return [] as Array<{ qboLineId: string | null; sku: string | null; description: string; qty: number; amount: number | null; isNonInventory: boolean }>;
 
   const payload = rawPayload as { Line?: unknown[] };
   const lines = Array.isArray(payload.Line) ? payload.Line : [];
@@ -536,6 +536,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       if (!line || typeof line !== "object") return null;
 
       const item = line as {
+        Id?: unknown;
         DetailType?: unknown;
         Description?: unknown;
         Qty?: unknown;
@@ -569,6 +570,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       if (!isNonInventory && hasExplicitQty && Number.isFinite(qty) && qty <= 0) return null;
 
       return {
+        qboLineId: item.Id == null ? null : String(item.Id).trim() || null,
         sku,
         description,
         qty: Number.isFinite(qty) && qty > 0 ? qty : (isNonInventory ? 0 : 1),
@@ -1352,7 +1354,10 @@ export default async function OrderDetailPage({
     return bestCanonicalLineMatch(skuKey, description);
   };
 
+  const canonicalDisplayLineIds = canonicalInvoiceDisplayLineIds(quickbooksSnapshot?.raw_payload, operationalLines);
+  const operationalLineById = new Map(operationalLines.map((line) => [line.id, line]));
   const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
+    qboLineId: null,
     sku: line.products?.sku ?? null,
     description: line.products?.canonical_name ?? line.products?.sku ?? "Line item",
     qty: Number(line.ordered_qty ?? 0),
@@ -1364,12 +1369,16 @@ export default async function OrderDetailPage({
     const resolvedProduct = skuKeys.map((key) => productMap.get(key)).find(Boolean) ?? (skuKey ? productMap.get(skuKey) ?? null : null);
     // Invoice SKUs are model codes while order lines often carry old-ERP numbers, so fall back to
     // the resolved product before giving up on finding the operational line.
-    const shippingLine = skuKey
+    // Exact invoice-line identity must win over a stale OLD_ERP sibling with the same SKU.
+    // Reuse the totals' evidence resolver so shipped items cannot reappear as waiting demand.
+    const canonicalDisplayLineId = item.qboLineId ? canonicalDisplayLineIds.get(item.qboLineId) : null;
+    const canonicalDisplayLine = canonicalDisplayLineId ? operationalLineById.get(canonicalDisplayLineId) : null;
+    const shippingLine = canonicalDisplayLine ?? (skuKey
       ? skuKeys.map((key) => lineForInvoiceSku(key, item.description)).find(Boolean)
         ?? lineForInvoiceSku(skuKey, item.description)
         ?? operationalLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
         ?? null
-      : item.description === "Invoice line" ? null : orderLines[index] ?? null;
+      : item.description === "Invoice line" ? null : orderLines[index] ?? null);
     // A saved alias can be useful for a genuine historical Misc Charge item,
     // but it must not make a documented accounting-only adjustment look like
     // product demand.  The same strict classifier drives QBO intake and the

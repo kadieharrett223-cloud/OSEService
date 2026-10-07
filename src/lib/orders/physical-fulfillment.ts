@@ -212,6 +212,13 @@ export function prioritizePhysicalFulfillmentLine(left: PhysicalFulfillmentLine,
   return (left.id ?? "").localeCompare(right.id ?? "") < 0 ? -1 : 1;
 }
 
+/** Display the same exact obligation/evidence that drives the order totals, not a SKU-first sibling. */
+export function canonicalInvoiceDisplayLineIds(rawPayload: unknown, lines: PhysicalFulfillmentLine[]) {
+  return new Map(getCanonicalPhysicalOrderSummary({ rawPayload, lines }).items
+    .filter((item) => Boolean(item.line?.id))
+    .map((item) => [item.key, item.line!.id!]));
+}
+
 export function getCanonicalPhysicalOrderSummary({
   rawPayload,
   lines,

@@ -28,6 +28,7 @@ export function isInventoryDemandQuickbooksLine(line: { qbo_sku?: string | null;
     // Without that mapping we remain conservative and keep accounting rows
     // outside the queue.
     && !isAlwaysNonInventoryQuickbooksLine(line)
+    && !/^(?:service|install(?:ation)?|inspection)(?:\s*\(deleted[^)]*\))?$/.test(sku)
     && (hasExactProductMapping || !isNonInventoryQuickbooksLine(line))
     && !/^misc(?:ellaneous)?\s+charge\b/.test(sku);
 }

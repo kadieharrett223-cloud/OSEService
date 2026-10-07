@@ -17,8 +17,9 @@ import {
   getQuickbooksConnectionStatus,
 } from "@/lib/quickbooks/integration";
 import { SyncInvoicesButton } from "@/app/(protected)/settings/sync-invoices-button";
+import { compareQboReviewPriority, formatQboReviewPriority, qboReviewPriority, type QboReviewPriorityRow } from "@/lib/orders/qbo-review-priority";
 
-type QboBacklogReview = {
+type QboBacklogReview = QboReviewPriorityRow & {
   invoice_number: string | null;
   customer_name: string | null;
   qbo_sku: string | null;
@@ -101,7 +102,7 @@ export default async function SettingsPage({
       .select("id", { count: "exact", head: true }),
     supabase
       .from("qbo_backlog_import_reviews")
-      .select("invoice_number, customer_name, qbo_sku, source_description, quantity, first_payment_at")
+      .select("id, invoice_number, customer_name, qbo_sku, source_description, quantity, first_payment_at, qbo_invoice_lines(qbo_invoices(invoice_date))")
       .eq("status", "OPEN")
       .order("first_payment_at", { ascending: true }),
     (supabase.from("qbo_forward_intake_state") as any)
@@ -114,7 +115,7 @@ export default async function SettingsPage({
   const connectedRow = quickbooksStatus.connection;
   const hasSnapshots = (quickbooksSnapshotCount ?? 0) > 0;
   const isConnected = quickbooksTableMissing ? hasSnapshots : Boolean(connectedRow);
-  const openQboBacklogReviews = (qboBacklogReviews ?? []) as unknown as QboBacklogReview[];
+  const openQboBacklogReviews = ((qboBacklogReviews ?? []) as unknown as QboBacklogReview[]).sort(compareQboReviewPriority);
   const qboForwardIntakeEnabled = Boolean((qboForwardIntakeState as QboForwardIntakeState | null)?.is_enabled);
 
   return (
@@ -250,8 +251,8 @@ export default async function SettingsPage({
       <section className="card p-4 overflow-x-auto">
         <h2 className="text-xl">QBO Manual-Duplicate Review</h2>
         <table className="mt-3 w-full min-w-[760px] text-left text-sm">
-          <thead><tr className="border-b border-[#ececec] text-[#5a5a5a]"><th className="px-2 py-2">Invoice</th><th className="px-2 py-2">Customer</th><th className="px-2 py-2">SKU / Description</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">First Paid</th></tr></thead>
-          <tbody>{openQboBacklogReviews.map((review) => <tr key={`${review.invoice_number}-${review.qbo_sku}`} className="border-b border-[#f1f5f9]"><td className="px-2 py-2">{review.invoice_number ?? "—"}</td><td className="px-2 py-2">{review.customer_name ?? "—"}</td><td className="px-2 py-2">{review.qbo_sku ?? "—"}<div className="text-xs text-[#5a5a5a]">{review.source_description ?? ""}</div></td><td className="px-2 py-2">{review.quantity}</td><td className="px-2 py-2">{review.first_payment_at ? new Date(review.first_payment_at).toLocaleString() : "Payment date unavailable"}</td></tr>)}</tbody>
+          <thead><tr className="border-b border-[#ececec] text-[#5a5a5a]"><th className="px-2 py-2">Invoice</th><th className="px-2 py-2">Customer</th><th className="px-2 py-2">SKU / Description</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Priority Date</th></tr></thead>
+          <tbody>{openQboBacklogReviews.map((review) => <tr key={review.id} className="border-b border-[#f1f5f9]"><td className="px-2 py-2">{review.invoice_number ?? "—"}</td><td className="px-2 py-2">{review.customer_name ?? "—"}</td><td className="px-2 py-2">{review.qbo_sku ?? "—"}<div className="text-xs text-[#5a5a5a]">{review.source_description ?? ""}</div></td><td className="px-2 py-2">{review.quantity}</td><td className="px-2 py-2">{formatQboReviewPriority(review)}<div className="text-xs text-[#5a5a5a]">{qboReviewPriority(review).source}</div></td></tr>)}</tbody>
         </table>
         {!qboBacklogReviews?.length ? <p className="mt-3 text-sm text-[#5a5a5a]">No manual duplicate reviews are open.</p> : null}
       </section>

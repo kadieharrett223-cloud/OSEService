@@ -2,7 +2,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { buildSafeQboProductIdByAlias, liveQuickBooksLineQuantities, qboSkuCandidates } from "./quickbooks-refresh";
 import { classifyQboForwardIntakeLine, isInventoryDemandQuickbooksLine, type QboForwardIntakeDecision } from "./qbo-forward-intake";
-import { isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
+import { canonicalProductSkuKey, isUnsafeGlobalProductAlias } from "@/lib/products/canonical-sku";
 import { isWithinAutomaticQboIntake, qboIntakePriorityDate } from "./qbo-intake-policy";
 
 const PAID_STATUSES = new Set(["Paid", "Partially Paid"]);
@@ -94,7 +94,7 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
     fetchAllRows<InvoiceLine>((from, to) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,source_description,ordered_qty,product_id").order("id").range(from, to)),
     fetchAllRows<Order>((from, to) => supabase.from("shipping_orders").select("id,source_invoice_id,duplicate_of_order_id,cancellation_status,review_status,order_number,customer_id,legacy_customer_name,customers(company_name,full_name)").order("id").range(from, to) as unknown as PromiseLike<{ data: Order[] | null; error: { message: string } | null }>),
     fetchAllRows<OrderLine>((from, to) => supabase.from("shipping_order_lines").select("shipping_order_id,qbo_invoice_line_id,product_id,ordered_qty,fulfilled_qty,fulfillment_status").order("id").range(from, to)),
-    fetchAllRows<{ id: string; sku: string | null }>((from, to) => supabase.from("products").select("id,sku").order("id").range(from, to)),
+    fetchAllRows<{ id: string; sku: string | null; canonical_name?: string | null }>((from, to) => supabase.from("products").select("id,sku,canonical_name").order("id").range(from, to)),
     fetchAllRows<{ product_id: string; alias: string | null }>((from, to) => supabase.from("product_aliases").select("product_id,alias").order("id").range(from, to)),
     fetchAllRows<{ qbo_invoice_line_id: string | null; status: string | null }>((from, to) => supabase.from("reviewed_obligation_resolutions").select("qbo_invoice_line_id,status").order("id").range(from, to)),
   ]);
@@ -103,7 +103,7 @@ export async function previewQboForwardIntake(firstPaymentByQboInvoiceId: Map<st
 
 export type QboForwardIntakeSnapshot = {
   invoices: Invoice[]; invoiceLines: InvoiceLine[]; orders: Order[]; orderLines: OrderLine[];
-  products: Array<{ id: string; sku: string | null }>;
+  products: Array<{ id: string; sku: string | null; canonical_name?: string | null }>;
   aliases: Array<{ product_id: string; alias: string | null }>;
   resolutions: Array<{ qbo_invoice_line_id: string | null; status: string | null }>;
 };
@@ -121,6 +121,7 @@ export function buildQboForwardIntakePreview(
   for (const line of invoiceLines) linesByInvoice.set(line.qbo_invoice_id, [...(linesByInvoice.get(line.qbo_invoice_id) ?? []), line]);
   const sourceLineById = new Map(invoiceLines.map((line) => [line.id, line]));
   const productSkuById = new Map(products.map((product) => [product.id, product.sku]));
+  const productKeyById = new Map(products.map((product) => [product.id, canonicalProductSkuKey(product.sku, [], product.canonical_name)]));
   const exactOrderLineIds = new Set(orderLines.flatMap((line) => line.qbo_invoice_line_id ? [line.qbo_invoice_line_id] : []));
   const activeResolutionIds = new Set(resolutions.filter((row) => normalized(row.status) === "ACTIVE" && row.qbo_invoice_line_id).map((row) => String(row.qbo_invoice_line_id)));
   const eligibleInvoices = invoices.filter((invoice) => {
@@ -155,12 +156,23 @@ export function buildQboForwardIntakePreview(
       const unmatchedParentLines = parentLines.filter((orderLine) => !orderLine.qbo_invoice_line_id
         && Number(orderLine.ordered_qty ?? 0) === Number(line.ordered_qty ?? 0));
       const hasUnlinkedRepresentation = unmatchedParentLines.some((orderLine) => !orderLine.product_id || orderLine.product_id === productId);
+      // A lift accidentally linked to the motor's QBO identity still exists
+      // as lift demand. Do not create another lift while repairing that
+      // source-link conflict. Correct same-product siblings remain distinct.
+      const hasMislinkedRepresentation = Boolean(productId) && parentLines.some((orderLine) => {
+        if (!orderLine.product_id || !orderLine.qbo_invoice_line_id || orderLine.qbo_invoice_line_id === line.id
+          || Number(orderLine.ordered_qty ?? 0) !== Number(line.ordered_qty ?? 0)
+          || productKeyById.get(orderLine.product_id) !== productKeyById.get(productId!)) return false;
+        const source = sourceLineById.get(orderLine.qbo_invoice_line_id);
+        const sourceProductId = source?.product_id ?? qboSkuCandidates(source?.qbo_sku).map((sku) => productIdBySku.get(normalized(sku))).find(Boolean);
+        return Boolean(sourceProductId) && productKeyById.get(sourceProductId!) !== productKeyById.get(productId!);
+      });
       const manualMatch = Boolean(productId) && orders.some((candidate) => candidate.source_invoice_id !== invoice.id && !candidate.duplicate_of_order_id && candidate.order_number && normalized(candidate.order_number) === normalized(invoice.invoice_number) && sameKnownCustomer(candidate, invoice) && orderLines.some((orderLine) => orderLine.shipping_order_id === candidate.id && orderLine.product_id === productId && Number(orderLine.ordered_qty ?? 0) === Number(line.ordered_qty ?? 0)));
       const terminal = invoiceClosed || (liveQuantities !== null && !liveQuantities.has(String(line.qbo_line_id)))
         || activeResolutionIds.has(line.id) || orderLines.some((orderLine) => orderLine.qbo_invoice_line_id === line.id && (CLOSED_STATUSES.has(normalized(orderLine.fulfillment_status)) || Number(orderLine.fulfilled_qty ?? 0) >= Number(orderLine.ordered_qty ?? 0)));
       const liveQuantityMismatch = liveQuantities !== null && liveQuantities.has(String(line.qbo_line_id))
         && liveQuantities.get(String(line.qbo_line_id)) !== Number(line.ordered_qty ?? 0);
-      return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine({ ...line, product_id: productId }), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch || hasUnlinkedRepresentation || canonicalParents.length > 1 || parentRequiresReview, hasConflictingSkuIdentity: liveQuantityMismatch || (unmatchedParentLines.length > 0 && !hasUnlinkedRepresentation) }) };
+      return { qboInvoiceLineId: line.id, sku: line.qbo_sku, quantity: Number(line.ordered_qty ?? 0), productId, decision: classifyQboForwardIntakeLine({ isPaymentEligible: true, isInventoryDemandLine: isInventoryDemandQuickbooksLine({ ...line, product_id: productId }), hasExactExistingLine: exactOrderLineIds.has(line.id), hasTerminalOrReviewedResolution: terminal, hasMappedProduct: Boolean(productId), hasPossibleManualDuplicate: manualMatch || hasUnlinkedRepresentation || hasMislinkedRepresentation || canonicalParents.length > 1 || parentRequiresReview, hasConflictingSkuIdentity: liveQuantityMismatch || (unmatchedParentLines.length > 0 && !hasUnlinkedRepresentation) }) };
     });
     const decision = summarizeQboInvoiceIntake(lines.map((line) => line.decision));
     return { qboInvoiceId: invoice.id, invoiceNumber: invoice.invoice_number, customerName: customerName(invoice), firstPaymentAt, invoiceDate: invoice.invoice_date, priorityDate, priorityDateSource: firstPaymentAt ? "FIRST_PAYMENT" as const : "INVOICE_DATE" as const, decision, lines };

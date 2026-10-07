@@ -76,6 +76,20 @@ describe("exact-source forward intake", () => {
     s.resolutions.push({ qbo_invoice_line_id: "missing-line", status: "ACTIVE" });
     expect(decision(s)).toBe("CLOSED");
   });
+  it("does not duplicate demand whose order line was linked to a different QBO item", () => {
+    const s = snapshot();
+    s.orderLines[0]!.product_id = "drain"; // drain incorrectly linked to lift-line
+    expect(decision(s)).toBe("MANUAL_DUPLICATE_REVIEW");
+    s.products.push({ id: "legacy-drain", sku: "000082", canonical_name: "OD-3198A" });
+    s.orderLines[0]!.product_id = "legacy-drain";
+    expect(decision(s)).toBe("MANUAL_DUPLICATE_REVIEW");
+  });
+  it("does not collapse distinct same-product QBO lines", () => {
+    const s = snapshot();
+    s.invoiceLines[1]!.product_id = "lift";
+    s.invoiceLines[1]!.qbo_sku = "4PC-6";
+    expect(decision(s)).toBe("AUTO_IMPORT");
+  });
   it("does not confuse two unknown customers who share a printed invoice number", () => {
     const s = snapshot();
     s.invoices[0]!.customer_id = null;

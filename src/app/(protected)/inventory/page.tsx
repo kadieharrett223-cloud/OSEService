@@ -939,6 +939,7 @@ export default async function InventoryPage({
                           />
                           <Link
                             href={`/inventory/audit?sku=${encodeURIComponent(row.sku)}`}
+                            prefetch={false}
                             className="mt-2 inline-flex rounded border border-[#bfdbfe] bg-[#eff6ff] px-2 py-1 text-xs font-semibold text-[#1d4ed8] hover:bg-[#dbeafe]"
                           >
                             Audit

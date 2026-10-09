@@ -8,7 +8,7 @@ import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/o
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { unstable_cache } from "next/cache";
-import { fetchQueuePages } from "./queue-query-pages";
+import { createQueueReadPool, fetchQueuePages } from "./queue-query-pages";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -68,8 +68,6 @@ const customerName = (line: CanonicalQueueLine) => line.shipping_orders?.qbo_inv
   ?? line.shipping_orders?.legacy_customer_name
   ?? "Customer pending";
 
-const fetchAll = fetchQueuePages;
-
 async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
   const batches = Array.from({ length: Math.ceil(ids.length / 100) }, (_, index) => ids.slice(index * 100, index * 100 + 100));
   return (await Promise.all(batches.map(async (batch) => {
@@ -82,6 +80,11 @@ async function fetchByIds<T>(ids: string[], fetch: (batch: string[]) => PromiseL
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonicalCustomerQueue> {
   const supabase = getSupabaseAdmin();
+  const read = createQueueReadPool(4);
+  const fetchAll = <T,>(fetch: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>) =>
+    fetchQueuePages((from, to) => read(() => fetch(from, to)), 3);
+  const fetchIds = <T,>(ids: string[], fetch: (batch: string[]) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) =>
+    fetchByIds(ids, (batch) => read(() => fetch(batch)));
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows, archivedIdentityBySourceRecordId] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").order("id", { ascending: true }).range(from, to)),
     fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").order("id", { ascending: true }).range(from, to)),
@@ -113,10 +116,10 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
   const sourceInvoiceIds = [...new Set(queueLines.map((line) => line.shipping_orders?.source_invoice_id).filter((value): value is string => Boolean(value)))];
   const orderNumbers = [...new Set(queueLines.map((line) => line.shipping_orders?.order_number).filter((value): value is string => Boolean(value)))];
   const [qboInvoices, qboLines, qboParents, sourceOrders] = await Promise.all([
-    fetchByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids)),
-    fetchByIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids)),
-    fetchByIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select("id,order_number,source_invoice_id,duplicate_of_order_id,cancellation_status,qbo_invoices(raw_payload,customers(company_name,full_name)),customers(company_name,full_name)").in("order_number", numbers).eq("source_type", "QBO_INVOICE")),
-    fetchByIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select("source_invoice_id,review_status,duplicate_of_order_id,cancellation_status").in("source_invoice_id", ids)),
+    fetchIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoices").select("id,raw_payload").in("id", ids)),
+    fetchIds(sourceInvoiceIds, (ids) => supabase.from("qbo_invoice_lines").select("id,qbo_invoice_id,qbo_line_id,qbo_sku,product_id,ordered_qty").in("qbo_invoice_id", ids)),
+    fetchIds(orderNumbers, (numbers) => supabase.from("shipping_orders").select("id,order_number,source_invoice_id,duplicate_of_order_id,cancellation_status,qbo_invoices(raw_payload,customers(company_name,full_name)),customers(company_name,full_name)").in("order_number", numbers).eq("source_type", "QBO_INVOICE")),
+    fetchIds(sourceInvoiceIds, (ids) => supabase.from("shipping_orders").select("source_invoice_id,review_status,duplicate_of_order_id,cancellation_status").in("source_invoice_id", ids)),
   ]);
   const payloadByInvoiceId = new Map((qboInvoices as Array<{ id: string; raw_payload: { PrivateNote?: string | null; Line?: unknown[] } | null }>).map((invoice) => [invoice.id, invoice.raw_payload]));
   const allQboLines = qboLines as CanonicalQboInvoiceLine[];

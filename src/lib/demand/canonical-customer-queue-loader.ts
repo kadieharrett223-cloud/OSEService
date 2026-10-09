@@ -9,6 +9,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
 import { unstable_cache } from "next/cache";
 import { createQueueReadPool, fetchQueuePages } from "./queue-query-pages";
+import { decodeQueueCache, encodeQueueCache } from "./queue-cache-codec";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -296,19 +297,20 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
 // read-only cache: it improves repeated page loads without becoming a source of inventory
 // truth. Write paths below always ask for a fresh projection before persisting positions.
 const getCachedCanonicalCustomerQueue = unstable_cache(
-  loadCanonicalCustomerQueueFromDatabase,
+  async () => encodeQueueCache(await loadCanonicalCustomerQueueFromDatabase()),
   // Version this key when the read-model's identity rules change.  Vercel's
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v3"],
+  ["canonical-customer-queue-read-model-v4-lossless"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 
 /** Loads the exact canonical Customer List population used for display. This function is read-only. */
 export async function loadCanonicalCustomerQueue(options?: { fresh?: boolean }): Promise<CanonicalCustomerQueueLoaderResult> {
-  const loader = options?.fresh ? loadCanonicalCustomerQueueFromDatabase : getCachedCanonicalCustomerQueue;
-  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueEntryBySourceLineId, lineProductIdEntries } = await loader();
+  const { queue, canonicalLines, qboInvoiceLines, manualMappingSkus, queueEntryBySourceLineId, lineProductIdEntries } = options?.fresh
+    ? await loadCanonicalCustomerQueueFromDatabase()
+    : await decodeQueueCache<CachedCanonicalCustomerQueue>(await getCachedCanonicalCustomerQueue());
   const lineProductIdByLineId = new Map(lineProductIdEntries);
   const queueByLineId = new Map(queueEntryBySourceLineId);
   const queueByLogicalDemandKey = new Map(queue.map((row) => [row.logicalDemandKey, row]));

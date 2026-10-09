@@ -192,14 +192,13 @@ export async function unlockInventoryAdminAction(formData: FormData) {
   }
 
   await unlockAdminForUser(user.id);
-  revalidateInventoryReadModel();
+  // Cookie changes refresh this user's UI; no inventory data changed.
   redirect("/inventory?mapMessage=Admin+mode+enabled");
 }
 
 export async function lockInventoryAdminAction() {
   await requireUser();
   await clearAdminUnlock();
-  revalidateInventoryReadModel();
   redirect("/inventory?mapMessage=Admin+mode+turned+off");
 }
 

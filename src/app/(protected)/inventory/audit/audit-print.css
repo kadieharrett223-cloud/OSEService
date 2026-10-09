@@ -1,0 +1,12 @@
+@media print {
+  @page { size: landscape; margin: 12mm; }
+  body { background: white !important; }
+  body:has(.inventory-audit-report) aside, body:has(.inventory-audit-report) header, body:has(.inventory-audit-report) nav, .inventory-audit-report .audit-controls { display: none !important; }
+  body:has(.inventory-audit-report) div.md\:grid-cols-\[264px_1fr\] { display: block !important; }
+  .inventory-audit-report { padding: 0 !important; max-width: none !important; }
+  .inventory-audit-report table { font-size: 9pt !important; }
+  .inventory-audit-report thead { display: table-header-group; }
+  .inventory-audit-report tr, .audit-attempt { break-inside: avoid; }
+  .inventory-audit-report .overflow-x-auto { overflow: visible !important; }
+  .inventory-audit-report .shadow-sm { box-shadow: none !important; }
+}

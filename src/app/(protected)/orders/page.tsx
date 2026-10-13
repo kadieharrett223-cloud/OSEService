@@ -11,6 +11,7 @@ import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projec
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { OrdersBrowser } from "./orders-browser";
+import { recommendWarehouseOrderIds } from "@/lib/orders/warehouse-recommendations";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -97,6 +98,7 @@ type ProjectedOrderRow = {
   remainingStatus: string;
   tabs: string[];
   recommendedForWarehouse: boolean;
+  quickbooksInvoiceDate: string | null;
 };
 
 function buildOrdersSelect(includeDuplicateField: boolean) {
@@ -294,8 +296,27 @@ async function getOrdersDatasetFromDatabase() {
         ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
       ].filter(Boolean).join(" ").toLowerCase();
       const fullyCoveredByWarehouse = remainingQty > 0 && canonicalSummary.items.every(({ line, remaining }) => remaining <= 0 || Boolean(line?.id && (coverageByLineId.get(line.id)?.warehouseQty ?? 0) >= remaining));
-      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs, recommendedForWarehouse: classification.isNewOrder && fullyCoveredByWarehouse };
+      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, quickbooksInvoiceDate: order.qbo_invoices?.invoice_date ?? null, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs, recommendedForWarehouse: classification.isNewOrder && fullyCoveredByWarehouse };
     });
+    const eligibleIds = new Set(projectedOrders.filter((order) => order.recommendedForWarehouse).map((order) => order.id));
+    const reservedQuantityByProduct = new Map<string, number>();
+    for (const [productId, lines] of queueLinesByProduct) {
+      reservedQuantityByProduct.set(productId, lines.reduce((sum, line) => sum + Number(line.warehouse_reserved_qty ?? 0), 0));
+    }
+    const recommendedIds = new Set(recommendWarehouseOrderIds({
+      candidates: allOrders.filter((order) => eligibleIds.has(order.id)).map((order) => ({
+        id: order.id,
+        createdAt: order.created_at,
+        quickbooksInvoiceDate: order.qbo_invoices?.invoice_date,
+        requirements: getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines }).items
+          .filter((item) => item.remaining > 0 && item.line?.product_id)
+          .map((item) => ({ productId: item.line!.product_id!, quantity: item.remaining })),
+      })),
+      floorQuantityByProduct,
+      reservedQuantityByProduct,
+      limit: 10,
+    }));
+    for (const order of projectedOrders) order.recommendedForWarehouse = recommendedIds.has(order.id);
     const tabCounts = {
       orders: projectedOrders.filter((order) => order.tabs.includes("orders")).length,
       new: projectedOrders.filter((order) => order.tabs.includes("new")).length,
@@ -313,7 +334,7 @@ async function getOrdersDatasetFromDatabase() {
 // orders route, and the source records remain the sole inventory and fulfillment authority.
 const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
-  ["orders-list-read-model"],
+  ["orders-list-read-model-v2-oldest-warehouse"],
   { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG] },
 );
 

@@ -5,6 +5,15 @@ export type WarehouseRecommendationCandidate = {
   requirements: Array<{ productId: string; quantity: number }>;
 };
 
+export function compareWarehouseOrderAge(left: { id: string; createdAt: string; quickbooksInvoiceDate?: string | null }, right: { id: string; createdAt: string; quickbooksInvoiceDate?: string | null }) {
+  const timestamp = (order: typeof left) => {
+    const invoiceDate = Date.parse(order.quickbooksInvoiceDate ?? "");
+    const createdAt = Date.parse(order.createdAt);
+    return Number.isFinite(invoiceDate) ? invoiceDate : Number.isFinite(createdAt) ? createdAt : Number.MAX_SAFE_INTEGER;
+  };
+  return timestamp(left) - timestamp(right) || left.id.localeCompare(right.id);
+}
+
 export function recommendWarehouseOrderIds({
   candidates,
   floorQuantityByProduct,
@@ -22,11 +31,7 @@ export function recommendWarehouseOrderIds({
   }
 
   const recommended: string[] = [];
-  const oldestFirst = candidates.slice().sort((left, right) => {
-    const leftOrderDate = Date.parse(left.quickbooksInvoiceDate ?? left.createdAt) || Number.MAX_SAFE_INTEGER;
-    const rightOrderDate = Date.parse(right.quickbooksInvoiceDate ?? right.createdAt) || Number.MAX_SAFE_INTEGER;
-    return leftOrderDate - rightOrderDate || left.id.localeCompare(right.id);
-  });
+  const oldestFirst = candidates.slice().sort(compareWarehouseOrderAge);
 
   for (const candidate of oldestFirst) {
     if (recommended.length >= limit || candidate.requirements.length === 0) continue;

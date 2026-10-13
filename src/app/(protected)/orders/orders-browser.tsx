@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { compareWarehouseOrderAge } from "@/lib/orders/warehouse-recommendations";
 import { moveOrderToWarehouseAction } from "./actions";
 import { getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
 import { sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
@@ -11,6 +13,7 @@ export type OrdersBrowserRow = {
   invoiceNumber: string;
   customerName: string;
   createdAt: string;
+  quickbooksInvoiceDate?: string | null;
   updatedAt: string;
   searchable: string;
   hasPhysicalLines: boolean;
@@ -36,6 +39,11 @@ const tabs = [
 
 const pageSize = 100;
 
+function MoveToWarehouseButton() {
+  const { pending } = useFormStatus();
+  return <button type="submit" disabled={pending} className="btn-primary inline-flex text-xs disabled:opacity-50" aria-live="polite">{pending ? "Moving…" : "Move to Warehouse"}</button>;
+}
+
 function formatDate(value: string) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? "Unknown" : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -54,7 +62,7 @@ export function OrdersBrowser({ rows, tabCounts, initialTab, initialPage, search
   const globalSearchIds = useMemo(() => new Set(globalSearchResults.map((order) => order.id)), [globalSearchResults]);
   const matchingOrders = useMemo(() => rows.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchIds.has(order.id))), [rows, activeTab, searchText, globalSearchIds]);
   const filteredOrders = useMemo(() => activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders, [activeTab, matchingOrders]);
-  const recommendedOrders = useMemo(() => activeTab === "warehouse" ? rows.filter((order) => order.recommendedForWarehouse && (!searchText || globalSearchIds.has(order.id))) : [], [activeTab, rows, searchText, globalSearchIds]);
+  const recommendedOrders = useMemo(() => activeTab === "warehouse" ? rows.filter((order) => order.recommendedForWarehouse && (!searchText || globalSearchIds.has(order.id))).sort(compareWarehouseOrderAge).slice(0, 10) : [], [activeTab, rows, searchText, globalSearchIds]);
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
   const orderSummaries = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -99,8 +107,8 @@ export function OrdersBrowser({ rows, tabCounts, initialTab, initialPage, search
           <td className="px-3 py-3 font-semibold text-[#0f766e]">{order.hasPhysicalLines ? `${order.shippedQty} of ${order.totalQty}` : "—"}</td>
           <td className="px-3 py-3 font-semibold text-[#b45309]">{order.hasPhysicalLines ? order.remainingQty : "—"}</td>
           <td className="px-3 py-3 font-semibold text-[#334155]">{order.hasPhysicalLines ? order.remainingStatus : "No physical fulfillment"}</td>
-          <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.createdAt)}</td>
-          <td className="px-3 py-3 text-right"><div className="flex justify-end gap-2"><Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>{(activeTab === "new" || showRecommendedBadge) && order.hasPhysicalLines ? <form action={moveOrderToWarehouseAction}><input type="hidden" name="orderId" value={order.id} /><button type="submit" className="btn-primary inline-flex text-xs">Move to Warehouse</button></form> : null}</div></td>
+          <td className="px-3 py-3 text-xs text-[#475569]">{formatDate(order.quickbooksInvoiceDate ?? order.createdAt)}</td>
+          <td className="px-3 py-3 text-right"><div className="flex justify-end gap-2"><Link href={`/orders/${order.id}`} className="btn-secondary inline-flex text-xs">View</Link>{(activeTab === "new" || showRecommendedBadge) && order.hasPhysicalLines ? <form action={moveOrderToWarehouseAction}><input type="hidden" name="orderId" value={order.id} /><MoveToWarehouseButton /></form> : null}</div></td>
         </tr>)}</tbody>
       </table>
     </div>

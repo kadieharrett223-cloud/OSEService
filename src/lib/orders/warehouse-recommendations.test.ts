@@ -1,7 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { recommendWarehouseOrderIds } from "./warehouse-recommendations";
+import { compareWarehouseOrderAge, recommendWarehouseOrderIds } from "./warehouse-recommendations";
 
 describe("warehouse recommendations", () => {
+  it("caps recommendations at ten and ignores newest-first input/import timestamps", () => {
+    const candidates = Array.from({ length: 15 }, (_, index) => ({
+      id: String(index).padStart(2, "0"), createdAt: "2026-10-13",
+      quickbooksInvoiceDate: `2026-04-${String(index + 1).padStart(2, "0")}`,
+      requirements: [{ productId: "lift", quantity: 1 }],
+    })).reverse();
+    const floor = new Map([["lift", 20]]);
+    const reserved = new Map([["lift", 2]]);
+    expect(recommendWarehouseOrderIds({ candidates, floorQuantityByProduct: floor, reservedQuantityByProduct: reserved }))
+      .toEqual(["00", "01", "02", "03", "04", "05", "06", "07", "08", "09"]);
+    expect(floor.get("lift")).toBe(20);
+    expect(reserved.get("lift")).toBe(2);
+    expect(candidates[0].id).toBe("14");
+  });
+
+  it("falls back to creation date when the invoice date is invalid and uses a stable tie-break", () => {
+    const rows = [
+      { id: "z", createdAt: "2026-01-01", quickbooksInvoiceDate: "invalid" },
+      { id: "a", createdAt: "2026-01-02", quickbooksInvoiceDate: "2026-01-01" },
+      { id: "new", createdAt: "2026-10-13", quickbooksInvoiceDate: null },
+    ];
+    expect(rows.sort(compareWarehouseOrderAge).map((row) => row.id)).toEqual(["a", "z", "new"]);
+  });
+
   it("selects up to ten complete unreserved orders by oldest date without overcommitting floor stock", () => {
     const recommended = recommendWarehouseOrderIds({
       candidates: [

@@ -18,6 +18,7 @@ import { getOrderCancellationPostconditionErrors, type CancellationLineState } f
 import { appendQuickbooksInternalMemoForOrder, syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
 import { shipmentMemoLabel } from "@/lib/orders/shipment-memo-label";
 import { findShipmentEvidenceRepairs } from "@/lib/orders/shipment-evidence-reconciliation";
+import { isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 
 function revalidateOrdersList() {
   revalidateOrdersProjection();
@@ -846,7 +847,7 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
 
   const { data: lines, error: linesError } = await adminClient
     .from("shipping_order_lines")
-    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status")
+    .select("id, product_id, ordered_qty, approved_qty, fulfilled_qty, approval_status, fulfillment_status, warehouse_status, legacy_item_code, products(sku,canonical_name)")
     .eq("shipping_order_id", orderId);
 
   if (linesError) redirect(`/orders/${orderId}?error=${encodeURIComponent(linesError.message)}`);
@@ -855,36 +856,41 @@ export async function moveOrderToWarehouseAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=This+order+has+no+mapped+operational+lines.+Map+the+QuickBooks+SKUs+before+moving+items+to+the+warehouse.`);
   }
 
-  const openLines = (lines ?? []).filter((line) =>
+  const openLines = ((lines ?? []) as unknown as Array<PhysicalFulfillmentLine & { id: string }>).filter((line) =>
     line.product_id
     && Number(line.approved_qty ?? 0) > Number(line.fulfilled_qty ?? 0)
-    && line.fulfillment_status !== "FULFILLED"
-    && line.fulfillment_status !== "CANCELLED",
+    && ["APPROVED", "PARTIAL"].includes(String(line.approval_status ?? "").toUpperCase())
+    && !CLOSED_FULFILLMENT_STATES.has(String(line.fulfillment_status ?? "").toUpperCase())
+    && !isNonInventoryPhysicalLine(line),
   );
   if (openLines.length === 0) redirect(`/orders/${orderId}?error=This+order+has+no+open+mapped+items+to+move+to+the+warehouse`);
 
-  const { error: updateError } = await adminClient
+  const toMove = openLines.filter((line) => !["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()));
+  if (toMove.length === 0) {
+    revalidateOrdersList();
+    redirect("/orders?tab=warehouse&message=Order+is+already+in+warehouse");
+  }
+  const { data: movedLines, error: updateError } = await adminClient
     .from("shipping_order_lines")
-    .update({
-      approval_status: "APPROVED",
-      warehouse_status: "IN_WAREHOUSE",
-      fulfillment_status: "PENDING",
-    })
+    // Staging is not shipping: preserve approvals, quantities and fulfillment history.
+    .update({ warehouse_status: "IN_WAREHOUSE" })
     .eq("shipping_order_id", orderId)
-    .in("id", openLines.map((line) => line.id));
+    .in("id", toMove.map((line) => line.id))
+    .in("approval_status", ["APPROVED", "PARTIAL"])
+    .or("fulfillment_status.is.null,fulfillment_status.not.in.(FULFILLED,CANCELLED,REMOVED,DENIED)")
+    .select("id");
 
   if (updateError) redirect(`/orders/${orderId}?error=${encodeURIComponent(updateError.message)}`);
 
-  const orderColumns = await loadTableColumnSet(adminClient, "shipping_orders", ["review_status", "fulfillment_status"]);
-  const orderPayload = filterPayloadByColumnSet({ review_status: "APPROVED", fulfillment_status: "PENDING" }, orderColumns);
-  await adminClient.from("shipping_orders").update(orderPayload).eq("id", orderId);
-  await recalculateProductQueues(openLines.map((line) => line.product_id).filter((productId): productId is string => Boolean(productId)));
-  await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_TO_WAREHOUSE", { line_count: openLines.length });
+  if (!movedLines?.length) redirect(`/orders/${orderId}?error=No+open+items+were+moved.+The+order+may+have+changed;+refresh+and+try+again.`);
+  // Warehouse state doesn't change customer obligation or queue ordering. A full
+  // queue rebuild here delayed confirmation and could fail after the move saved.
+  await writeOrderActivity(adminClient, orderId, "ORDER_MOVED_TO_WAREHOUSE", { line_count: movedLines.length });
 
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   revalidatePath("/inventory");
-  redirect(`/orders/${orderId}?message=Order+moved+to+warehouse`);
+  redirect("/orders?tab=warehouse&message=Order+moved+to+warehouse");
 }
 
 export async function moveOrderLineBackToOrdersAction(formData: FormData) {

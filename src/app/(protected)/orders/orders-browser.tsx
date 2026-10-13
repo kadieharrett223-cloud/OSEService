@@ -6,7 +6,7 @@ import { useFormStatus } from "react-dom";
 import { compareWarehouseOrderAge } from "@/lib/orders/warehouse-recommendations";
 import { moveOrderToWarehouseAction } from "./actions";
 import { getOrderLifecycleLabel, getOrderSearchResultHref, searchOrders } from "@/lib/orders/orders-search";
-import { sortNewOrdersByOperationalRecency } from "@/lib/orders/order-visibility";
+import { sortNewOrdersByOrderDate } from "@/lib/orders/order-visibility";
 
 export type OrdersBrowserRow = {
   id: string;
@@ -63,7 +63,7 @@ export function OrdersBrowser({ rows, tabCounts, initialTab, initialPage, search
   const globalSearchResults = useMemo(() => searchOrders(rows, searchText), [rows, searchText]);
   const globalSearchIds = useMemo(() => new Set(globalSearchResults.map((order) => order.id)), [globalSearchResults]);
   const matchingOrders = useMemo(() => rows.filter((order) => order.tabs.includes(activeTab) && (!searchText || globalSearchIds.has(order.id))), [rows, activeTab, searchText, globalSearchIds]);
-  const filteredOrders = useMemo(() => activeTab === "new" ? sortNewOrdersByOperationalRecency(matchingOrders) : matchingOrders, [activeTab, matchingOrders]);
+  const filteredOrders = useMemo(() => activeTab === "new" ? sortNewOrdersByOrderDate(matchingOrders) : matchingOrders, [activeTab, matchingOrders]);
   const recommendedOrders = useMemo(() => activeTab === "warehouse" ? rows.filter((order) => order.recommendedForWarehouse && (!searchText || globalSearchIds.has(order.id))).sort(compareWarehouseOrderAge).slice(0, 10) : [], [activeTab, rows, searchText, globalSearchIds]);
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);

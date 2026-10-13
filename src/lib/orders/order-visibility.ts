@@ -146,11 +146,18 @@ export function matchesOrderTab(classification: OrderClassification, tabId: stri
   }
 }
 
-/** Explicit invoice entry updates an order, so New Orders displays the most recently entered work first. */
-export function sortNewOrdersByOperationalRecency<T extends { updatedAt: string }>(orders: T[]) {
+/** New Orders is invoice age, not edit activity. Refreshing an old order must not promote it. */
+export function sortNewOrdersByOrderDate<T extends { id: string; createdAt: string; quickbooksInvoiceDate?: string | null; invoiceNumber?: string }>(orders: T[]) {
+  const timestamp = (order: T) => {
+    const invoiceDate = Date.parse(order.quickbooksInvoiceDate ?? "");
+    const createdAt = Date.parse(order.createdAt);
+    return Number.isFinite(invoiceDate) ? invoiceDate : Number.isFinite(createdAt) ? createdAt : Number.NEGATIVE_INFINITY;
+  };
   return orders.slice().sort((left, right) => {
-    const leftUpdated = Date.parse(left.updatedAt) || 0;
-    const rightUpdated = Date.parse(right.updatedAt) || 0;
-    return rightUpdated - leftUpdated;
+    const leftDate = timestamp(left);
+    const rightDate = timestamp(right);
+    if (leftDate !== rightDate) return rightDate - leftDate;
+    return String(right.invoiceNumber ?? "").localeCompare(String(left.invoiceNumber ?? ""), "en", { numeric: true })
+      || left.id.localeCompare(right.id);
   });
 }

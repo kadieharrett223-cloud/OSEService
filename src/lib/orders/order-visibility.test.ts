@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyOrder, matchesOrderTab, sortNewOrdersByOperationalRecency, type ClassificationLine, type ClassificationOrder } from "./order-visibility";
+import { classifyOrder, matchesOrderTab, sortNewOrdersByOrderDate, type ClassificationLine, type ClassificationOrder } from "./order-visibility";
 
 function line(overrides: Partial<ClassificationLine> = {}): ClassificationLine {
   return {
@@ -26,14 +26,23 @@ function order(overrides: Partial<ClassificationOrder> = {}): ClassificationOrde
 }
 
 describe("orders visibility and activation", () => {
-  it("places the most recently entered invoice first in New Orders", () => {
-    const orders = sortNewOrdersByOperationalRecency([
-      { invoice: "older", updatedAt: "2026-08-01T09:00:00.000Z" },
-      { invoice: "just-entered", updatedAt: "2026-08-31T10:00:00.000Z" },
-      { invoice: "middle", updatedAt: "2026-08-20T09:00:00.000Z" },
+  it("shows newest invoices first even when an older invoice was refreshed today", () => {
+    const orders = sortNewOrdersByOrderDate([
+      { id: "older", createdAt: "2026-08-13", quickbooksInvoiceDate: "2026-07-31", updatedAt: "2026-10-13" },
+      { id: "newest", createdAt: "2026-10-12", quickbooksInvoiceDate: "2026-10-12", updatedAt: "2026-10-12" },
+      { id: "middle", createdAt: "2026-08-13", quickbooksInvoiceDate: "2026-09-20", updatedAt: "2026-09-20" },
     ]);
 
-    expect(orders.map((order) => order.invoice)).toEqual(["just-entered", "middle", "older"]);
+    expect(orders.map((order) => order.id)).toEqual(["newest", "middle", "older"]);
+  });
+  it("falls back to order creation, puts undated orders last, and does not mutate the input", () => {
+    const input = [
+      { id: "unknown", createdAt: "invalid" },
+      { id: "older", createdAt: "2026-08-01", quickbooksInvoiceDate: "invalid" },
+      { id: "newer", createdAt: "2026-10-13", quickbooksInvoiceDate: null },
+    ];
+    expect(sortNewOrdersByOrderDate(input).map((order) => order.id)).toEqual(["newer", "older", "unknown"]);
+    expect(input[0].id).toBe("unknown");
   });
 
   it("hides a dormant PENDING_REVIEW bulk import that was never activated", () => {

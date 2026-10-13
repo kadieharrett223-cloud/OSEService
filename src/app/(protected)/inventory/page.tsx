@@ -21,7 +21,8 @@ import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
-import { authoritativeStockProductIds, canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
+import { authoritativeStockProductIds, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { inventoryOperationalIdentity } from "@/lib/inventory/stock-edit-context";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -382,32 +383,7 @@ export default async function InventoryPage({
     if (sourceId && itemCode && !/^\d+$/.test(itemCode)) archivedItemCodeBySourceRecordId.set(sourceId, itemCode);
   }
 
-  const operationalSkuByProduct = new Map<string, string>();
-  for (const product of productRows) {
-    const archivedItemCode = archivedItemCodeBySourceRecordId.get(String(product.source_record_id ?? "").trim()) ?? null;
-    const candidate = preferredOperationalSku(product.sku, [], product.canonical_name, archivedItemCode);
-    if (candidate && !/^\d+$/.test(candidate)) operationalSkuByProduct.set(product.id, candidate);
-  }
-  for (const alias of productAliasRows) {
-    if (!alias.product_id || !alias.alias) continue;
-    const candidate = preferredOperationalSku(null, [alias.alias]);
-    if (!candidate || /^\d+$/.test(candidate)) continue;
-    if (!operationalSkuByProduct.has(alias.product_id)) operationalSkuByProduct.set(alias.product_id, candidate);
-  }
-
-  const demandSkuCountsByProduct = new Map<string, Map<string, number>>();
-  for (const line of dedupedQueueLineRows) {
-    if (!line.product_id || !isOpenQueueLine(line) || !line.legacy_item_code) continue;
-    const candidate = qboSkuCandidates(line.legacy_item_code).at(-1) ?? line.legacy_item_code.trim().toUpperCase();
-    if (!candidate || /^\d+$/.test(candidate)) continue;
-    const counts = demandSkuCountsByProduct.get(line.product_id) ?? new Map<string, number>();
-    counts.set(candidate, (counts.get(candidate) ?? 0) + Math.max(0, Number(line.approved_qty ?? 0) - Number(line.fulfilled_qty ?? 0)));
-    demandSkuCountsByProduct.set(line.product_id, counts);
-  }
-  for (const [productId, counts] of demandSkuCountsByProduct) {
-    const preferred = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
-    if (preferred) operationalSkuByProduct.set(productId, preferred);
-  }
+  const { operationalSkuByProduct, demandSkuCountsByProduct } = inventoryOperationalIdentity(productRows, productAliasRows, Object.fromEntries(archivedItemCodeBySourceRecordId), dedupedQueueLineRows);
   const canonicalInventoryKeyByProductId = new Map(productRows.map((product) => [
     product.id,
     canonicalSkuKey(operationalSkuByProduct.get(product.id) ?? product.sku ?? "") || product.id,

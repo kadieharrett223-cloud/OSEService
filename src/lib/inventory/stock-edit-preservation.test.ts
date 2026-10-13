@@ -18,6 +18,11 @@ describe("grouped stock recount preservation", () => {
   it("permits first counts for a product without any ledger", () => {
     expect(stockEditContext([product("new", "NEW-SKU")], [], {}, [], "NEW-SKU").targetId).toBe("new");
   });
+  it("uses current demand identity when a recycled numeric archive refers to another lift", () => {
+    const context = stockEditContext([{ ...product("old", "000011", "HL-4PML-9"), source_record_id: "recycled" }, product("real", "4PC-6"), product("stock", "000235", "4PC-6")], [], { "recycled": "HK-4PC-6" }, [{ product_id: "old", source_type: "RECOUNT" }, { product_id: "stock", source_type: "RECOUNT" }], "4PC-6", [{ id: "line", product_id: "old", legacy_item_code: "4PML-9", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" }]);
+    expect(context.ownerIds).toEqual(["stock"]);
+    expect(context.groupIds).not.toContain("old");
+  });
   it("atomically audits stale and no-change outcomes without zero entries or invalid actor FK", () => {
     const sql = source("supabase/migrations/20261013154637_atomic_group_stock_recount.sql");
     expect(sql).toContain("lock table public.inventory_transactions in share row exclusive mode");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import { adjustProductStockAction, deleteUnusedProductAction, updateProductTitleAction } from "@/app/(protected)/inventory/actions";
 
 type AdminRowEditorProps = {
@@ -11,6 +12,11 @@ type AdminRowEditorProps = {
   storedName: string;
   onFloor: number;
 };
+
+function SaveStockButton() {
+  const { pending } = useFormStatus();
+  return <button type="submit" disabled={pending} className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-50">{pending ? "Verifying and saving…" : "Save stock"}</button>;
+}
 
 export function AdminRowEditor({ productId, stockProductIds, sku, productName, storedName, onFloor }: AdminRowEditorProps) {
   const [open, setOpen] = useState(false);
@@ -88,9 +94,7 @@ export function AdminRowEditor({ productId, stockProductIds, sku, productName, s
               />
               <p className="text-xs text-[#6b7280]">Recorded as an adjustment against the current count of {onFloor}.</p>
               <p className="text-xs text-[#6b7280]">Saves one audited recount for this product's displayed total. Historical records are preserved.</p>
-              <button type="submit" className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-50">
-                Save stock
-              </button>
+              <SaveStockButton />
             </form>
 
             <form action={deleteUnusedProductAction} className="mt-6 border-t border-[#fecaca] pt-5">

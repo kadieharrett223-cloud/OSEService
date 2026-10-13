@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { stockEditContext } from "@/lib/inventory/stock-edit-context";
+import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 
 function normalizeAliasSku(value: FormDataEntryValue | null) {
   return String(value ?? "").trim().toUpperCase();
@@ -325,15 +326,16 @@ export async function adjustProductStockAction(formData: FormData) {
   let context;
   let transactions;
   try {
-    const [products, aliases, archive, ledger] = await Promise.all([
+    const [products, aliases, archive, ledger, queue] = await Promise.all([
       fetchQueuePages((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").neq("status", "Inactive").order("id").range(from, to)),
       fetchQueuePages((from, to) => supabase.from("product_aliases").select("product_id,alias").order("product_id").order("alias").range(from, to)),
       getCachedOldErpProductIdentityBySourceRecordId(),
       fetchQueuePages((from, to) => supabase.from("inventory_transactions").select("product_id,source_type").eq("bucket", "ON_FLOOR").order("id").range(from, to)),
+      loadCanonicalCustomerQueue({ fresh: true }),
     ]);
     transactions = ledger;
     const productRows = products as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
-    context = stockEditContext(productRows.filter(p => p.sku?.trim().toUpperCase() !== "TEST"), aliases, archive, ledger, sku);
+    context = stockEditContext(productRows.filter(p => p.sku?.trim().toUpperCase() !== "TEST"), aliases, archive, ledger, sku, queue.canonicalLines);
   } catch (error) {
     redirect(`/inventory?mapError=${encodeURIComponent(error instanceof Error ? error.message : "Could not verify stock records")}`);
   }

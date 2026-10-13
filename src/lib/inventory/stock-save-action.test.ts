@@ -11,6 +11,7 @@ vi.mock("@/lib/product-queue", () => ({ recalculateProductQueues: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/products/old-erp-product-identity", () => ({ getCachedOldErpProductIdentityBySourceRecordId: async () => ({}) }));
 vi.mock("@/lib/demand/queue-query-pages", () => ({ fetchQueuePages: async () => [] }));
+vi.mock("@/lib/demand/canonical-customer-queue-loader", () => ({ loadCanonicalCustomerQueue: async () => ({ canonicalLines: [] }) }));
 vi.mock("@/lib/inventory/stock-edit-context", () => ({ stockEditContext: () => ({ groupIds: ["a", "b"], ownerIds: ["a", "b"], targetId: "a" }) }));
 vi.mock("@/lib/supabase/admin", () => ({ getSupabaseAdmin: () => ({ rpc: async (name: string, args: any) => { state.calls.push({ name, args }); return { data: { outcome: state.outcome, delta: args.p_target - args.p_expected }, error: null }; } }) }));
 import { adjustProductStockAction } from "@/app/(protected)/inventory/actions";

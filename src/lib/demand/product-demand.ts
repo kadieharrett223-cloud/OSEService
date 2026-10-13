@@ -19,6 +19,8 @@ export type DemandLineLike = {
   ordered_qty?: number | null;
   canonical_obligation_qty?: number | null;
   fulfilled_qty?: number | null;
+  /** Net signed OCC fulfillment events; not a historical line-summary guess. */
+  recorded_fulfilled_qty?: number | null;
   approval_status?: string | null;
   fulfillment_status?: string | null;
   warehouse_status?: string | null;
@@ -113,9 +115,14 @@ export function isOpenDemandLine(line: DemandLineLike) {
  */
 export function withCurrentQuickBooksFulfillmentTruth<T extends DemandLineLike>(lines: T[]): T[] {
   const currentQboFulfilledByIdentity = new Map<string, number>();
+  const recordedFulfilledByIdentity = new Map<string, number>();
   for (const line of lines) {
-    if (line.parent_source_type !== "QBO_INVOICE" || !line.qbo_invoice_line_id) continue;
     const identity = demandLineIdentity(line);
+    if (line.recorded_fulfilled_qty != null) recordedFulfilledByIdentity.set(identity, Math.max(
+      recordedFulfilledByIdentity.get(identity) ?? 0,
+      Math.max(0, Number(line.recorded_fulfilled_qty)),
+    ));
+    if (line.parent_source_type !== "QBO_INVOICE" || !line.qbo_invoice_line_id) continue;
     currentQboFulfilledByIdentity.set(identity, Math.max(
       currentQboFulfilledByIdentity.get(identity) ?? 0,
       Math.max(0, Number(line.fulfilled_qty ?? 0)),
@@ -123,10 +130,11 @@ export function withCurrentQuickBooksFulfillmentTruth<T extends DemandLineLike>(
   }
   const sharedFulfillment = withLogicalFulfilledQty(lines);
   return sharedFulfillment.map((line) => {
-    const currentQboFulfilled = currentQboFulfilledByIdentity.get(demandLineIdentity(line));
+    const identity = demandLineIdentity(line);
+    const currentQboFulfilled = currentQboFulfilledByIdentity.get(identity);
     return currentQboFulfilled == null
       ? line
-      : withProvenFulfilledQty({ ...line, fulfilled_qty: currentQboFulfilled }, currentQboFulfilled);
+      : withProvenFulfilledQty({ ...line, fulfilled_qty: currentQboFulfilled }, Math.max(currentQboFulfilled, recordedFulfilledByIdentity.get(identity) ?? 0));
   });
 }
 

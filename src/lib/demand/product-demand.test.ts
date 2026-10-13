@@ -3,6 +3,13 @@ import { getWarehouseDemandDisplay } from "./display-status";
 import { customerQueueObligationQty, dedupeDemandLines, excludeCompletedQboOrderSiblings, excludeCompletedQboSiblings, getCanonicalOpenDemandLines, isOpenCustomerQueueLine, isOpenDemandLine, netRecordedFulfilledQty, openQtyOf, totalOpenDemand, withLogicalFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 
 describe("shared active logical demand", () => {
+  it("removes a shipped lift's pending QBO copy using signed OCC event proof, not stale history", () => {
+    const current = { id: "qbo-copy", product_id: "lift", qbo_invoice_line_id: "lift-line", parent_source_type: "QBO_INVOICE", approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING" };
+    const history = { id: "shipped-lift", product_id: "legacy-lift", logical_demand_key: "lift-line", approved_qty: 1, fulfilled_qty: 1, recorded_fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "FULFILLED" };
+    expect(getCanonicalOpenDemandLines([current, history], new Set(), new Set())).toEqual([]);
+    // A reversal is not proof of shipment; don't suppress the real open item.
+    expect(getCanonicalOpenDemandLines([current, { ...history, recorded_fulfilled_qty: 0 }], new Set(), new Set())).toMatchObject([{ id: "qbo-copy", fulfilled_qty: 0 }]);
+  });
   it("assigns every approved mapped open line using its largest real obligation quantity", () => {
     const line = { id: "open-mapped", product_id: "product-1", ordered_qty: 4, approved_qty: 0, fulfilled_qty: 1, approval_status: "APPROVED", fulfillment_status: "PENDING" };
     expect(customerQueueObligationQty(line)).toBe(4);

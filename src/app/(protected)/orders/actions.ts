@@ -17,7 +17,6 @@ import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache
 import { getOrderCancellationPostconditionErrors, type CancellationLineState } from "@/lib/orders/order-cancellation";
 import { appendQuickbooksInternalMemoForOrder, syncQuickbooksInvoice } from "@/lib/quickbooks/integration";
 import { shipmentMemoLabel } from "@/lib/orders/shipment-memo-label";
-import { findShipmentEvidenceRepairs } from "@/lib/orders/shipment-evidence-reconciliation";
 import { isNonInventoryPhysicalLine, type PhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 
 function revalidateOrdersList() {
@@ -35,77 +34,6 @@ async function refreshCustomerQueuesAfterFulfillment(productIds: Array<string | 
   if (mappedProductIds.length > 0) await recalculateProductQueues(mappedProductIds);
   revalidateCanonicalCustomerQueue();
   revalidateErpHealth();
-}
-
-/**
- * Repairs only the derived line summary when its own completed OCC shipment
- * already proves fulfillment. It deliberately performs no inventory,
- * allocation, shipment, or order-status write: those were established by the
- * original shipment and must never be replayed by reconciliation.
- */
-async function reconcileConfirmedShipmentEvidenceForOrder(
-  supabase: ReturnType<typeof getSupabaseAdmin>,
-  orderId: string,
-) {
-  const { data: rawLines, error: linesError } = await supabase
-    .from("shipping_order_lines")
-    .select("id,product_id,ordered_qty,approved_qty,fulfilled_qty")
-    .eq("shipping_order_id", orderId);
-  if (linesError) throw new Error(linesError.message);
-  const lines = (rawLines ?? []) as Array<{
-    id: string;
-    product_id: string | null;
-    ordered_qty: number | null;
-    approved_qty: number | null;
-    fulfilled_qty: number | null;
-  }>;
-  if (lines.length === 0) return 0;
-
-  const lineIds = lines.map((line) => line.id);
-  const [{ data: rawEvents, error: eventsError }, { data: shipments, error: shipmentsError }] = await Promise.all([
-    supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty,shipment_number").in("shipping_order_line_id", lineIds),
-    supabase.from("order_shipments").select("id,shipment_number").eq("shipping_order_id", orderId),
-  ]);
-  if (eventsError) throw new Error(eventsError.message);
-  if (shipmentsError) throw new Error(shipmentsError.message);
-  const shipmentRows = (shipments ?? []) as Array<{ id: string; shipment_number: string | null }>;
-  const shipmentIds = shipmentRows.map((shipment) => shipment.id);
-  const { data: rawShipmentLines, error: shipmentLinesError } = shipmentIds.length > 0
-    ? await supabase
-      .from("order_shipment_lines")
-      .select("shipping_order_line_id,quantity")
-      .in("shipment_id", shipmentIds)
-    : { data: [], error: null };
-  if (shipmentLinesError) throw new Error(shipmentLinesError.message);
-
-  const repairs = findShipmentEvidenceRepairs(
-    lines,
-    (rawEvents ?? []) as Array<{ shipping_order_line_id: string; fulfilled_qty: number | null; shipment_number: string | null }>,
-    shipmentRows.map((shipment) => shipment.shipment_number),
-    (rawShipmentLines ?? []) as Array<{ shipping_order_line_id: string; quantity: number | null }>,
-  );
-  for (const repair of repairs) {
-    const { error } = await supabase
-      .from("shipping_order_lines")
-      .update({
-        fulfilled_qty: repair.fulfilledQty,
-        fulfillment_status: repair.complete ? "FULFILLED" : "PARTIALLY_FULFILLED",
-        warehouse_status: repair.complete ? "FULFILLED" : "PARTIALLY_FULFILLED",
-      })
-      .eq("id", repair.lineId)
-      // A concurrent normal fulfillment can only advance this number. Never
-      // replace it with the older reconciliation snapshot.
-      .lt("fulfilled_qty", repair.fulfilledQty);
-    if (error) throw new Error(error.message);
-  }
-  if (repairs.length > 0) {
-    await refreshCustomerQueuesAfterFulfillment(repairs.map((repair) => repair.productId));
-    await writeOrderActivity(supabase, orderId, "SHIPMENT_EVIDENCE_RECONCILED", {
-      line_count: repairs.length,
-      source: "completed_occ_shipments",
-    });
-  }
-  return repairs.length;
 }
 
 async function loadTableColumnSet(
@@ -983,10 +911,9 @@ async function activateExistingQuickbooksOrder(
   invoice: { id: string; qbo_invoice_id: string | null; invoice_number: string | null; raw_payload?: unknown },
 ) {
   await assertOrderIsOperational(adminClient, orderId);
-  // The completed shipment is immutable evidence. Reconcile a stale summary
-  // before planning the QBO refresh so that refresh sees this line as shipped
-  // and can never re-open, requeue, or deduct it a second time.
-  await reconcileConfirmedShipmentEvidenceForOrder(adminClient, orderId);
+  // QBO refresh is an invoice/mapping operation, never a fulfillment operation.
+  // Shipment edits may have deliberately reopened an item. Do not replay old
+  // shipment evidence or change shipped quantities here.
   const { data: importedInvoiceLines } = await adminClient
     .from("qbo_invoice_lines")
     .select("id, qbo_line_id, product_id, ordered_qty, qbo_sku, source_description")

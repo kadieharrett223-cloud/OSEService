@@ -56,7 +56,9 @@ export function findShipmentEvidenceRepairs(
   for (const event of events) {
     const shipmentNumber = String(event.shipment_number ?? "").trim();
     const quantity = Number(event.fulfilled_qty ?? 0);
-    if (!confirmedShipmentNumbers.has(shipmentNumber) || !Number.isFinite(quantity) || quantity <= 0) continue;
+    // Shipment edits append compensating negatives. Ignoring those resurrects
+    // removed shipment items (12447's HLCJ-6 was +1 followed by -1).
+    if (!confirmedShipmentNumbers.has(shipmentNumber) || !Number.isFinite(quantity) || quantity === 0) continue;
     ledgerEvidenceByLineId.set(
       event.shipping_order_line_id,
       (ledgerEvidenceByLineId.get(event.shipping_order_line_id) ?? 0) + quantity,

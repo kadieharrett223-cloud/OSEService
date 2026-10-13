@@ -113,7 +113,10 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     fulfillmentEventsByLineId.set(fulfillment.shipping_order_line_id, [...(fulfillmentEventsByLineId.get(fulfillment.shipping_order_line_id) ?? []), fulfillment]);
   }
   const fulfilledByLineId = new Map([...fulfillmentEventsByLineId].map(([lineId, events]) => [lineId, netRecordedFulfilledQty(events)]));
-  const queueLines = (rawLines as unknown as CanonicalQueueLine[]).map((line) => withProvenFulfilledQty(line, fulfilledByLineId.get(line.id) ?? 0));
+  const queueLines = (rawLines as unknown as CanonicalQueueLine[]).map((line) => ({
+    ...withProvenFulfilledQty(line, fulfilledByLineId.get(line.id) ?? 0),
+    recorded_fulfilled_qty: fulfilledByLineId.get(line.id) ?? null,
+  }));
   const sourceInvoiceIds = [...new Set(queueLines.map((line) => line.shipping_orders?.source_invoice_id).filter((value): value is string => Boolean(value)))];
   const orderNumbers = [...new Set(queueLines.map((line) => line.shipping_orders?.order_number).filter((value): value is string => Boolean(value)))];
   const [qboInvoices, qboLines, qboParents, sourceOrders] = await Promise.all([
@@ -177,7 +180,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     // read-model exclusion only; no stock, allocation, fulfillment, or order
     // record is changed.
     const currentQboPayloadHasLineIds = (liveQboLineQtyByInvoiceId.get(bridgeInvoiceId ?? "")?.size ?? 0) > 0;
-    const legacyLineAbsentFromCurrentQbo = parent?.source_type !== "QBO_INVOICE"
+    const legacyLineAbsentFromCurrentQbo = (parent?.source_type !== "QBO_INVOICE" || Boolean(line.source_record_id))
       && !line.qbo_invoice_line_id
       && currentQboPayloadHasLineIds
       && candidates.length === 0;
@@ -302,7 +305,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v4-lossless"],
+  ["canonical-customer-queue-read-model-v5-signed-proof"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

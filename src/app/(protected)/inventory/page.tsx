@@ -932,7 +932,7 @@ export default async function InventoryPage({
                         <>
                           <AdminRowEditor
                             productId={row.productId}
-                            stockProductId={row.stockProductIds.length === 1 ? row.stockProductIds[0] : null}
+                            stockProductIds={row.stockProductIds}
                             sku={row.sku}
                             productName={row.productName}
                             storedName={row.storedName}

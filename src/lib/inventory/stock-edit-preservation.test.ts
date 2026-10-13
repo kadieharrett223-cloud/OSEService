@@ -1,40 +1,30 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { authoritativeStockProductIds } from "../products/canonical-sku";
-
+import { stockEditContext } from "./stock-edit-context";
 const source = (file: string) => readFileSync(resolve(process.cwd(), file), "utf8");
-
-describe("stock editor identity and audit preservation", () => {
-  it("uses the displayed ledger owner, not the first historical catalog identity", () => {
-    const owners = authoritativeStockProductIds(
-      [{ id: "legacy", sku: "000008" }, { id: "live", sku: "2PCFHD-12" }],
-      new Map([["legacy", "2PCFHD12"], ["live", "2PCFHD12"]]),
-      new Set(["legacy", "live"]), new Set(["legacy", "live"]),
-    );
-    expect([...owners]).toEqual(["live"]);
-    const page = source("src/app/(protected)/inventory/page.tsx");
-    expect(page).toContain("group.stockProductIds.push(product.id)");
-    expect(page).toContain("row.stockProductIds.length === 1 ? row.stockProductIds[0] : null");
-    const editor = source("src/app/(protected)/inventory/admin-row-editor.tsx");
-    expect(editor).toContain('name="product_id" value={stockProductId ?? ""}');
-    expect(editor).toContain('name="expected_on_floor_qty" value={onFloor}');
-    expect(editor).toContain("disabled={!stockProductId}");
+const product = (id: string, sku: string, name: string = sku) => ({ id, sku, canonical_name: name, source_record_id: null });
+describe("grouped stock recount preservation", () => {
+  it("keeps both displayed legacy owners instead of disabling edits", () => {
+    const context = stockEditContext([product("a", "000013", "4PC-6"), product("b", "000235", "4PC-6"), product("c", "4PC-6")], [], {}, [{ product_id: "a", source_type: "ADJUSTMENT" }, { product_id: "b", source_type: "RECOUNT" }, { product_id: "c", source_type: "FULFILLMENT" }], "4PC-6");
+    expect(context).toEqual({ groupIds: ["a", "b", "c"], ownerIds: ["a", "b"], targetId: "a" });
+    expect(source("src/app/(protected)/inventory/page.tsx")).toContain("stockProductIds={row.stockProductIds}");
+    expect(source("src/app/(protected)/inventory/admin-row-editor.tsx")).not.toContain("disabled={!stockProductId}");
   });
-
-  it("logs attempts before the no-change exit without inserting a zero stock movement", () => {
-    const action = source("src/app/(protected)/inventory/actions.ts").split("export async function adjustProductStockAction")[1].split("export async function moveCustomerQueuePositionAction")[0];
-    expect(action.indexOf('action: "STOCK_EDIT_ATTEMPT"')).toBeLessThan(action.indexOf("if (delta === 0)"));
-    expect(action.indexOf('outcome === "STALE_COUNT"')).toBeLessThan(action.indexOf("if (delta === 0)"));
-    expect(action.indexOf('from("inventory_transactions").insert')).toBeGreaterThan(action.indexOf("if (delta === 0)"));
+  it("preserves an explicitly counted zero base owner and ignores obsolete ledgers", () => {
+    const context = stockEditContext([product("legacy", "000008", "2PCFHD-12"), product("live", "2PCFHD-12")], [], {}, [{ product_id: "legacy", source_type: "RECOUNT" }, { product_id: "live", source_type: "ADJUSTMENT" }], "2PCFHD-12");
+    expect(context.ownerIds).toEqual(["live"]);
+  });
+  it("permits first counts for a product without any ledger", () => {
+    expect(stockEditContext([product("new", "NEW-SKU")], [], {}, [], "NEW-SKU").targetId).toBe("new");
+  });
+  it("atomically audits stale and no-change outcomes without zero entries or invalid actor FK", () => {
+    const sql = source("supabase/migrations/20261013154637_atomic_group_stock_recount.sql");
+    expect(sql).toContain("lock table public.inventory_transactions in share row exclusive mode");
+    expect(sql).toContain("if v_outcome<>'ADJUSTMENT_REQUESTED' then return v_prior");
+    expect(sql).toContain("'manual-group:'||p_request_id::text,null");
+    expect(sql).toContain("security invoker");
+    expect(sql).toContain("from public,anon,authenticated");
     expect(source("src/app/(protected)/inventory/audit/page.tsx")).toContain('eq("action", "STOCK_EDIT_ATTEMPT")');
-  });
-
-  it("does not send the synthetic shared-login session UUID to the stock actor foreign key", () => {
-    const action = source("src/app/(protected)/inventory/actions.ts").split("export async function adjustProductStockAction")[1].split("export async function moveCustomerQueuePositionAction")[0];
-    const movement = action.split('from("inventory_transactions").insert')[1];
-    expect(movement).toContain("actor_id: null");
-    expect(movement).not.toContain("actor_id: user.id");
-    expect(action).toContain("actor_name: user.fullName");
   });
 });

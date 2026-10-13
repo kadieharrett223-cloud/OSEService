@@ -5,15 +5,16 @@ import { adjustProductStockAction, deleteUnusedProductAction, updateProductTitle
 
 type AdminRowEditorProps = {
   productId: string;
-  stockProductId: string | null;
+  stockProductIds: string[];
   sku: string;
   productName: string;
   storedName: string;
   onFloor: number;
 };
 
-export function AdminRowEditor({ productId, stockProductId, sku, productName, storedName, onFloor }: AdminRowEditorProps) {
+export function AdminRowEditor({ productId, stockProductIds, sku, productName, storedName, onFloor }: AdminRowEditorProps) {
   const [open, setOpen] = useState(false);
+  const [requestId, setRequestId] = useState("");
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export function AdminRowEditor({ productId, stockProductId, sku, productName, st
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => { setRequestId(crypto.randomUUID()); setOpen(true); }}
         className="mt-1 text-xs font-medium text-[#b45309] underline decoration-dotted underline-offset-2 transition hover:text-[#92400e]"
       >
         Edit
@@ -63,7 +64,9 @@ export function AdminRowEditor({ productId, stockProductId, sku, productName, st
             </form>
 
             <form action={adjustProductStockAction} className="mt-6 space-y-2 border-t border-[#e5e7eb] pt-5">
-              <input type="hidden" name="product_id" value={stockProductId ?? ""} />
+              <input type="hidden" name="stock_sku" value={sku} />
+              <input type="hidden" name="stock_product_ids" value={JSON.stringify([...stockProductIds].sort())} />
+              <input type="hidden" name="request_id" value={requestId} />
               <input type="hidden" name="expected_on_floor_qty" value={onFloor} />
               <label className="label" htmlFor={`stock-${productId}`}>On floor quantity</label>
               <input
@@ -84,8 +87,8 @@ export function AdminRowEditor({ productId, stockProductId, sku, productName, st
                 required
               />
               <p className="text-xs text-[#6b7280]">Recorded as an adjustment against the current count of {onFloor}.</p>
-              {!stockProductId ? <p role="alert" className="text-xs text-red-700">Stock has no single authoritative record. Editing is blocked to prevent changing the wrong ledger.</p> : null}
-              <button type="submit" disabled={!stockProductId} className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-50">
+              <p className="text-xs text-[#6b7280]">Saves one audited recount for this product's displayed total. Historical records are preserved.</p>
+              <button type="submit" className="rounded-lg bg-[#111827] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1f2937] disabled:opacity-50">
                 Save stock
               </button>
             </form>

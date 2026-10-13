@@ -10,6 +10,9 @@ import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache
 import { recalculateProductQueues } from "@/lib/product-queue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
+import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
+import { stockEditContext } from "@/lib/inventory/stock-edit-context";
 
 function normalizeAliasSku(value: FormDataEntryValue | null) {
   return String(value ?? "").trim().toUpperCase();
@@ -299,16 +302,18 @@ export async function deleteUnusedProductAction(formData: FormData) {
 export async function adjustProductStockAction(formData: FormData) {
   const user = await requireInventoryAdmin();
 
-  const productId = String(formData.get("product_id") ?? "").trim();
+  const sku = String(formData.get("stock_sku") ?? "").trim();
+  const requestId = String(formData.get("request_id") ?? "").trim();
   const targetRaw = String(formData.get("on_floor_qty") ?? "").trim();
+  const expectedRaw = String(formData.get("expected_on_floor_qty") ?? "").trim();
   const note = String(formData.get("reason") ?? "").trim();
 
-  if (!productId || !/^-?\d+(\.\d+)?$/.test(targetRaw)) {
+  if (!sku || !/^[0-9a-f-]{36}$/i.test(requestId) || !/^\d+$/.test(targetRaw) || !/^-?\d+(\.\d+)?$/.test(expectedRaw)) {
     redirect("/inventory?mapError=Enter+a+valid+on+floor+quantity");
   }
 
   const target = Number(targetRaw);
-  if (target < 0) {
+  if (!Number.isSafeInteger(target) || target < 0) {
     redirect("/inventory?mapError=On+floor+quantity+cannot+be+negative");
   }
 
@@ -317,61 +322,45 @@ export async function adjustProductStockAction(formData: FormData) {
   }
 
   const supabase = getSupabaseAdmin();
-
-  // Stock is a ledger: record the difference rather than overwriting history.
-  const { data: existing, error: readError } = await supabase
-    .from("inventory_transactions")
-    .select("delta")
-    .eq("product_id", productId)
-    .eq("bucket", "ON_FLOOR");
-
-  if (readError) {
-    redirect(`/inventory?mapError=${encodeURIComponent(readError.message)}`);
+  let context;
+  let transactions;
+  try {
+    const [products, aliases, archive, ledger] = await Promise.all([
+      fetchQueuePages((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").neq("status", "Inactive").order("id").range(from, to)),
+      fetchQueuePages((from, to) => supabase.from("product_aliases").select("product_id,alias").order("product_id").order("alias").range(from, to)),
+      getCachedOldErpProductIdentityBySourceRecordId(),
+      fetchQueuePages((from, to) => supabase.from("inventory_transactions").select("product_id,source_type").eq("bucket", "ON_FLOOR").order("id").range(from, to)),
+    ]);
+    transactions = ledger;
+    const productRows = products as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
+    context = stockEditContext(productRows.filter(p => p.sku?.trim().toUpperCase() !== "TEST"), aliases, archive, ledger, sku);
+  } catch (error) {
+    redirect(`/inventory?mapError=${encodeURIComponent(error instanceof Error ? error.message : "Could not verify stock records")}`);
   }
-
-  const current = (existing ?? []).reduce((sum, row) => sum + Number(row.delta ?? 0), 0);
-  const expectedRaw = String(formData.get("expected_on_floor_qty") ?? "").trim();
-  const expected = expectedRaw === "" ? NaN : Number(expectedRaw);
-  // Never apply a recount against a different ledger/count than the operator saw.
-  const outcome = !Number.isFinite(expected) || current !== expected ? "STALE_COUNT" : current === target ? "ALREADY_MATCHES" : "ADJUSTMENT_REQUESTED";
-  const { error: attemptError } = await supabase.from("audit_log").insert({
-    entity_type: "product",
-    entity_id: productId,
-    action: "STOCK_EDIT_ATTEMPT",
-    details: { actor_id: user.id, actor_name: user.fullName ?? "admin", displayed_qty: Number.isFinite(expected) ? expected : null, current_qty: current, requested_qty: target, reason: note, outcome },
+  // Never trust the browser to choose different ledger identities from the displayed row.
+  if (!context.targetId || String(formData.get("stock_product_ids")) !== JSON.stringify(context.ownerIds)) {
+    revalidateInventoryReadModel();
+    redirect("/inventory?mapError=Stock+identity+changed.+Refresh+and+review+the+count+before+saving.");
+  }
+  // Atomic fresh-count check + audit + one delta. RPC is executable only by service_role.
+  const { data, error } = await (supabase as any).rpc("recount_inventory_stock_group", {
+    p_group_ids: context.groupIds, p_owner_ids: context.ownerIds, p_target_id: context.targetId,
+    p_expected: Number(expectedRaw), p_target: target,
+    p_snapshot_count: transactions.filter(t => context.groupIds.includes(t.product_id ?? "")).length,
+    p_request_id: requestId, p_actor_name: user.fullName ?? "admin", p_actor_id: user.id, p_reason: note,
   });
-  if (attemptError) redirect(`/inventory?mapError=${encodeURIComponent(attemptError.message)}`);
-  if (outcome === "STALE_COUNT") {
+  if (error) redirect(`/inventory?mapError=${encodeURIComponent(error.message)}`);
+  const result = data as { outcome: string; delta: number };
+  if (result.outcome === "STALE_COUNT") {
     revalidateInventoryReadModel();
     redirect("/inventory?mapError=Stock+count+changed+or+the+editor+is+outdated.+Refresh+and+review+the+count+before+saving.+Attempt+recorded+in+audit.");
   }
-  const delta = target - current;
-
-  if (delta === 0) {
+  if (result.outcome === "ALREADY_MATCHES") {
     revalidatePath("/inventory/audit");
     redirect("/inventory?mapMessage=On+floor+quantity+already+matches.+No+stock+changed%3B+attempt+recorded+in+audit.");
   }
-
-  const { error: insertError } = await supabase.from("inventory_transactions").insert({
-    product_id: productId,
-    bucket: "ON_FLOOR",
-    delta,
-    before_qty: current,
-    after_qty: target,
-    reason: `Manual adjustment by ${user.fullName ?? "admin"}: ${note}`,
-    source_type: "ADJUSTMENT",
-    source_event_key: `manual:${productId}:${Date.now()}`,
-    // Shared-code login generates a session UUID, not an access_users row.
-    // Preserve the operator in the reason and attempt audit, not this FK.
-    actor_id: null,
-  });
-
-  if (insertError) {
-    redirect(`/inventory?mapError=${encodeURIComponent(insertError.message)}`);
-  }
-
   revalidateInventoryReadModel();
-  redirect(`/inventory?mapMessage=${encodeURIComponent(`On floor set to ${target} (${delta > 0 ? "+" : ""}${delta}).`)}`);
+  redirect(`/inventory?mapMessage=${encodeURIComponent(`On floor set to ${target} (${result.delta > 0 ? "+" : ""}${result.delta}).`)}`);
 }
 
 export async function moveCustomerQueuePositionAction(formData: FormData) {

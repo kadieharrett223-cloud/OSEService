@@ -18,6 +18,7 @@ import { customerQueueObligationQty, demandLineIdentity, isOpenCustomerQueueLine
 import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
+import { getBackorderedNow } from "@/lib/inventory/backordered-now";
 import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { formatPackageDimensions, formatPackageWeight, type PackageDimensions } from "@/lib/products/package-dimensions";
@@ -144,6 +145,7 @@ type InventoryViewRow = {
   openDemand: number;
   floorCommitted: number;
   availableNow: number;
+  backorderedNow: number;
   incoming: number;
   availableAfterIncoming: number;
   backorderedAfterIncoming: number;
@@ -638,6 +640,7 @@ export default async function InventoryPage({
       openDemand: 0,
       floorCommitted: 0,
       availableNow: 0,
+      backorderedNow: 0,
       incoming: 0,
       availableAfterIncoming: 0,
       backorderedAfterIncoming: 0,
@@ -746,6 +749,7 @@ export default async function InventoryPage({
         incomingContainers,
         customerQueue: coveredQueue,
         availableNow: Math.max(0, group.onFloor - committedFloor),
+        backorderedNow: getBackorderedNow({ onFloor: group.onFloor, openDemand: group.openDemand }),
         ...afterIncoming,
         nextEta: incomingContainers[0] ? `${incomingContainers[0].containerNumber} · ${incomingContainers[0].eta}` : "—",
       };
@@ -936,6 +940,14 @@ export default async function InventoryPage({
                     <td className="whitespace-nowrap px-2 py-3">{formatNumber(row.openDemand)}</td>
                     <td className="whitespace-nowrap px-2 py-3 font-semibold text-[#16a34a]">
                       {formatNumber(row.availableNow)}
+                      {row.backorderedNow > 0 ? (
+                        <div
+                          className="mt-1 text-xs font-semibold text-[#b45309]"
+                          title="Open customer quantity not covered by stock on floor. Incoming stock is not available yet."
+                        >
+                          Backordered {formatNumber(row.backorderedNow)}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="whitespace-nowrap px-2 py-3">
                       <IncomingDropdown

@@ -1,5 +1,5 @@
 import { canonicalSkuKey } from "@/lib/products/canonical-sku";
-import { qboSkuCandidates, withoutFreeShippingBenefits } from "./quickbooks-refresh";
+import { qboSkuCandidates, withoutFreeShippingBenefits, quickbooksInventoryClassificationText } from "./quickbooks-refresh";
 
 const NON_INVENTORY_TEXT = /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error|\bnote\b|\bservice\b|\binstall(?:ation)?\b/i;
 const EXCLUDED_PHYSICAL_STATES = new Set(["CANCELLED", "REMOVED", "DENIED"]);
@@ -126,7 +126,7 @@ function parseInvoicePhysicalItems(
     const description = typeof item.Description === "string" ? item.Description.trim() : "";
     const detailType = typeof item.DetailType === "string" ? item.DetailType : "";
     if (!sku && !description && detailType !== "SalesItemLineDetail") return null;
-    const text = `${sku ?? ""} ${withoutFreeShippingBenefits(description)}`;
+    const text = quickbooksInventoryClassificationText(sku, description);
     const isCommercialNonInventory = description.startsWith("--")
       || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error|\bservice\b|\binstall(?:ation)?\b|\bfinance fee\b|\bfinancing fee\b/i.test(text);
     // A discount, freight, tax, or service row must never become a physical

@@ -160,6 +160,14 @@ export function withoutFreeShippingBenefits(description: string) {
   return description.replace(/\bfree\s+(?:shipping|freight|delivery)\b/gi, "");
 }
 
+/** A model SKU identifies the product; promotional description words do not identify a charge. */
+export function quickbooksInventoryClassificationText(sku: string | null | undefined, description: string) {
+  const model = qboSkuCandidates(sku).at(-1) ?? "";
+  const isModelSku = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(model) && /[A-Z]/.test(model) && /[0-9]/.test(model);
+  // Keep the item name in all cases: Discount-1, Shipping-1, etc. remain charges.
+  return `${sku ?? ""} ${isModelSku ? "" : withoutFreeShippingBenefits(description)}`;
+}
+
 /** These rows cannot represent warehouse demand even when a stale mapping exists. */
 export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
   const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
@@ -174,7 +182,7 @@ export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | nu
     // invoices, so it is not globally non-inventory.  A Synchrony/refund
     // balance correction, however, is accounting-only and must never become
     // customer demand or block a completed shipment.
-    || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error/.test(`${sku} ${description}`);
+    || /discount|shipping|freight|delivery|sales tax|tax adjustment|synchrony\s+balance\s+adjustment|balance\s+adjustment.*refund|refund\s+error/.test(quickbooksInventoryClassificationText(sku, description));
 }
 
 export function planQuickbooksOrderRefresh(

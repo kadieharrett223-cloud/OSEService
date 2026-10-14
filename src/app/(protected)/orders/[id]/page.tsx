@@ -13,7 +13,7 @@ import {
 } from "@/lib/fulfillment/suggested-allocation";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
-import { isAlwaysNonInventoryQuickbooksLine, qboSkuCandidates, withoutFreeShippingBenefits } from "@/lib/orders/quickbooks-refresh";
+import { isAlwaysNonInventoryQuickbooksLine, qboSkuCandidates, quickbooksInventoryClassificationText } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { canonicalInvoiceDisplayLineIds, getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
@@ -560,7 +560,7 @@ function parseQuickbooksInvoiceItems(rawPayload: unknown) {
       const amount = Number(item.Amount ?? 0);
       const normalizedDescription = description.trim().toLowerCase();
       const normalizedSku = (sku ?? "").trim().toLowerCase();
-      const normalizedLineText = `${normalizedSku} ${withoutFreeShippingBenefits(normalizedDescription)}`;
+      const normalizedLineText = quickbooksInventoryClassificationText(normalizedSku, normalizedDescription);
       const isNonInventory = detailType !== "SalesItemLineDetail"
         || normalizedDescription.startsWith("--")
         || normalizedSku === "note"

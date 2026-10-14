@@ -14,6 +14,11 @@ const cleanMappedPhysicalLine = {
 };
 
 describe("QBO forward intake classifier", () => {
+  it("does not mistake a bundle discount in a lift description for a discount item", () => {
+    expect(isInventoryDemandQuickbooksLine({ qbo_sku: "4PXW-10", product_id: "lift", ordered_qty: 6,
+      source_description: "Olympic 4PXW-10 lift – 5% OFF BUNDLE DISCOUNT" })).toBe(true);
+  });
+
   it.each(["Free Shipping", "Free Freight", "Free Delivery"])("imports physical lifts advertising %s", (benefit) => {
     expect(isInventoryDemandQuickbooksLine({ qbo_sku: "4PC-6", product_id: "product-lift", ordered_qty: 1,
       source_description: `Olympic 4PC-6 Little Buddy 6,000 lb Lift – ${benefit}` })).toBe(true);

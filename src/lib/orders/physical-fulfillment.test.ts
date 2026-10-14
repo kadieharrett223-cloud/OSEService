@@ -15,6 +15,16 @@ function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfill
 }
 
 describe("physical fulfillment totals", () => {
+  it("counts real lifts whose descriptions advertise a bundle discount", () => {
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PXW-10", 6], ["Discount-1", 1]], {
+        descriptions: { "4PXW-10": "Olympic 4PXW-10 lift\n*25% OFF BLACK FRIDAY + 5% OFF BUNDLE DISCOUNT*" },
+      }),
+      lines: [line({ id: "six-lifts", legacy_item_code: "4PXW-10", ordered_qty: 6, approved_qty: 6 })],
+    });
+    expect(summary).toMatchObject({ ordered: 6, fulfilled: 0, remaining: 6, lineCount: 1 });
+  });
+
   it("counts the Little Buddy lift and motor despite the Free Shipping product description", () => {
     const lines = [
       line({ id: "lift", legacy_item_code: "4PC-6", products: { sku: "4PC-6", canonical_name: "Little Buddy Lift – Free Shipping" } }),

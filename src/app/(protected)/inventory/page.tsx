@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getCommittedFloor } from "@/lib/inventory/floor-demand";
 import { unstable_cache } from "next/cache";
 import { Fragment } from "react";
 import { createProductAction } from "@/app/(protected)/inventory/actions";
@@ -700,7 +701,10 @@ export default async function InventoryPage({
       group.openDemand = group.customerQueue.reduce((sum, item) => sum + item.openQty, 0);
 
       // Unallocated open demand still consumes floor stock, matching the OLD_ERP Available = On Floor - Sold rule.
-      const committedFloor = Math.max(group.floorCommitted, Math.min(group.openDemand, group.onFloor));
+      const committedFloor = getCommittedFloor({
+        onFloor: group.onFloor, openDemand: group.openDemand, floorCommitted: group.floorCommitted,
+        containerReserved: group.incomingContainers.reduce((sum, container) => sum + Math.min(container.qty, container.committed), 0),
+      });
       let groupIncomingDemand = Math.max(0, group.openDemand - committedFloor);
       const incomingContainers = group.incomingContainers
         .slice()

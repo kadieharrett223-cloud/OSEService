@@ -3,7 +3,7 @@ import { customerQueueObligationQty, demandLineIdentity, getCanonicalOpenDemandL
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { liveQuickBooksLineQuantities, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
-import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
+import { customerQueueProductKeys } from "./customer-queue-product-keys";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-cache";
@@ -98,14 +98,11 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
 
   const productRows = products as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
   const productIdByAlias = new Map<string, string>();
-  const aliasesByProductId = new Map<string, string[]>();
   for (const product of productRows) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
   for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) {
     if (!alias.product_id || !alias.alias) continue;
     productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
-    aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
-  const productQueueKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
   const manualMappingSkus = new Set(((mappingRows.data ?? []) as unknown as Array<{ source_sku: string | null }>).map((row) => normalizeSku(row.source_sku)));
 
   const fulfillmentEventsByLineId = new Map<string, Array<{ fulfilled_qty: number | null }>>();
@@ -220,6 +217,12 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     : line);
   const resolvedCanonicalLines = getCanonicalOpenDemandLines(bridgedWithQueueObligation, completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
   const canonicalLines = resolvedCanonicalLines;
+  // Number the same operational products that inventory displays. Recycled
+  // legacy IDs can have an archived SKU that disagrees with the currently
+  // accepted item code. Using that archive alone mixed two product queues
+  // together, while separately numbering variants later merged by inventory.
+  // This changes only position/grouping metadata, never stock ownership.
+  const productQueueKeyById = customerQueueProductKeys(productRows, aliases as Array<{ product_id: string | null; alias: string | null }>, archivedIdentityBySourceRecordId, canonicalLines);
   const queueRows: Array<ReturnType<typeof toCustomerQueueRow>> = [];
   const lineProductIdByLineId = new Map<string, string>();
   function toCustomerQueueRow(line: typeof canonicalLines[number]) {
@@ -305,7 +308,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v5-signed-proof"],
+  ["canonical-customer-queue-read-model-v6-display-product-keys"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

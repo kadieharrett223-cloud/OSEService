@@ -7,54 +7,11 @@ import { loadContainerReceipt, UNPLANNED_RECEIPT_REF } from "@/lib/containers/co
 import { computeCoverage } from "@/lib/containers/coverage-math";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { validateContainerProductRows, type ContainerProductOption } from "@/lib/containers/product-selection";
 
 function emptyToNull(value: FormDataEntryValue | null) {
   const raw = String(value ?? "").trim();
   return raw ? raw : null;
-}
-
-function parseProductLines(raw: string) {
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const parts = line.split("|").map((part) => part.trim()).filter(Boolean);
-      if (parts.length === 0) {
-        return null;
-      }
-
-      const sku = parts[0];
-      const qtyRaw = parts[1] ?? "1";
-      const qty = Number(qtyRaw);
-
-      if (!sku || Number.isNaN(qty) || qty <= 0) {
-        return null;
-      }
-
-      return { sku, qty };
-    })
-    .filter((item): item is { sku: string; qty: number } => Boolean(item));
-}
-
-function parseProductRows(formData: FormData) {
-  const skus = formData.getAll("product_sku").map((value) => String(value ?? "").trim());
-  const qtyValues = formData.getAll("product_qty").map((value) => String(value ?? "").trim());
-  const max = Math.max(skus.length, qtyValues.length);
-  const rows: Array<{ sku: string; qty: number }> = [];
-
-  for (let index = 0; index < max; index += 1) {
-    const sku = skus[index] ?? "";
-    const qtyRaw = qtyValues[index] ?? "";
-    if (!sku) continue;
-
-    const qty = Number(qtyRaw || "0");
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-
-    rows.push({ sku, qty });
-  }
-
-  return rows;
 }
 
 function isUuid(value: string) {
@@ -84,7 +41,19 @@ export async function createContainerAction(formData: FormData) {
   const etaEstimatedDate = emptyToNull(formData.get("eta_estimated_date"));
   const etaConfirmedDate = emptyToNull(formData.get("eta_confirmed_date"));
   const notes = emptyToNull(formData.get("notes"));
-  const productsInput = String(formData.get("products") ?? "").trim();
+
+  // Validate every catalog identity before creating anything. A typo must
+  // never create a new product or silently omit part of the manifest.
+  const { data: catalog, error: catalogError } = await supabase.from("products").select("id,sku,canonical_name,status");
+  if (catalogError) redirect("/containers?error=Unable+to+validate+products");
+  let selectedLines: Array<{ productId: string; qty: number }>;
+  try {
+    selectedLines = validateContainerProductRows(formData, (catalog ?? []).map(p => ({
+      id: p.id, sku: p.sku ?? "", name: p.canonical_name ?? "", status: p.status,
+    })) as ContainerProductOption[]);
+  } catch (error) {
+    redirect(`/containers?error=${encodeURIComponent(error instanceof Error ? error.message : "Invalid products")}`);
+  }
 
   const { data: container, error: containerError } = await supabase
     .from("containers")
@@ -112,49 +81,22 @@ export async function createContainerAction(formData: FormData) {
     redirect("/containers?error=Could+not+create+container");
   }
 
-  const parsedRows = parseProductRows(formData);
-  const parsedLines = parsedRows.length > 0 ? parsedRows : parseProductLines(productsInput);
-  if (parsedLines.length > 0) {
-    for (const line of parsedLines) {
-      let productId: string | null = null;
-
-      const { data: existingProduct, error: productLookupError } = await supabase
-        .from("products")
-        .select("id")
-        .eq("sku", line.sku)
-        .maybeSingle();
-
-      if (!productLookupError && existingProduct?.id) {
-        productId = existingProduct.id;
-      } else {
-        const { data: createdProduct, error: createProductError } = await supabase
-          .from("products")
-          .insert({
-            sku: line.sku,
-            canonical_name: line.sku,
-            description: "Created from container import",
-            status: "Active",
-          })
-          .select("id")
-          .single();
-
-        if (!createProductError && createdProduct?.id) {
-          productId = createdProduct.id;
-        }
-      }
-
-      if (productId) {
-        await supabase.from("container_lines").insert({
-          container_id: container.id,
-          product_id: productId,
-          ordered_qty: line.qty,
-          received_qty: 0,
-          on_order_qty: line.qty,
-        });
-      }
+  if (selectedLines.length > 0) {
+    const { error: manifestError } = await supabase.from("container_lines").insert(selectedLines.map(line => ({
+      container_id: container.id, product_id: line.productId,
+      ordered_qty: line.qty, received_qty: 0, on_order_qty: line.qty,
+    })));
+    if (manifestError) {
+      // Only this newly-created empty container is eligible for cleanup.
+      const { error: cleanupError } = await supabase.from("containers").delete().eq("id", container.id);
+      redirect(`/containers?error=${encodeURIComponent(cleanupError
+        ? "Manifest could not be saved; an empty container remains. Do not recreate it—review the saved container."
+        : "Manifest could not be saved. No container was created. Please retry.")}`);
     }
   }
 
+  revalidateOrdersProjection();
+  revalidatePath("/inventory");
   revalidatePath("/containers");
   redirect("/containers?success=Container+added");
 }

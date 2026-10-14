@@ -1,34 +1,36 @@
 "use client";
 
 import { useState } from "react";
+import { productLookupText, type ContainerProductOption } from "@/lib/containers/product-selection";
 
 type AddContainerModalProps = {
   createAction: (formData: FormData) => void | Promise<void>;
-  productSkus: string[];
+  products: ContainerProductOption[];
 };
 
 type ProductRow = {
   id: string;
-  sku: string;
+  productId: string;
+  search: string;
   qty: string;
 };
 
-export function AddContainerModal({ createAction, productSkus }: AddContainerModalProps) {
+export function AddContainerModal({ createAction, products }: AddContainerModalProps) {
   const [open, setOpen] = useState(false);
-  const [rows, setRows] = useState<ProductRow[]>([{ id: "row-1", sku: "", qty: "" }]);
+  const [rows, setRows] = useState<ProductRow[]>([{ id: "row-1", productId: "", search: "", qty: "" }]);
 
   function addRow() {
-    setRows((current) => [...current, { id: `row-${current.length + 1}-${Date.now()}`, sku: "", qty: "" }]);
+    setRows((current) => [...current, { id: `row-${current.length + 1}-${Date.now()}`, productId: "", search: "", qty: "" }]);
   }
 
   function removeRow(id: string) {
     setRows((current) => {
-      if (current.length === 1) return [{ ...current[0], sku: "", qty: "" }];
+      if (current.length === 1) return [{ ...current[0], productId: "", search: "", qty: "" }];
       return current.filter((row) => row.id !== id);
     });
   }
 
-  function updateRow(id: string, key: "sku" | "qty", value: string) {
+  function updateRow(id: string, key: "productId" | "search" | "qty", value: string) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, [key]: value } : row)));
   }
 
@@ -121,29 +123,30 @@ export function AddContainerModal({ createAction, productSkus }: AddContainerMod
                   </button>
                 </div>
 
-                <datalist id="container-sku-options">
-                  {productSkus.map((sku) => (
-                    <option key={sku} value={sku} />
-                  ))}
-                </datalist>
-
                 <div className="space-y-2">
                   {rows.map((row, index) => (
                     <div key={row.id} className="grid grid-cols-[1fr_130px_88px] gap-2">
-                      <input
-                        id={`product-row-${index}`}
-                        name="product_sku"
-                        list="container-sku-options"
-                        className="input"
-                        placeholder="Start typing SKU..."
-                        value={row.sku}
-                        onChange={(event) => updateRow(row.id, "sku", event.target.value.toUpperCase())}
-                      />
+                      <div className="min-w-0 space-y-1">
+                        <input id={`product-row-${index}`} className="input"
+                          aria-label={`Search product for row ${index + 1}`}
+                          placeholder="Search existing products by SKU or name…"
+                          value={row.search} onChange={event => updateRow(row.id, "search", event.target.value)} />
+                        <select name="product_id" className="select"
+                          aria-label={`Select product for row ${index + 1}`}
+                          required={Boolean(row.search || row.qty || row.productId)}
+                          value={row.productId} onChange={event => updateRow(row.id, "productId", event.target.value)}>
+                          <option value="">Select an existing product</option>
+                          {products.filter(p => p.id === row.productId || productLookupText(`${p.sku} ${p.name}`).includes(productLookupText(row.search)))
+                            .map(p => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+                        </select>
+                      </div>
                       <input
                         name="product_qty"
                         type="number"
                         min="1"
                         step="1"
+                        required={Boolean(row.productId)}
+                        aria-label={`Quantity for row ${index + 1}`}
                         className="input"
                         placeholder="Qty"
                         value={row.qty}
@@ -159,7 +162,7 @@ export function AddContainerModal({ createAction, productSkus }: AddContainerMod
                     </div>
                   ))}
                 </div>
-                <p className="mt-1 text-xs text-[#64748b]">Type SKU to see suggestions, then enter quantity.</p>
+                <p className="mt-1 text-xs text-[#64748b]">Search, select an existing product, then enter quantity. New products must be added on Inventory first; typing here never creates one.</p>
               </div>
 
               <div>

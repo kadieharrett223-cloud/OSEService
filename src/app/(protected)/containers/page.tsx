@@ -85,13 +85,14 @@ export default async function ContainersPage({
       .order("entered_date", { ascending: false }),
     supabase
       .from("products")
-      .select("sku")
+      .select("id,sku,canonical_name,status")
+      .eq("status", "Active")
       .order("sku", { ascending: true }),
   ]);
 
-  const skuOptions = (products ?? [])
-    .map((row) => String((row as { sku?: string | null }).sku ?? "").trim().toUpperCase())
-    .filter(Boolean);
+  const productOptions = (products ?? []).map(row => ({
+    id: row.id, sku: row.sku ?? "", name: row.canonical_name ?? "",
+  })).filter(row => row.sku);
 
   const errorMessage = containersError ? "Unable to load container data right now." : params.error ? params.error : null;
   const successMessage = params.success ? params.success : null;
@@ -143,7 +144,7 @@ export default async function ContainersPage({
               Review incoming inventory, logistics, and product detail for each container without changing the service workflow.
             </p>
           </div>
-          <AddContainerModal createAction={createContainerAction} productSkus={skuOptions} />
+          <AddContainerModal createAction={createContainerAction} products={productOptions} />
         </div>
       </div>
 

@@ -14,6 +14,16 @@ const cleanMappedPhysicalLine = {
 };
 
 describe("QBO forward intake classifier", () => {
+  it.each(["Free Shipping", "Free Freight", "Free Delivery"])("imports physical lifts advertising %s", (benefit) => {
+    expect(isInventoryDemandQuickbooksLine({ qbo_sku: "4PC-6", product_id: "product-lift", ordered_qty: 1,
+      source_description: `Olympic 4PC-6 Little Buddy 6,000 lb Lift – ${benefit}` })).toBe(true);
+  });
+
+  it.each(["Shipping Charge", "Freight", "Delivery", "Discount-1"])("keeps %s out of demand even with a stale mapping", (qbo_sku) => {
+    expect(isInventoryDemandQuickbooksLine({ qbo_sku, product_id: "stale-product", ordered_qty: 1,
+      source_description: "Free Shipping" })).toBe(false);
+  });
+
   it("uses invoice date when paid status exists but the payment date was not detected", () => {
     expect(qboIntakePriorityDate(null, "2026-06-08")).toBe("2026-06-08");
     expect(isWithinAutomaticQboIntake(null, "2026-06-08")).toBe(true);

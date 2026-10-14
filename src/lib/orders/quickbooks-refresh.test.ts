@@ -13,6 +13,16 @@ function orderLine(overrides: Partial<RefreshOrderLine> = {}): RefreshOrderLine 
 }
 
 describe("re-entering a QuickBooks invoice", () => {
+  it("restores the 4PC-6 lift identity despite Free Shipping in its product description", () => {
+    const plan = planQuickbooksOrderRefresh([
+      invoiceLine({ product_id: "product-lift", qbo_sku: "4PC-6", ordered_qty: 1,
+        source_description: "Olympic 4PC-6 Little Buddy 6,000 lb Compact Portable 4-Post Car Storage & Maintenance Lift – Low-Profile Vehicle Lift – 10-Year Warranty – Free Shipping" }),
+    ], [orderLine({ product_id: "product-motor" })], new Map([["4PC-6", "product-lift"]]));
+    expect(plan.updates).toEqual([{ lineId: "order-line-1", ordered_qty: 1, approved_qty: 1, approval_status: "APPROVED", product_id: "product-lift" }]);
+    expect(plan.inserts).toEqual([]);
+    expect(plan.skippedShipped).toEqual([]);
+  });
+
   it("uses only the current positive QBO item lines when an invoice has historical snapshots", () => {
     const quantities = liveQuickBooksLineQuantities({
       Line: [

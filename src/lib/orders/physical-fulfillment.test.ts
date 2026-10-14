@@ -15,6 +15,21 @@ function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfill
 }
 
 describe("physical fulfillment totals", () => {
+  it("counts the Little Buddy lift and motor despite the Free Shipping product description", () => {
+    const lines = [
+      line({ id: "lift", legacy_item_code: "4PC-6", products: { sku: "4PC-6", canonical_name: "Little Buddy Lift – Free Shipping" } }),
+      line({ id: "motor", legacy_item_code: "HPU1103", products: { sku: "HPU1103", canonical_name: "110V motor" } }),
+    ];
+    const summary = getCanonicalPhysicalOrderSummary({
+      rawPayload: invoicePayload([["4PC-6", 1], ["HPU1103", 1], ["Shipping Charge", 1]], {
+        descriptions: { "4PC-6": "Olympic 4PC-6 Little Buddy 6,000 lb Lift – Free Shipping" },
+      }),
+      lines,
+    });
+    expect(summary).toMatchObject({ ordered: 2, fulfilled: 0, remaining: 2, lineCount: 2, isComplete: false });
+    expect(lines.map((item) => item.fulfilled_qty)).toEqual([0, 0]);
+  });
+
   it("keeps every remaining mapped physical line eligible regardless of fulfillment source or assignment", () => {
     for (const fulfillmentSource of [null, "WAREHOUSE", "CONTAINER", "DROPSHIP", "OTHER"]) {
       expect(isRemainingPhysicalFulfillmentLine({

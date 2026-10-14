@@ -155,6 +155,11 @@ export function isNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; so
     || /\bservice\b|\binstall(?:ation)?\b/.test(`${sku} ${description}`);
 }
 
+/** Ignore marketing benefits when classifying descriptions, never the actual item/SKU name. */
+export function withoutFreeShippingBenefits(description: string) {
+  return description.replace(/\bfree\s+(?:shipping|freight|delivery)\b/gi, "");
+}
+
 /** These rows cannot represent warehouse demand even when a stale mapping exists. */
 export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | null; source_description?: string | null }) {
   const sku = String(line.qbo_sku ?? "").trim().toLowerCase();
@@ -162,8 +167,7 @@ export function isAlwaysNonInventoryQuickbooksLine(line: { qbo_sku?: string | nu
   // benefit does not turn a physical lift into an accounting-only charge.
   // Keep the actual item name intact so Shipping/Delivery charge SKUs still
   // stay non-inventory, even if their descriptions also say "free".
-  const description = String(line.source_description ?? "").trim().toLowerCase()
-    .replace(/\bfree\s+(?:shipping|freight|delivery)\b/g, "");
+  const description = withoutFreeShippingBenefits(String(line.source_description ?? "").trim().toLowerCase());
   return sku === "note"
     || sku.startsWith("note:")
     // A miscellaneous charge can stand in for a real product on older

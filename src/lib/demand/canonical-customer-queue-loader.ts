@@ -10,7 +10,7 @@ import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "./canonical-customer-queue-c
 import { unstable_cache } from "next/cache";
 import { createQueueReadPool, fetchQueuePages } from "./queue-query-pages";
 import { decodeQueueCache, encodeQueueCache } from "./queue-cache-codec";
-import { pausedCustomerQueueIdentities } from "./customer-queue-pause";
+import { otherFulfillmentQueueIdentities } from "./customer-queue-source";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -220,9 +220,9 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     : line);
   const resolvedCanonicalLines = getCanonicalOpenDemandLines(bridgedWithQueueObligation, completedLineIds, completedInvoiceIds, reviewedResolutions as ReviewedObligationResolution[]);
   const canonicalLines = resolvedCanonicalLines;
-  // Readiness affects display positions only. Preserve canonicalLines verbatim:
+  // Other fulfillment is outside the active Customer List. Preserve canonicalLines verbatim:
   // inventory totals, shipment evidence and saved allocations must not change.
-  const pausedIdentities = pausedCustomerQueueIdentities(bridged);
+  const otherSourceIdentities = otherFulfillmentQueueIdentities(canonicalLines);
   // Number the same operational products that inventory displays. Recycled
   // legacy IDs can have an archived SKU that disagrees with the currently
   // accepted item code. Using that archive alone mixed two product queues
@@ -254,7 +254,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: false };
   }
   for (const line of canonicalLines) {
-    if (pausedIdentities.has(demandLineIdentity(line))) continue;
+    if (otherSourceIdentities.has(demandLineIdentity(line))) continue;
     if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;
     queueRows.push(toCustomerQueueRow(line));
     lineProductIdByLineId.set(line.id, line.product_id);
@@ -278,7 +278,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     projectedByInvoiceProductKey.set(`${row.sourceInvoiceId ?? `ORDER:${row.orderId}`}|${productKey}`, row);
   }
   for (const line of canonicalLines) {
-    if (pausedIdentities.has(demandLineIdentity(line))) continue;
+    if (otherSourceIdentities.has(demandLineIdentity(line))) continue;
     if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;
     const productKey = productQueueKeyById.get(line.product_id) ?? line.product_id;
     const invoiceKey = line.shipping_orders?.source_invoice_id ?? `ORDER:${line.shipping_orders?.id ?? ""}`;
@@ -291,7 +291,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
   // QBO obligation, too.  This is deliberately an alias only: it does not
   // create demand or alter any physical inventory state.
   for (const line of bridged) {
-    if (pausedIdentities.has(demandLineIdentity(line))) continue;
+    if (otherSourceIdentities.has(demandLineIdentity(line))) continue;
     if (!isOpenCustomerQueueLine(line)) continue;
     const canonicalRow = projectedByLogicalDemandKey.get(demandLineIdentity(line));
     if (canonicalRow) queueEntryBySourceLineId.set(line.id, canonicalRow);
@@ -317,7 +317,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v8-explicit-readiness-pause"],
+  ["canonical-customer-queue-read-model-v9-other-source-exclusion"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

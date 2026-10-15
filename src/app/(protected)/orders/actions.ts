@@ -1665,50 +1665,6 @@ export async function remapOrderLineProductAction(formData: FormData) {
   redirect(`/orders/${orderId}?message=Product+mapping+updated+for+this+order+line`);
 }
 
-/** Readiness metadata only: never touch stock, allocations, quantities or shipment state. */
-export async function updateCustomerQueuePauseAction(formData: FormData) {
-  await requireUser();
-  const orderId = getString(formData, "orderId");
-  const lineId = getString(formData, "lineId");
-  const operation = getString(formData, "queue_operation");
-  const reason = getString(formData, "queue_pause_reason")?.trim() || null;
-  const adminClient = getSupabaseAdmin();
-  if (!orderId || !lineId || !["pause", "resume"].includes(operation ?? "")) {
-    redirect("/orders?error=Invalid+customer+list+request");
-  }
-  await assertOrderIsOperational(adminClient, orderId);
-  const paused = operation === "pause";
-  if (paused && !reason) redirect(`/orders/${orderId}?error=Enter+a+reason+for+pausing+this+customer+list+item`);
-  const { data: line, error } = await adminClient.from("shipping_order_lines")
-    .select("id,customer_queue_paused,customer_queue_pause_reason,approved_qty,ordered_qty,fulfilled_qty,fulfillment_status")
-    .eq("id", lineId).eq("shipping_order_id", orderId).maybeSingle();
-  const row = line as { id: string; customer_queue_paused: boolean; customer_queue_pause_reason: string | null; approved_qty: number | null; ordered_qty: number | null; fulfilled_qty: number | null; fulfillment_status: string | null } | null;
-  if (error || !row) redirect(`/orders/${orderId}?error=${encodeURIComponent(error?.message ?? "Order line not found")}`);
-  if (Math.max(Number(row.approved_qty ?? 0), Number(row.ordered_qty ?? 0)) <= Number(row.fulfilled_qty ?? 0)
-    || ["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(row.fulfillment_status ?? "").toUpperCase())) {
-    redirect(`/orders/${orderId}?error=Only+remaining+order+items+can+be+paused+or+resumed`);
-  }
-  if (row.customer_queue_paused === paused) redirect(`/orders/${orderId}?message=Customer+list+item+already+${paused ? "paused" : "active"}`);
-  const { data: saved, error: saveError } = await adminClient.from("shipping_order_lines").update({
-    customer_queue_paused: paused,
-    customer_queue_pause_reason: paused ? reason : null,
-  } as never).eq("id", lineId).eq("shipping_order_id", orderId)
-    .eq("customer_queue_paused", row.customer_queue_paused).select("id");
-  if (saveError || saved?.length !== 1) redirect(`/orders/${orderId}?error=${encodeURIComponent(saveError?.message ?? "Item changed while saving. Reload and try again.")}`);
-  const { error: auditError } = await adminClient.from("audit_log").insert({
-    entity_type: "shipping_order", entity_id: orderId,
-    action: paused ? "CUSTOMER_QUEUE_PAUSED" : "CUSTOMER_QUEUE_RESUMED",
-    details: { line_id: lineId, reason: paused ? reason : row.customer_queue_pause_reason,
-      previous_paused: row.customer_queue_paused, paused },
-  });
-  revalidateOrdersList();
-  revalidatePath("/inventory");
-  revalidatePath("/order-queue");
-  revalidatePath(`/orders/${orderId}`);
-  if (auditError) redirect(`/orders/${orderId}?error=${encodeURIComponent(`Customer list change saved, but activity history could not be recorded: ${auditError.message}`)}`);
-  redirect(`/orders/${orderId}?message=${paused ? "Item+paused+on+Customer+Lists.+Order+and+stock+unchanged" : "Item+resumed+on+Customer+Lists+using+original+order+priority"}`);
-}
-
 export async function updateOrderLineAssignmentAction(formData: FormData) {
   await requireUser();
 
@@ -1730,7 +1686,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
 
   const normalizedSource = normalizeFulfillmentSource(source);
   const isContainerAssignment = source === "CONTAINER";
-  if (!normalizedSource && !isContainerAssignment) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Container,+Dropship,+or+Other`);
+  if (!normalizedSource && !isContainerAssignment) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Container,+Dropship,+Other,+or+Customer+Not+Ready`);
   if (normalizedSource === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
   if (normalizedSource === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
   if (isContainerAssignment && !containerId) redirect(`/orders/${orderId}?error=Select+a+container+for+Container+assignment`);
@@ -1773,15 +1729,15 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
   }
 
-  const { error: sourceError } = await adminClient.from("shipping_order_lines").update({
+  const { data: savedSources, error: sourceError } = await adminClient.from("shipping_order_lines").update({
     // Container allocation is still an internal physical pipeline source.
     fulfillment_source: isContainerAssignment ? "WAREHOUSE" : normalizedSource,
     fulfillment_supplier: normalizedSource === "DROPSHIP" ? supplier : null,
     fulfillment_reference: normalizedSource === "DROPSHIP" ? reference : null,
     fulfillment_tracking: normalizedSource === "DROPSHIP" ? tracking : null,
     fulfillment_notes: fulfillmentNotes,
-  } as never).eq("id", lineRow.id);
-  if (sourceError) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError.message)}`);
+  } as never).eq("id", lineRow.id).eq("shipping_order_id", orderId).select("id");
+  if (sourceError || savedSources?.length !== 1) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError?.message ?? "Assignment was not saved. Reload and try again.")}`);
 
   if (remainingQty > 0 && (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource))) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({
@@ -1816,7 +1772,9 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
 
   await writeOrderActivity(adminClient, orderId, "ORDER_LINE_ASSIGNMENT_UPDATED", {
     line_id: lineId,
+    previous_source: lineRow.fulfillment_source,
     source: isContainerAssignment ? "CONTAINER" : normalizedSource,
+    notes: fulfillmentNotes,
     container_id: isContainerAssignment ? containerId : null,
     quantity: assignedQty,
   });
@@ -1825,7 +1783,7 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   revalidatePath("/order-queue");
   revalidatePath(`/orders/${orderId}`);
   revalidateOrdersProjection();
-  redirect(`/orders/${orderId}?message=Assignment+updated`);
+  redirect(`/orders/${orderId}?message=${normalizedSource === "CUSTOMER_NOT_READY" ? "Customer+Not+Ready+saved.+Item+removed+from+active+Customer+Lists.+Physical+stock+unchanged" : normalizedSource === "OTHER" ? "Other+assignment+saved.+Item+removed+from+active+Customer+Lists.+Physical+stock+unchanged" : "Assignment+updated"}`);
 }
 
 export async function completeNonWarehouseFulfillmentAction(formData: FormData) {
@@ -1999,6 +1957,9 @@ export async function markOrderLineShippedAction(formData: FormData) {
   const fulfilledQty = Number(lineRow.fulfilled_qty ?? 0);
   const remainingQty = Math.max(0, approvedQty - fulfilledQty);
 
+  if (normalizeFulfillmentSource(lineRow.fulfillment_source) === "CUSTOMER_NOT_READY") {
+    redirect(`/orders/${orderId}?error=Customer+Not+Ready.+Change+the+fulfillment+source+before+shipping`);
+  }
   if (shipQty > remainingQty) {
     redirect(`/orders/${orderId}?error=Ship+quantity+cannot+exceed+remaining+quantity`);
   }

@@ -166,7 +166,7 @@ function sortContainersByEta(containers: ProductContainerSupply[]) {
 
 function isInventoryDemand(line: OpenQueueLine) {
   const source = String(line.fulfillment_source ?? "WAREHOUSE").trim().toUpperCase();
-  return source !== "DROPSHIP" && source !== "OTHER";
+  return source !== "DROPSHIP" && source !== "OTHER" && source !== "CUSTOMER_NOT_READY";
 }
 
 function queueRange(line: OpenQueueLine, offset: number, quantity: number) {

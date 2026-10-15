@@ -19,7 +19,7 @@ type FulfillmentEntry = {
   fulfillment_type?: "SHIPMENT" | "PICKUP" | null;
 };
 
-type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
+type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" | "CUSTOMER_NOT_READY";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -65,6 +65,7 @@ export function LineFulfillmentPanel({
   const driverLicenses = attachments.filter((item) => item.document_type === "DRIVERS_LICENSE" && item.is_restricted);
   const isDropship = fulfillmentSource === "DROPSHIP";
   const isOther = fulfillmentSource === "OTHER";
+  const isNotReady = fulfillmentSource === "CUSTOMER_NOT_READY";
 
   return (
     <div className="rounded-xl border border-[#dbe3ee] bg-white p-4 xl:col-span-2">
@@ -74,13 +75,13 @@ export function LineFulfillmentPanel({
           <h3 className="mt-1 text-lg font-semibold text-[#111827]">{sku} · Qty {remainingQty}</h3>
           <p className="mt-1 text-sm text-[#475569]">Ordered line remaining: {remainingQty} · Customer queue: {queuePosition != null ? `#${queuePosition}` : "Not queued"}</p>
         </div>
-        {isDropship || isOther ? null : <div className="flex rounded-lg border border-[#dbe3ee] bg-[#f8fafc] p-1">
+        {isDropship || isOther || isNotReady ? null : <div className="flex rounded-lg border border-[#dbe3ee] bg-[#f8fafc] p-1">
           <button type="button" onClick={() => setMode("SHIP")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "SHIP" ? "bg-white text-[#111827] shadow-sm" : "text-[#64748b]"}`}>Ship</button>
           <button type="button" onClick={() => setMode("PICKUP")} className={`rounded-md px-3 py-1.5 text-sm font-semibold ${mode === "PICKUP" ? "bg-white text-[#111827] shadow-sm" : "text-[#64748b]"}`}>Will Call / Pickup</button>
         </div>}
       </div>
 
-      {isDropship || isOther ? (
+      {isNotReady ? <p className="mt-4 text-sm">Customer Not Ready — change the fulfillment source before recording a shipment or pickup. This item remains owed.</p> : isDropship || isOther ? (
         <form action={completeNonWarehouseFulfillmentAction} className="mt-4 grid gap-3 md:grid-cols-2">
           <input type="hidden" name="orderId" value={orderId} />
           <input type="hidden" name="lineId" value={lineId} />

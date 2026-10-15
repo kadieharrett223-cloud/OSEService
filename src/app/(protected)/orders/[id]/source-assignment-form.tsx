@@ -4,7 +4,7 @@ import { useState } from "react";
 import { updateOrderLineAssignmentAction } from "../actions";
 import { AssignmentSubmitButton } from "./assignment-submit-button";
 
-type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
+type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" | "CUSTOMER_NOT_READY";
 
 export function SourceAssignmentForm({
   orderId,
@@ -42,6 +42,7 @@ export function SourceAssignmentForm({
         <option value="CONTAINER">Container</option>
         <option value="DROPSHIP">Dropship</option>
         <option value="OTHER">Other</option>
+        <option value="CUSTOMER_NOT_READY">Customer Not Ready</option>
       </select>
 
       {source === "WAREHOUSE" || source === "CONTAINER" ? (
@@ -90,10 +91,17 @@ export function SourceAssignmentForm({
       {source === "OTHER" ? (
         <>
           <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Required explanation</label>
-          <textarea name="fulfillment_notes" className="textarea" defaultValue={notes} placeholder="Explain the verified non-inventory fulfillment evidence" required />
-          <p className="text-xs text-[#64748b]">Other fulfillment does not deduct ON_FLOOR inventory or move container quantities. To temporarily remove this item from Customer Lists, use Pause Customer List Item below.</p>
+          <textarea name="fulfillment_notes" className="textarea" defaultValue={notes} placeholder="Explain the Other assignment, e.g. customer not ready" required />
+          <p className="text-xs text-[#64748b]">Other removes this item from active Customer Lists without marking it shipped or changing physical stock. Switch back to Warehouse or Container to restore its original queue priority.</p>
         </>
       ) : null}
+
+      {source === "CUSTOMER_NOT_READY" ? <>
+        <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Notes (optional)
+          <textarea name="fulfillment_notes" className="textarea mt-1" defaultValue={notes} placeholder="Customer timing or follow-up instructions" />
+        </label>
+        <p className="text-xs text-[#64748b]">Keeps this item owed but removes it from active Customer Lists and releases its reservation. Does not change physical stock or mark anything shipped. Change the source back when the customer is ready; original queue priority is retained.</p>
+      </> : null}
 
       <AssignmentSubmitButton label="Save Assignment" disabled={remainingQty <= 0} />
     </form>

@@ -1,10 +1,11 @@
-export type FulfillmentSource = "WAREHOUSE" | "DROPSHIP" | "OTHER";
+export type FulfillmentSource = "WAREHOUSE" | "DROPSHIP" | "OTHER" | "CUSTOMER_NOT_READY";
 
 export function normalizeFulfillmentSource(value: string | null | undefined): FulfillmentSource | null {
   const source = String(value ?? "").trim().toUpperCase();
   if (source === "FLOOR" || source === "WAREHOUSE") return "WAREHOUSE";
   if (source === "DROPSHIP") return "DROPSHIP";
   if (source === "OTHER") return "OTHER";
+  if (source === "CUSTOMER_NOT_READY") return "CUSTOMER_NOT_READY";
   return null;
 }
 
@@ -23,5 +24,6 @@ export function formatSavedFulfillmentSource(
   const normalized = normalizeFulfillmentSource(source);
   if (normalized === "DROPSHIP") return supplier ? `Dropship · ${supplier}` : "Dropship";
   if (normalized === "OTHER") return "Other fulfillment";
+  if (normalized === "CUSTOMER_NOT_READY") return "Customer Not Ready";
   return null;
 }

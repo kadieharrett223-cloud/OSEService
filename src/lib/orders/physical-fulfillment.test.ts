@@ -41,7 +41,7 @@ describe("physical fulfillment totals", () => {
   });
 
   it("keeps every remaining mapped physical line eligible regardless of fulfillment source or assignment", () => {
-    for (const fulfillmentSource of [null, "WAREHOUSE", "CONTAINER", "DROPSHIP", "OTHER"]) {
+    for (const fulfillmentSource of [null, "WAREHOUSE", "CONTAINER", "DROPSHIP", "OTHER", "CUSTOMER_NOT_READY"]) {
       expect(isRemainingPhysicalFulfillmentLine({
         id: `line-${fulfillmentSource ?? "unassigned"}`,
         product_id: "product-1",

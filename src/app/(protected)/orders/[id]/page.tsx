@@ -31,7 +31,6 @@ import {
   remapOrderLineProductAction,
   restoreOrphanedFulfillmentToQueueAction,
   updateOrderLineAssignmentAction,
-  updateCustomerQueuePauseAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
   updateOrderOperationsAction,
@@ -43,7 +42,6 @@ import {
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { AutoSubmitSelect } from "./auto-submit-select";
-import { AssignmentSubmitButton } from "./assignment-submit-button";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
 import { ShipmentHistoryCard } from "./shipment-history-card";
 import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionComposer, ShipmentSelectionProvider } from "./shipment-selection";
@@ -1609,6 +1607,8 @@ export default async function OrderDetailPage({
           ? "Dropship Assigned"
         : fulfillmentSource === "OTHER"
           ? "Other Assigned"
+        : fulfillmentSource === "CUSTOMER_NOT_READY"
+          ? "Customer Not Ready"
         : supply.fulfillment === "Preparing"
           ? "Preparing"
         : inStock >= needed
@@ -1847,7 +1847,7 @@ export default async function OrderDetailPage({
                     const lineHistoryCount = line ? (lineHistoryById[line.id]?.length ?? 0) : 0;
                     const assignedQty = line?.inventory_allocations?.reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0) ?? 0;
                     const inferredSource = String(line?.fulfillment_source ?? (line?.inventory_allocations?.[0]?.source_type === "CONTAINER" ? "CONTAINER" : line?.inventory_allocations?.[0]?.source_type === "FLOOR" ? "WAREHOUSE" : "WAREHOUSE")).toUpperCase();
-                    const assignmentSourceDefault = inferredSource === "DROPSHIP" || inferredSource === "OTHER" || inferredSource === "CONTAINER" ? inferredSource : "WAREHOUSE";
+                    const assignmentSourceDefault = inferredSource === "DROPSHIP" || inferredSource === "OTHER" || inferredSource === "CONTAINER" || inferredSource === "CUSTOMER_NOT_READY" ? inferredSource : "WAREHOUSE";
                     const qtyAssignedDefault = Math.min(Math.max(1, assignedQty || remainingQty || 1), Math.max(1, remainingQty || 1));
                     const descriptionSummary = truncateText(item.description, 30);
 
@@ -1855,14 +1855,14 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {!isCancelled && shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault as "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" }} /> : null}
+                            {!isCancelled && shipmentLine && !item.isNonInventory && remainingQty > 0 && assignmentSourceDefault !== "CUSTOMER_NOT_READY" ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>
                           <span className="text-[12px]">{item.orderedQty}</span>
                           <span className="text-[12px]">{fulfilled}</span>
                           <span className="text-[12px]">{needed}</span>
-                          <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
+                          <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "CUSTOMER_NOT_READY" ? "Customer Not Ready" : line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
                           <span className="self-center text-center text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
                           <span className="self-center text-center"><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>
@@ -1951,17 +1951,6 @@ export default async function OrderDetailPage({
                               </form>
                             ) : null}
                           </div>
-
-                          {!item.isNonInventory && remainingQty > 0 ? <form action={updateCustomerQueuePauseAction} className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                            <input type="hidden" name="orderId" value={lineOwnerOrderId} />
-                            <input type="hidden" name="lineId" value={line.id} />
-                            <input type="hidden" name="queue_operation" value={line.customer_queue_paused ? "resume" : "pause"} />
-                            <h3 className="text-sm font-semibold">Customer readiness · {line.customer_queue_paused ? "Paused" : "Active"}</h3>
-                            <p className="mt-1 text-xs text-[#64748b]">Pause this item when the customer is not ready. This only removes its Customer List position; stock, saved allocations and fulfillment stay unchanged. Other fulfillment is not a pause.</p>
-                            {line.customer_queue_paused ? <p className="mt-2 text-sm">{line.customer_queue_pause_reason}</p> : <label className="mt-2 block text-sm">Reason<textarea name="queue_pause_reason" className="textarea mt-1" rows={2} required placeholder="Customer not ready for delivery" /></label>}
-                            <AssignmentSubmitButton className="btn-secondary mt-2" label={line.customer_queue_paused ? "Resume Customer List Item" : "Pause Customer List Item"} />
-                            <p className="mt-1 text-xs text-[#64748b]">Resume restores the original date-based priority, not the back of the line.</p>
-                          </form> : null}
 
                           <LineFulfillmentPanel orderId={lineOwnerOrderId} lineId={line.id} sku={item.sku ?? line.products?.sku ?? "Item"} remainingQty={remainingQty} queuePosition={line.queue_position_start} fulfillmentMethod={orderRecord.fulfillment_method === "WILL_CALL" ? "WILL_CALL" : "SHIP"} fulfillmentSource={assignmentSourceDefault} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} attachments={attachments} history={fulfillmentsByLine[line.id] ?? []} />
 
@@ -2148,8 +2137,10 @@ export default async function OrderDetailPage({
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
                     <p className="mt-1 text-xs text-[#64748b]">{truncateText(queueDescription, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
-                      {queueLine?.customer_queue_paused
-                        ? "Customer list: Paused — customer not ready"
+                      {String(queueLine?.fulfillment_source ?? "").toUpperCase() === "CUSTOMER_NOT_READY"
+                        ? "Customer list: Excluded — Customer Not Ready"
+                        : String(queueLine?.fulfillment_source ?? "").toUpperCase() === "OTHER"
+                        ? "Customer list: Excluded — Other fulfillment"
                         : queuePosition
                         ? `Customer list position: #${queuePosition}`
                         : requiresQueueApproval

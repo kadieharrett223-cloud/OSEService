@@ -24,6 +24,15 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
+  it("does not consume warehouse or incoming supply for Customer Not Ready", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map([[productId, 1]]),
+      queueLinesByProduct: new Map([[productId, [line("not-ready", 4, 1, { fulfillment_source: "CUSTOMER_NOT_READY" }), line("ready", 1, 5)]]]),
+      containerSupplyByProduct: new Map([[productId, [container("c1", "Incoming", 4, "2026-11-01")]]]),
+    });
+    expect(result.allocations.map((allocation) => allocation.orderLineId)).toEqual(["ready"]);
+    expect(validateProductCoverage(result)).toEqual([]);
+  });
   it("allocates warehouse first, then incoming supply by ETA, at unit/range level", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 2]]),

@@ -477,6 +477,8 @@ export type Database = {
       };
       shipping_order_lines: {
         Row: {
+          customer_queue_paused: boolean;
+          customer_queue_pause_reason: string | null;
           id: string;
           shipping_order_id: string;
           qbo_invoice_line_id: string | null;
@@ -515,6 +517,8 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          customer_queue_paused?: boolean;
+          customer_queue_pause_reason?: string | null;
           id?: string;
           shipping_order_id: string;
           qbo_invoice_line_id?: string | null;
@@ -553,6 +557,8 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          customer_queue_paused?: boolean;
+          customer_queue_pause_reason?: string | null;
           shipping_order_id?: string;
           qbo_invoice_line_id?: string | null;
           product_id?: string;

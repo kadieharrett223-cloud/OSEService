@@ -11,6 +11,8 @@ describe("QuickBooks refresh fulfillment boundary", () => {
     // update is allowed to mark an item shipped as a side effect of refreshing.
     for (const update of activation.matchAll(/\.update\(\{([\s\S]*?)\}\)/g)) {
       expect(update[1]).not.toContain("fulfilled_qty");
+      expect(update[1]).not.toContain("customer_queue_paused");
+      expect(update[1]).not.toContain("customer_queue_pause_reason");
       expect(update[1]).not.toMatch(/fulfillment_status:\s*"FULFILLED"/);
     }
   });

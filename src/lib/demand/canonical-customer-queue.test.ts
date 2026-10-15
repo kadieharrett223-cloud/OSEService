@@ -30,6 +30,14 @@ function row(overrides: Partial<CanonicalCustomerQueueRow> = {}): CanonicalCusto
 }
 
 describe("projectCanonicalCustomerQueue", () => {
+  it("compacts a paused quantity range and resumes it at its original priority without changing the input", () => {
+    const first = row({ lineId: "early", sourceInvoiceId: "early-invoice", invoice: "early", logicalDemandKey: "early", openQty: 4, firstPaymentAt: "2026-01-01", priorityDate: "2026-01-01", excludedFromQueue: true });
+    const later = row({ lineId: "later", sourceInvoiceId: "later-invoice", invoice: "later", logicalDemandKey: "later", priorityDate: "2026-02-01" });
+    expect(projectCanonicalCustomerQueue([later, first]).map((entry) => [entry.lineId, entry.position])).toEqual([["later", "1"]]);
+    expect(projectCanonicalCustomerQueue([later, { ...first, excludedFromQueue: false }]).map((entry) => [entry.lineId, entry.position])).toEqual([["early", "1-4"], ["later", "5"]]);
+    expect(first.openQty).toBe(4);
+    expect(first.shippedQty).toBe(0);
+  });
   it("compacts excluded stored positions so Bernerd's active demand is #7, not stored #16", () => {
     const rows = Array.from({ length: 16 }, (_, index) => row({
       invoice: String(index + 1),

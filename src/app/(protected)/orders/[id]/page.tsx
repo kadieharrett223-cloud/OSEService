@@ -31,6 +31,7 @@ import {
   remapOrderLineProductAction,
   restoreOrphanedFulfillmentToQueueAction,
   updateOrderLineAssignmentAction,
+  updateCustomerQueuePauseAction,
   updateOrderLineStatusAction,
   updateOrderScheduleAction,
   updateOrderOperationsAction,
@@ -42,6 +43,7 @@ import {
 } from "../actions";
 import { AttachmentDropzone } from "@/app/(protected)/cases/new/attachment-dropzone";
 import { AutoSubmitSelect } from "./auto-submit-select";
+import { AssignmentSubmitButton } from "./assignment-submit-button";
 import { LineFulfillmentPanel } from "./line-fulfillment-panel";
 import { ShipmentHistoryCard } from "./shipment-history-card";
 import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionComposer, ShipmentSelectionProvider } from "./shipment-selection";
@@ -89,6 +91,8 @@ type OrderDetailRow = {
     priority: string | null;
     queue_position_start: number | null;
     queue_position_count: number | null;
+    customer_queue_paused?: boolean | null;
+    customer_queue_pause_reason?: string | null;
     queue_position_override: number | null;
     queue_position_override_reason: string | null;
     legacy_item_code: string | null;
@@ -656,6 +660,8 @@ function buildShippingOrderSelect(columnSet: Set<string>, lineColumnSet: Set<str
     "priority",
     "queue_position_start",
     "queue_position_count",
+    "customer_queue_paused",
+    "customer_queue_pause_reason",
     "queue_position_override",
     "queue_position_override_reason",
     "legacy_item_code",
@@ -819,6 +825,7 @@ export default async function OrderDetailPage({
     loadTableColumnSet(supabase, "shipping_order_lines", [
       "ordered_qty", "approved_qty", "fulfilled_qty", "approval_status", "warehouse_status", "fulfillment_status",
       "allocation_status", "priority", "queue_position_start", "queue_position_count", "queue_position_override",
+      "customer_queue_paused", "customer_queue_pause_reason",
       "queue_position_override_reason", "legacy_item_code", "legacy_matched_item_code", "legacy_container_assignment",
       "suggested_assignment_source", "suggested_container_id", "fulfillment_source", "fulfillment_supplier",
       "fulfillment_reference", "fulfillment_tracking", "fulfillment_notes",
@@ -1945,6 +1952,17 @@ export default async function OrderDetailPage({
                             ) : null}
                           </div>
 
+                          {!item.isNonInventory && remainingQty > 0 ? <form action={updateCustomerQueuePauseAction} className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                            <input type="hidden" name="orderId" value={lineOwnerOrderId} />
+                            <input type="hidden" name="lineId" value={line.id} />
+                            <input type="hidden" name="queue_operation" value={line.customer_queue_paused ? "resume" : "pause"} />
+                            <h3 className="text-sm font-semibold">Customer readiness · {line.customer_queue_paused ? "Paused" : "Active"}</h3>
+                            <p className="mt-1 text-xs text-[#64748b]">Pause this item when the customer is not ready. This only removes its Customer List position; stock, saved allocations and fulfillment stay unchanged. Other fulfillment is not a pause.</p>
+                            {line.customer_queue_paused ? <p className="mt-2 text-sm">{line.customer_queue_pause_reason}</p> : <label className="mt-2 block text-sm">Reason<textarea name="queue_pause_reason" className="textarea mt-1" rows={2} required placeholder="Customer not ready for delivery" /></label>}
+                            <AssignmentSubmitButton className="btn-secondary mt-2" label={line.customer_queue_paused ? "Resume Customer List Item" : "Pause Customer List Item"} />
+                            <p className="mt-1 text-xs text-[#64748b]">Resume restores the original date-based priority, not the back of the line.</p>
+                          </form> : null}
+
                           <LineFulfillmentPanel orderId={lineOwnerOrderId} lineId={line.id} sku={item.sku ?? line.products?.sku ?? "Item"} remainingQty={remainingQty} queuePosition={line.queue_position_start} fulfillmentMethod={orderRecord.fulfillment_method === "WILL_CALL" ? "WILL_CALL" : "SHIP"} fulfillmentSource={assignmentSourceDefault} supplier={line.fulfillment_supplier ?? ""} reference={line.fulfillment_reference ?? ""} tracking={line.fulfillment_tracking ?? ""} notes={line.fulfillment_notes ?? ""} attachments={attachments} history={fulfillmentsByLine[line.id] ?? []} />
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
@@ -2130,7 +2148,9 @@ export default async function OrderDetailPage({
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
                     <p className="mt-1 text-xs text-[#64748b]">{truncateText(queueDescription, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
-                      {queuePosition
+                      {queueLine?.customer_queue_paused
+                        ? "Customer list: Paused — customer not ready"
+                        : queuePosition
                         ? `Customer list position: #${queuePosition}`
                         : requiresQueueApproval
                           ? "Customer list: Needs mapping approval"

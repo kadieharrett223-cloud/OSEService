@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { updateOrderLineAssignmentAction } from "../actions";
+import { AssignmentSubmitButton } from "./assignment-submit-button";
 
 type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
 
@@ -90,11 +91,11 @@ export function SourceAssignmentForm({
         <>
           <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Required explanation</label>
           <textarea name="fulfillment_notes" className="textarea" defaultValue={notes} placeholder="Explain the verified non-inventory fulfillment evidence" required />
-          <p className="text-xs text-[#64748b]">Other fulfillment does not deduct ON_FLOOR inventory or move container quantities.</p>
+          <p className="text-xs text-[#64748b]">Other fulfillment does not deduct ON_FLOOR inventory or move container quantities. To temporarily remove this item from Customer Lists, use Pause Customer List Item below.</p>
         </>
       ) : null}
 
-      <button className="btn-secondary" type="submit" disabled={remainingQty <= 0}>Save Assignment</button>
+      <AssignmentSubmitButton label="Save Assignment" disabled={remainingQty <= 0} />
     </form>
   );
 }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createOrderFromQuickbooksInvoiceAction } from "../actions";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { OrderSubmitButton } from "./order-submit-button";
 
 type SearchParams = { invoice?: string; error?: string };
 
@@ -90,9 +91,10 @@ export default async function NewOrderPage({
                 <form action={createOrderFromQuickbooksInvoiceAction}>
                   <input type="hidden" name="qbo_invoice_id" value={invoice.id} />
                   {invoice.payment_status !== "Paid" ? <input type="hidden" name="payment_hold" value="true" /> : null}
-                  <button type="submit" className="btn-primary">
-                    {invoice.existingOrderId ? "Open in New Orders" : invoice.payment_status === "Paid" ? "Add to New Orders" : "Add With Payment Hold"}
-                  </button>
+                  <OrderSubmitButton
+                    label={invoice.existingOrderId ? "Open in New Orders" : invoice.payment_status === "Paid" ? "Add to New Orders" : "Add With Payment Hold"}
+                    pendingLabel={invoice.existingOrderId ? "Opening…" : "Adding…"}
+                  />
                 </form>
               </div>
             ))}

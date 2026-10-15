@@ -1720,15 +1720,6 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     redirect(`/orders/${orderId}?error=Assigned+quantity+must+be+greater+than+zero`);
   }
 
-  const { error: clearError } = await adminClient
-    .from("inventory_allocations")
-    .delete()
-    .eq("shipping_order_line_id", lineRow.id);
-
-  if (clearError) {
-    redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
-  }
-
   const { data: savedSources, error: sourceError } = await adminClient.from("shipping_order_lines").update({
     // Container allocation is still an internal physical pipeline source.
     fulfillment_source: isContainerAssignment ? "WAREHOUSE" : normalizedSource,
@@ -1738,6 +1729,16 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     fulfillment_notes: fulfillmentNotes,
   } as never).eq("id", lineRow.id).eq("shipping_order_id", orderId).select("id");
   if (sourceError || savedSources?.length !== 1) redirect(`/orders/${orderId}?error=${encodeURIComponent(sourceError?.message ?? "Assignment was not saved. Reload and try again.")}`);
+
+  // A rejected source save must not release the customer's existing reservation.
+  const { error: clearError } = await adminClient
+    .from("inventory_allocations")
+    .delete()
+    .eq("shipping_order_line_id", lineRow.id);
+
+  if (clearError) {
+    redirect(`/orders/${orderId}?error=${encodeURIComponent(clearError.message)}`);
+  }
 
   if (remainingQty > 0 && (isContainerAssignment || shouldCreateWarehouseReservation(normalizedSource))) {
       const { error: insertError } = await adminClient.from("inventory_allocations").insert({

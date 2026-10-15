@@ -14,7 +14,7 @@ type SelectionLine = {
   defaultQty: number;
   inStock: number;
   isReserved: boolean;
-  fulfillmentSource: "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER";
+  fulfillmentSource: "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" | "CUSTOMER_NOT_READY";
 };
 type SelectedLine = SelectionLine & { quantity: number };
 type ContextValue = {
@@ -159,14 +159,15 @@ export function ShipmentSelectionCheckbox({ line }: { line: SelectionLine }) {
 
 export function ShipmentSelectionComposer({
   orderId,
-  pickupMode = false,
+  pickupMode: requestedPickupMode = false,
 }: {
   orderId: string;
   pickupMode?: boolean;
 }) {
   const { active, selected, cancel } = useSelection();
   if (!active) return null;
-  const hasExternalFulfillment = selected.some((line) => line.fulfillmentSource === "DROPSHIP" || line.fulfillmentSource === "OTHER");
+  const hasExternalFulfillment = selected.some((line) => ["DROPSHIP", "OTHER", "CUSTOMER_NOT_READY"].includes(line.fulfillmentSource));
+  const pickupMode = requestedPickupMode && !hasExternalFulfillment;
   return (
     <div className="mt-4 rounded-xl border border-[#bfdbfe] bg-[#f8fbff] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -279,7 +280,7 @@ export function ShipmentSelectionComposer({
               ) : null}
               {hasExternalFulfillment ? (
                 <p className="rounded-lg border border-[#bfdbfe] bg-white px-3 py-2 text-xs font-semibold text-[#334155]">
-                  Dropship/Other completion records customer fulfillment only. Olympic warehouse inventory is not deducted.
+                  Non-warehouse items record fulfillment without a stock deduction. Any selected Warehouse items still deduct only their fulfilled quantity.
                 </p>
               ) : null}
               <label className="text-xs font-semibold text-[#64748b]">

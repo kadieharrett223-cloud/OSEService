@@ -1824,7 +1824,8 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   } | null;
 
   if (lineError || !lineRow) redirect(`/orders/${orderId}?error=${encodeURIComponent(lineError?.message ?? "Order line not found")}`);
-  const source = String(lineRow.fulfillment_source ?? "").toUpperCase();
+  const savedSource = String(lineRow.fulfillment_source ?? "").toUpperCase();
+  const source = savedSource === "CUSTOMER_NOT_READY" ? "OTHER" : savedSource;
   if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Select+Dropship+or+Other+before+using+this+completion`);
 
   const finalSupplier = supplier ?? lineRow.fulfillment_supplier ?? null;
@@ -1957,9 +1958,6 @@ export async function markOrderLineShippedAction(formData: FormData) {
   const fulfilledQty = Number(lineRow.fulfilled_qty ?? 0);
   const remainingQty = Math.max(0, approvedQty - fulfilledQty);
 
-  if (normalizeFulfillmentSource(lineRow.fulfillment_source) === "CUSTOMER_NOT_READY") {
-    redirect(`/orders/${orderId}?error=Customer+Not+Ready.+Change+the+fulfillment+source+before+shipping`);
-  }
   if (shipQty > remainingQty) {
     redirect(`/orders/${orderId}?error=Ship+quantity+cannot+exceed+remaining+quantity`);
   }
@@ -2396,7 +2394,8 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     linesByOwner.set(line.shipping_order_id, ownerLines);
   }
   for (const line of lines.filter((candidate) => !shouldMoveWarehouseInventory(candidate.fulfillment_source ?? "WAREHOUSE"))) {
-    const source = String(line.fulfillment_source ?? "").toUpperCase();
+    const savedSource = String(line.fulfillment_source ?? "").toUpperCase();
+    const source = savedSource === "CUSTOMER_NOT_READY" ? "OTHER" : savedSource;
     if (source !== "DROPSHIP" && source !== "OTHER") redirect(`/orders/${orderId}?error=Dropship+and+Other+must+be+assigned+before+non-warehouse+completion`);
     const quantity = selectedQuantities.get(line.id) ?? 0;
     const approvedQty = Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0));

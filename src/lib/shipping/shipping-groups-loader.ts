@@ -244,7 +244,11 @@ export async function loadShippingGroupCandidates() {
   }
   const warehouseQty = new Map<string, number>();
   const warnings: string[] = [];
+  const liftKeys = new Set(products
+    .filter(p => p.inventory_group?.toLowerCase().includes("lifts"))
+    .map(p => keys.get(p.id)));
   for (const key of demand.keys()) {
+    if (!liftKeys.has(key)) continue;
     const resolution = resolveProductCoverage(key, {
       floorAvailableByProduct: floor,
       queueLinesByProduct: demand,

@@ -24,6 +24,14 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
+  it("uses the saved estimated arrival before a stale entered-date lead-time fallback", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("oldest", 1, 1)]]]),
+      containerSupplyByProduct: new Map([[productId, [container("254", "254", 20, null, { entered_date: "2026-08-24", eta_estimated_date: "2026-10-27" })]]]),
+    });
+    expect(result.allocations[0]).toMatchObject({ etaDate: "2026-10-27", etaType: "ESTIMATED", sourceId: "254" });
+  });
   it("does not consume warehouse or incoming supply for Customer Not Ready", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 1]]),

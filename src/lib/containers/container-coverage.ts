@@ -2,7 +2,8 @@ import type { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
-import { canonicalProductSkuKey, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { authoritativeStockProductIds, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { customerQueueProductKeys } from "@/lib/demand/customer-queue-product-keys";
 import { containerProductCode } from "./product-code";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
@@ -111,21 +112,28 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
     if (!alias.product_id || !alias.alias) continue;
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
-  const productKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
+  // Match Inventory's customer lists. Archived numeric catalog IDs were recycled;
+  // using the archive alone can put 4PML-9 demand against 4PC-6 container supply.
+  const productKeyById = customerQueueProductKeys(productRows, (aliases ?? []) as Array<{ product_id: string | null; alias: string | null }>, archivedIdentityBySourceRecordId, canonicalQueue.canonicalLines);
   const productCodeById = Object.fromEntries(productRows.map((product) => [product.id,
     containerProductCode(product.sku, product.canonical_name, aliasesByProductId.get(product.id),
       archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]),
   ]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));
   const productIds = [...productKeyById.entries()].filter(([, key]) => containerKeys.has(key)).map(([id]) => id);
-  if (!containerKeys.size || !productIds.length) return { productCodeById, rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };
+  if (!containerKeys.size || !productIds.length) return { productKeyById, productCodeById, rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };
 
   const [{ data: floorRows }, { data: supplyRows }] = await Promise.all([
-    supabase.from("inventory_transactions").select("product_id,delta").in("product_id", productIds).eq("bucket", "ON_FLOOR"),
+    supabase.from("inventory_transactions").select("product_id,delta,source_type").in("product_id", productIds).eq("bucket", "ON_FLOOR"),
     supabase.from("container_lines").select("product_id,container_id,on_order_qty,received_qty,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date,entered_date)").in("product_id", productIds),
   ]);
+  const floorTransactions = (floorRows ?? []) as Array<{ product_id: string; delta: number | null; source_type: string | null }>;
+  const stockOwners = authoritativeStockProductIds(productRows, productKeyById,
+    new Set(floorTransactions.map((row) => row.product_id)),
+    new Set(floorTransactions.filter((row) => ["ADJUSTMENT", "RECOUNT", "CONTAINER_RECEIVED"].includes(String(row.source_type).toUpperCase())).map((row) => row.product_id)));
   const floorByKey = new Map<string, number>();
-  for (const row of (floorRows ?? []) as Array<{ product_id: string | null; delta: number | null }>) {
+  for (const row of floorTransactions) {
+    if (!stockOwners.has(row.product_id)) continue;
     const key = productKeyById.get(row.product_id ?? "");
     if (key) floorByKey.set(key, (floorByKey.get(key) ?? 0) + Number(row.delta ?? 0));
   }
@@ -169,12 +177,12 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
     for (const [lineId, lineCoverage] of coverage.lines) {
       const base = metadata.get(lineId);
       if (!base) continue;
-      const currentContainer = lineCoverage.allocations.find((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === containerId);
-      const source = currentContainer ?? lineCoverage.allocations[0];
-      rows.push({ ...base, productCode: productCodeById[base.productId] || base.sku, queuePositionLabel: queuePositionLabelByLineId.get(lineId) ?? "—", forecastSource: source?.sourceType ?? "UNASSIGNED", forecastSourceLabel: source?.sourceLabel ?? "Unassigned", forecastQty: currentContainer?.quantity ?? 0 });
+      const currentContainer = lineCoverage.allocations.filter((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === containerId);
+      const source = currentContainer[0] ?? lineCoverage.allocations[0];
+      rows.push({ ...base, productCode: productCodeById[base.productId] || base.sku, queuePositionLabel: queuePositionLabelByLineId.get(lineId) ?? "—", forecastSource: source?.sourceType ?? "UNASSIGNED", forecastSourceLabel: source?.sourceLabel ?? "Unassigned", forecastQty: currentContainer.reduce((sum, allocation) => sum + allocation.quantity, 0) });
     }
   }
-  return { productCodeById, rows: rows.sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER)), coverageByKey };
+  return { productKeyById, productCodeById, rows: rows.sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER)), coverageByKey };
 }
 
 export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId: string): Promise<ContainerReceipt> {
@@ -278,17 +286,14 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
   const effectiveQtyByProduct: Record<string, number> = {};
   const lines: ContainerLineSummary[] = containerLines.map((line) => {
     const productId = line.product_id as string;
-    const productKey = canonicalSkuKey(line.products?.sku);
-    const productForecast = forecast.coverageByKey.get(productKey);
+    const productKey = forecast.productKeyById.get(productId) ?? canonicalSkuKey(line.products?.sku);
     const expectedQty = getExpectedQty(line);
     const receivedQty = Math.max(0, Number(line.received_qty ?? 0));
     const demandQty = totalDemandQty(demandByProduct[productId] ?? []);
-    const forecastCoverageQty = productForecast?.allocations
-      .filter((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === containerId)
-      .reduce((sum, allocation) => sum + allocation.quantity, 0) ?? 0;
-    const assignedQty = forecast.rows
-      .filter((row) => canonicalSkuKey(row.sku) === productKey)
-      .reduce((sum, row) => sum + row.actuallyAssignedQty, 0);
+    // Summary and customer table must total the exact same forecast rows.
+    const productForecastRows = forecast.rows.filter((row) => forecast.productKeyById.get(row.productId) === productKey);
+    const forecastCoverageQty = productForecastRows.reduce((sum, row) => sum + row.forecastQty, 0);
+    const assignedQty = productForecastRows.reduce((sum, row) => sum + row.actuallyAssignedQty, 0);
 
     // Once received, physical counts are authoritative even when nothing arrived.
     const effectiveQty = isReceived ? receivedQty : expectedQty;

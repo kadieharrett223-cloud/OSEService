@@ -110,18 +110,19 @@ function getContainerEta(container: ProductContainerSupply): { etaDate: string |
     }
   }
 
+  if (container.eta_estimated_date) {
+    const parsed = new Date(container.eta_estimated_date);
+    if (!Number.isNaN(parsed.getTime())) {
+      return { etaDate: isoDateOnly(parsed), etaType: "ESTIMATED" };
+    }
+  }
+
+  // An operator's saved ETA supersedes the original lead-time calculation.
   if (container.entered_date) {
     const entered = new Date(container.entered_date);
     if (!Number.isNaN(entered.getTime())) {
       entered.setDate(entered.getDate() + 75);
       return { etaDate: isoDateOnly(entered), etaType: "ESTIMATED" };
-    }
-  }
-
-  if (container.eta_estimated_date) {
-    const parsed = new Date(container.eta_estimated_date);
-    if (!Number.isNaN(parsed.getTime())) {
-      return { etaDate: isoDateOnly(parsed), etaType: "ESTIMATED" };
     }
   }
 

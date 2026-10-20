@@ -18,7 +18,14 @@ vi.mock("@/lib/demand/canonical-customer-queue-loader", () => ({
   }),
 }));
 import { loadContainerReceipt } from "./container-coverage";
+import { containerProductCode } from "./product-code";
 import type { getSupabaseAdmin } from "@/lib/supabase/admin";
+
+it("does not replace a current product code with a recycled archive identity", () => {
+  expect(containerProductCode("000011", "HL-4PML-9", ["4PC-6"], "HK-4PC-6")).toBe("4PML-9");
+  expect(containerProductCode("000173", "Model: Olympic 4PXL-10 / lift")).toBe("4PXL-10");
+  expect(containerProductCode("000013", "HK-4PC-6")).toBe("4PC-6");
+});
 
 function database(received: boolean) {
   const writes = vi.fn(() => { throw new Error("Read-only display must not write"); });

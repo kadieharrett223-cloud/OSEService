@@ -2,7 +2,8 @@ import type { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
-import { canonicalProductSkuKey, canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
+import { canonicalProductSkuKey, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { containerProductCode } from "./product-code";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
@@ -112,7 +113,7 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
   }
   const productKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
   const productCodeById = Object.fromEntries(productRows.map((product) => [product.id,
-    preferredOperationalSku(product.sku, aliasesByProductId.get(product.id), product.canonical_name,
+    containerProductCode(product.sku, product.canonical_name, aliasesByProductId.get(product.id),
       archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]),
   ]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));

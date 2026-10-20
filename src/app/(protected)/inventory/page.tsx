@@ -274,7 +274,7 @@ const getCachedInventoryBaseDataset = unstable_cache(async () => {
     products = fallback.data as unknown as ProductRow[] | null;
   }
   return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, displayGroupData: displayGroupResult.data, oldErpProducts: oldErpProductsResult.data };
-}, ["inventory-base-read-model"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+}, ["inventory-base-read-model-stock-routing-v2"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];

@@ -124,6 +124,7 @@ export default async function ContainerDetailPage({
   }
 
   const isReceived = coverage.isReceived;
+  const customerDisplayByLineId = new Map(coverage.forecastRows.map((row) => [row.lineId, row]));
   const eligibleLineIds = coverage.eligibleLineIds;
   const customerRows = isReceived
     ? coverage.rows.map((row) => ({ ...row, containerQty: row.coveredQty, stockCovered: row.willMarkInWarehouse }))
@@ -171,7 +172,7 @@ export default async function ContainerDetailPage({
             lines={coverage.lines.map((line) => ({
               id: line.id,
               productId: line.productId,
-              sku: line.sku,
+              sku: coverage.productCodeById[line.productId] || line.sku,
               productName: line.productName,
               plannedQty: line.expectedQty,
             }))}
@@ -184,7 +185,7 @@ export default async function ContainerDetailPage({
             lines={coverage.lines.map((line) => ({
               id: line.id,
               productId: line.productId,
-              sku: line.sku,
+              sku: coverage.productCodeById[line.productId] || line.sku,
               productName: line.productName,
               expectedQty: line.expectedQty,
               assignedQty: line.assignedQty,
@@ -218,7 +219,7 @@ export default async function ContainerDetailPage({
             <table className="min-w-[720px] w-full divide-y divide-[#e5e7eb] text-sm">
               <thead className="bg-[#f9fafb] text-left text-[#6b7280]">
                 <tr>
-                  <th className="px-3 py-3 font-semibold">SKU</th>
+                  <th className="px-3 py-3 font-semibold">Product Code</th>
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Expected</th>
                   <th className="px-3 py-3 font-semibold">Received</th>
@@ -232,7 +233,7 @@ export default async function ContainerDetailPage({
                   return (
                     <tr key={line.id}>
                       <td className="px-3 py-3 font-medium text-[#111827]">
-                        {line.sku}
+                        {coverage.productCodeById[line.productId] || line.productName || line.sku}
                         {line.isUnplanned ? (
                           <span className="ml-2 rounded-full bg-[#fff7e6] px-2 py-0.5 text-[11px] font-semibold text-[#b45309]">Unplanned</span>
                         ) : null}
@@ -276,16 +277,17 @@ export default async function ContainerDetailPage({
               ? `${eligibleLineIds.size} order line(s) have stock covered by this container. ${customerRows.filter((row) => !row.stockCovered).length} line(s) remain waiting.`
               : `Based on expected quantities, ${customerRows.length} customer line(s) are forecast to receive ${customerUnits} unit(s) from this container.`}
           </p>
+          <p className="mt-1">Positions are on each product’s customer list, not a container-wide sequence. Ranges include all remaining units; Covered by Container shows only this container’s portion.</p>
         </div>
 
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-[840px] w-full divide-y divide-[#e5e7eb] text-sm">
             <thead className="bg-[#f9fafb] text-left text-[#6b7280]">
               <tr>
-                <th className="px-3 py-3 font-semibold">Queue</th>
+                <th className="px-3 py-3 font-semibold">Product List Position</th>
                 <th className="px-3 py-3 font-semibold">Invoice</th>
                 <th className="px-3 py-3 font-semibold">Customer</th>
-                <th className="px-3 py-3 font-semibold">SKU</th>
+                <th className="px-3 py-3 font-semibold">Product Code</th>
                 <th className="px-3 py-3 font-semibold">Covered by Container</th>
                 <th className="px-3 py-3 font-semibold">Qty Remaining</th>
                 <th className="px-3 py-3 font-semibold">Stock Covered</th>
@@ -302,7 +304,7 @@ export default async function ContainerDetailPage({
               ) : (
                 customerRows.map((row, idx) => (
                   <tr key={`${row.lineId}-${idx}`} className="bg-[#f8fbff]">
-                    <td className="px-3 py-3">{row.queuePosition ?? "—"}</td>
+                    <td className="px-3 py-3">{customerDisplayByLineId.get(row.lineId)?.queuePositionLabel ? `#${customerDisplayByLineId.get(row.lineId)!.queuePositionLabel}` : "—"}</td>
                     <td className="px-3 py-3">{row.invoice}</td>
                     <td className="px-3 py-3 font-medium text-[#111827]">
                       {row.customer}
@@ -310,7 +312,7 @@ export default async function ContainerDetailPage({
                         <span className="ml-2 rounded-full bg-[#eef2ff] px-2 py-0.5 text-[11px] font-semibold text-[#3730a3]">Assigned</span>
                       ) : null}
                     </td>
-                    <td className="px-3 py-3">{row.sku}</td>
+                    <td className="px-3 py-3 font-medium">{coverage.productCodeById[row.productId] || row.sku}</td>
                     <td className="px-3 py-3">{row.containerQty}</td>
                     <td className="px-3 py-3">{row.remainingQty}</td>
                     <td className="px-3 py-3">
@@ -338,7 +340,7 @@ export default async function ContainerDetailPage({
             <table className="min-w-full divide-y divide-[#e5e7eb] text-sm">
               <thead className="bg-[#f9fafb] text-left text-[#6b7280]">
                 <tr>
-                  <th className="px-3 py-3 font-semibold">SKU</th>
+                  <th className="px-3 py-3 font-semibold">Product Code</th>
                   <th className="px-3 py-3 font-semibold">Product</th>
                   <th className="px-3 py-3 font-semibold">Expected</th>
                   <th className="px-3 py-3 font-semibold">Qty Received</th>
@@ -359,7 +361,7 @@ export default async function ContainerDetailPage({
 
                   return (
                     <tr key={line.id}>
-                      <td className="px-3 py-3 font-medium text-[#111827]">{line.products?.sku ?? "—"}</td>
+                      <td className="px-3 py-3 font-medium text-[#111827]">{coverage.productCodeById[line.product_id ?? ""] || line.products?.canonical_name || line.products?.sku || "—"}</td>
                       <td className="px-3 py-3 text-[#374151]">{line.products?.canonical_name ?? "—"}</td>
                       <td className="px-3 py-3">{ordered}</td>
                       <td className="px-3 py-3">{received}</td>

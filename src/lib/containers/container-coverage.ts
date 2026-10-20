@@ -2,7 +2,7 @@ import type { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
-import { canonicalProductSkuKey, canonicalSkuKey } from "@/lib/products/canonical-sku";
+import { canonicalProductSkuKey, canonicalSkuKey, preferredOperationalSku } from "@/lib/products/canonical-sku";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
 
@@ -26,6 +26,8 @@ export type ContainerLineSummary = {
 };
 
 export type ContainerForecastRow = DemandLine & {
+  productCode: string;
+  queuePositionLabel: string;
   forecastSource: "WAREHOUSE" | "CONTAINER" | "UNASSIGNED";
   forecastSourceLabel: string;
   forecastQty: number;
@@ -33,6 +35,8 @@ export type ContainerForecastRow = DemandLine & {
 };
 
 export type ContainerReceipt = {
+  /** Display metadata only; never use these labels as allocation identities. */
+  productCodeById: Record<string, string>;
   lifecycleStatus: string | null;
   isReceived: boolean;
   lines: ContainerLineSummary[];
@@ -107,9 +111,13 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
     aliasesByProductId.set(alias.product_id, [...(aliasesByProductId.get(alias.product_id) ?? []), alias.alias]);
   }
   const productKeyById = new Map(productRows.map((product) => [product.id, canonicalProductSkuKey(product.sku, aliasesByProductId.get(product.id), product.canonical_name, archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]) ]));
+  const productCodeById = Object.fromEntries(productRows.map((product) => [product.id,
+    preferredOperationalSku(product.sku, aliasesByProductId.get(product.id), product.canonical_name,
+      archivedIdentityBySourceRecordId[String(product.source_record_id ?? "").trim()]),
+  ]));
   const containerKeys = new Set(containerLines.map((line) => productKeyById.get(line.product_id ?? "") ?? canonicalSkuKey(line.products?.sku)).filter(Boolean));
   const productIds = [...productKeyById.entries()].filter(([, key]) => containerKeys.has(key)).map(([id]) => id);
-  if (!containerKeys.size || !productIds.length) return { rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };
+  if (!containerKeys.size || !productIds.length) return { productCodeById, rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };
 
   const [{ data: floorRows }, { data: supplyRows }] = await Promise.all([
     supabase.from("inventory_transactions").select("product_id,delta").in("product_id", productIds).eq("bucket", "ON_FLOOR"),
@@ -137,7 +145,8 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
   }
   const canonicalLineById = new Map(canonicalQueue.canonicalLines.map((line) => [line.id, line]));
   const demandByKey = new Map<string, OpenQueueLine[]>();
-  const metadata = new Map<string, Omit<ContainerForecastRow, "forecastSource" | "forecastSourceLabel" | "forecastQty">>();
+  const metadata = new Map<string, Omit<ContainerForecastRow, "forecastSource" | "forecastSourceLabel" | "forecastQty" | "productCode" | "queuePositionLabel">>();
+  const queuePositionLabelByLineId = new Map<string, string>();
   for (const [productId, queueRows] of canonicalQueue.queueByProductId) {
     const key = productKeyById.get(productId);
     if (!key || !containerKeys.has(key)) continue;
@@ -145,6 +154,7 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
       const line = canonicalLineById.get(queueRow.lineId);
       if (!line) continue;
       const start = Number.parseInt(queueRow.position.split("-")[0] ?? "", 10);
+      queuePositionLabelByLineId.set(queueRow.lineId, queueRow.position);
       const actual = (line.inventory_allocations ?? []).filter((allocation) => allocation.allocation_status !== "RELEASED" && allocation.source_type === "CONTAINER" && allocation.container_id === containerId).reduce((sum, allocation) => sum + Math.max(0, Number(allocation.quantity ?? 0)), 0);
       demandByKey.set(key, [...(demandByKey.get(key) ?? []), { id: queueRow.lineId, product_id: key, remaining_qty: queueRow.openQty, priority: "NORMAL", queue_position_start: Number.isFinite(start) ? start : null, approved_at: null, created_at: queueRow.orderCreatedAt ?? new Date(0).toISOString(), has_live_allocation: actual > 0, fulfillment_source: line.fulfillment_source, warehouse_reserved_qty: 0 }]);
       metadata.set(queueRow.lineId, { lineId: queueRow.lineId, orderId: queueRow.orderId, productId, invoice: queueRow.invoice, customer: line.shipping_orders?.qbo_invoices?.customers?.company_name ?? line.shipping_orders?.qbo_invoices?.customers?.full_name ?? line.shipping_orders?.legacy_customer_name ?? "Customer pending", sku: line.products?.sku ?? "SKU pending", remainingQty: queueRow.openQty, queuePosition: Number.isFinite(start) ? start : null, currentWarehouse: formatStatus(line.warehouse_status), isAssigned: actual > 0, createdAt: queueRow.orderCreatedAt ?? new Date(0).toISOString(), actuallyAssignedQty: actual });
@@ -160,10 +170,10 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
       if (!base) continue;
       const currentContainer = lineCoverage.allocations.find((allocation) => allocation.sourceType === "CONTAINER" && allocation.sourceId === containerId);
       const source = currentContainer ?? lineCoverage.allocations[0];
-      rows.push({ ...base, forecastSource: source?.sourceType ?? "UNASSIGNED", forecastSourceLabel: source?.sourceLabel ?? "Unassigned", forecastQty: currentContainer?.quantity ?? 0 });
+      rows.push({ ...base, productCode: productCodeById[base.productId] || base.sku, queuePositionLabel: queuePositionLabelByLineId.get(lineId) ?? "—", forecastSource: source?.sourceType ?? "UNASSIGNED", forecastSourceLabel: source?.sourceLabel ?? "Unassigned", forecastQty: currentContainer?.quantity ?? 0 });
     }
   }
-  return { rows: rows.sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER)), coverageByKey };
+  return { productCodeById, rows: rows.sort((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER)), coverageByKey };
 }
 
 export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId: string): Promise<ContainerReceipt> {
@@ -299,5 +309,5 @@ export async function loadContainerReceipt(supabase: SupabaseAdmin, containerId:
 
   const { rows, eligibleLineIds } = computeCoverage(demandByProduct, effectiveQtyByProduct);
 
-  return { lifecycleStatus, isReceived, lines, demandByProduct, effectiveQtyByProduct, rows, forecastRows: forecast.rows, eligibleLineIds };
+  return { productCodeById: forecast.productCodeById, lifecycleStatus, isReceived, lines, demandByProduct, effectiveQtyByProduct, rows, forecastRows: forecast.rows, eligibleLineIds };
 }

@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createQueueReadPool, fetchQueuePages } from "./queue-query-pages";
 
 describe("queue query pagination", () => {
+  it("uses large flat pages without truncating history beyond the API limit", async () => {
+    const rows = Array.from({ length: 2049 }, (_, id) => ({ id }));
+    const fetch = vi.fn(async (from: number, to: number) => ({ data: rows.slice(from, to + 1), error: null }));
+    expect(await fetchQueuePages(fetch, 1, 1000)).toEqual(rows);
+    expect(fetch.mock.calls).toEqual([[0, 999], [1000, 1999], [2000, 2999]]);
+  });
   it("returns every row exactly once across small pages", async () => {
     const rows = Array.from({ length: 241 }, (_, id) => ({ id }));
     const fetch = vi.fn(async (from: number, to: number) => ({ data: rows.slice(from, to + 1), error: null }));

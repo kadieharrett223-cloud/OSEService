@@ -4,8 +4,10 @@ type PageResult<T> = { data: T[] | null; error: { message: string; code?: string
  * Callers must order by a unique key. Never return a partial list or
  * substitute stale demand after a read failure.
  */
-export async function fetchQueuePages<T>(fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>, concurrency = 1) {
-  const pageSize = 100;
+export async function fetchQueuePages<T>(fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>, concurrency = 1, requestedPageSize = 100) {
+  // Joined queue queries need small pages; lightweight ledger/catalog reads
+  // can use the API's full 1,000-row page without dropping subsequent pages.
+  const pageSize = Math.max(1, Math.min(1000, Math.floor(requestedPageSize) || 100));
   const width = Math.max(1, Math.min(4, Math.floor(concurrency) || 1));
   const rows: T[] = [];
   async function readPage(from: number) {

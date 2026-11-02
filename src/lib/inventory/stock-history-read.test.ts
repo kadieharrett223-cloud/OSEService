@@ -27,6 +27,7 @@ describe("complete stock history", () => {
     expect(total("incoming-lift")).toBe(12);
     expect(db.query.order).toHaveBeenCalledWith("id");
     expect(db.query.range.mock.calls.some(([from]) => from >= 1000)).toBe(true);
+    expect(db.query.range.mock.calls).toEqual([[0, 999], [1000, 1999]]);
   });
   it("rejects a failed later page instead of displaying a partial stock balance", async () => {
     const rows = Array.from({ length: 1100 }, () => ({ product_id: "lift", bucket: "ON_FLOOR", delta: 1, source_type: "RECOUNT" }));

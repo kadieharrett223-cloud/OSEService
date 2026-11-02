@@ -95,6 +95,7 @@ function SidebarNavContent({ role = "staff" }: { role?: string }) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 className={`group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[15px] font-medium leading-6 transition ${
                   active
                     ? "bg-[#1a2230] text-white"

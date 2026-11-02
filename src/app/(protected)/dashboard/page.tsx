@@ -2,6 +2,8 @@ import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
+import { dashboardStockSummary } from "@/lib/inventory/dashboard-stock";
 
 type ProductRow = {
   id: string;
@@ -17,7 +19,7 @@ async function loadAllInventoryTransactions() {
   const supabase = getSupabaseAdmin();
   const rows: InventoryTransactionRow[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").range(from, from + 999);
+    const { data, error } = await supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("id").range(from, from + 999);
     if (error) throw error;
     rows.push(...((data ?? []) as InventoryTransactionRow[]));
     if ((data ?? []).length < 1000) return rows;
@@ -36,6 +38,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
     { data: cases },
     { data: installations },
     { data: audits },
+    stockRoutes,
   ] = await Promise.all([
     supabase.from("products").select("id, sku, canonical_name"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("created_at", { ascending: false }).limit(120),
@@ -51,10 +54,11 @@ const getCachedDashboardDataset = unstable_cache(async () => {
     supabase.from("customer_service_cases").select("id, case_number, status, priority, updated_at").order("updated_at", { ascending: false }).limit(120),
     supabase.from("installation_jobs").select("id, status").order("updated_at", { ascending: false }).limit(120),
     supabase.from("audit_log").select("id, entity_type, entity_id, action, created_at").order("created_at", { ascending: false }).limit(120),
+    fetchQueuePages((from, to) => supabase.from("inventory_stock_routes").select("product_id,stock_product_id,operational_key").order("product_id").range(from, to)),
   ]);
 
-  return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits };
-}, ["dashboard-read-model"], { revalidate: 60 });
+  return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes };
+}, ["dashboard-read-model-stock-owners-v2"], { revalidate: 60 });
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -176,10 +180,9 @@ function getContainerEtaDate(container: ContainerRow) {
 
 export default async function DashboardPage() {
   await requireUser();
-  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits } = await getCachedDashboardDataset();
+  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes } = await getCachedDashboardDataset();
 
   const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
-  const operationalProductIds = new Set(productRows.map((product) => product.id));
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
   const containerRows = (containers ?? []) as ContainerRow[];
   const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
@@ -188,23 +191,7 @@ export default async function DashboardPage() {
   const installationRows = (installations ?? []) as InstallationRow[];
   const auditRows = (audits ?? []) as AuditRow[];
 
-  const inventoryByProduct = new Map<string, { onFloor: number; incomingAvailable: number }>();
-  for (const row of allInventoryTransactions) {
-    if (!row.product_id || !operationalProductIds.has(row.product_id)) continue;
-    const current = inventoryByProduct.get(row.product_id) ?? { onFloor: 0, incomingAvailable: 0 };
-    const delta = Number(row.delta ?? 0);
-    if (row.bucket === "ON_FLOOR") current.onFloor += delta;
-    if (row.bucket === "INCOMING_AVAILABLE") current.incomingAvailable += delta;
-    inventoryByProduct.set(row.product_id, current);
-  }
-
-  const availableInventory = Array.from(inventoryByProduct.values()).reduce((sum, row) => sum + row.onFloor + row.incomingAvailable, 0);
-  const onFloorInventory = Array.from(inventoryByProduct.values()).reduce((sum, row) => sum + row.onFloor, 0);
-
-  const lowOutOfStock = productRows.filter((product) => {
-    const metrics = inventoryByProduct.get(product.id) ?? { onFloor: 0, incomingAvailable: 0 };
-    return metrics.onFloor + metrics.incomingAvailable <= 5;
-  }).length;
+  const { availableInventory, onFloorInventory, lowOutOfStock } = dashboardStockSummary(productRows, allInventoryTransactions, stockRoutes);
 
   const activeContainerIds = new Set(
     containerRows

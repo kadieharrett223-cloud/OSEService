@@ -37,6 +37,7 @@ function database(received: boolean) {
       const query = {
         select: (selection: string) => { fields = selection; return query; },
         eq: () => query, neq: () => query, in: () => query,
+        order: () => query, range: () => query,
         maybeSingle: () => Promise.resolve({ data: { id: "container", lifecycle_status: received ? "RECEIVED" : "INBOUND" } }),
         insert: writes, update: writes, delete: writes, upsert: writes,
         then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: {

@@ -7,6 +7,7 @@ import { customerQueueProductKeys } from "@/lib/demand/customer-queue-product-ke
 import { containerProductCode } from "./product-code";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { computeCoverage, totalDemandQty, type CoverageRow, type DemandByProduct, type DemandLine } from "./coverage-math";
+import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
@@ -124,8 +125,8 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
   if (!containerKeys.size || !productIds.length) return { productKeyById, productCodeById, rows: [] as ContainerForecastRow[], coverageByKey: new Map<string, ReturnType<typeof resolveProductCoverage>>() };
 
   const [{ data: floorRows }, { data: supplyRows }] = await Promise.all([
-    supabase.from("inventory_transactions").select("product_id,delta,source_type").in("product_id", productIds).eq("bucket", "ON_FLOOR"),
-    supabase.from("container_lines").select("product_id,container_id,on_order_qty,received_qty,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date,entered_date)").in("product_id", productIds),
+    fetchQueuePages((from, to) => supabase.from("inventory_transactions").select("product_id,delta,source_type").in("product_id", productIds).eq("bucket", "ON_FLOOR").order("id").range(from, to), 3).then(data => ({ data })),
+    fetchQueuePages((from, to) => supabase.from("container_lines").select("product_id,container_id,on_order_qty,received_qty,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date,entered_date)").in("product_id", productIds).order("id").range(from, to), 3).then(data => ({ data })),
   ]);
   const floorTransactions = (floorRows ?? []) as Array<{ product_id: string; delta: number | null; source_type: string | null }>;
   const stockOwners = authoritativeStockProductIds(productRows, productKeyById,

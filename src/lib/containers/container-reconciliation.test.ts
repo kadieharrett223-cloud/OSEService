@@ -43,6 +43,7 @@ function database(targetEta = "2026-10-27") {
     let selection = "";
     const query = {
       select: (fields: string) => { selection = fields; return query; }, eq: () => query, neq: () => query, in: () => query,
+      order: () => query, range: () => query,
       maybeSingle: async () => ({ data: { id: "254", lifecycle_status: "INBOUND" } }),
       insert: writes, update: writes, upsert: writes, delete: writes,
       then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: {

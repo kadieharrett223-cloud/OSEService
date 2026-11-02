@@ -27,6 +27,8 @@ import { authoritativeStockProductIds, canonicalSkuKey } from "@/lib/products/ca
 import { inventoryOperationalIdentity } from "@/lib/inventory/stock-edit-context";
 import { splitProductTitle } from "@/lib/product-title";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
+import { loadInventoryStockHistory } from "@/lib/inventory/stock-history-read";
 
 type ProductRow = {
   id: string;
@@ -260,21 +262,18 @@ function toRecordMap<T>(rows: T[], getKey: (row: T) => string | null, getValue: 
 
 const getCachedInventoryBaseDataset = unstable_cache(async () => {
   const supabase = getSupabaseAdmin();
-  const [productsResult, aliasesResult, transactionsResult, containerLinesResult, displayGroupResult, oldErpProductsResult] = await Promise.all([
-    supabase.from("products").select("id, sku, canonical_name, source_record_id, inventory_group, inventory_sort_order").neq("status", "Inactive").order("sku", { ascending: true }),
-    supabase.from("product_aliases").select("product_id, alias"),
-    supabase.from("inventory_transactions").select("product_id, bucket, delta, source_type"),
-    supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)"),
-    supabase.from("inventory_display_groups").select("name, sort_order").order("sort_order", { ascending: true }),
-    supabase.from("old_erp_source_records").select("source_record_id, raw_payload").eq("source_container", "Products"),
+  const [productData, aliases, transactions, containerLines, displayGroupData, oldErpProducts] = await Promise.all([
+    fetchQueuePages((from, to) => supabase.from("products").select("id, sku, canonical_name, source_record_id, inventory_group, inventory_sort_order").neq("status", "Inactive").order("id").range(from, to), 3)
+      .catch(() => fetchQueuePages((from, to) => supabase.from("products").select("id, sku, canonical_name, source_record_id").neq("status", "Inactive").order("id").range(from, to), 3)),
+    fetchQueuePages((from, to) => supabase.from("product_aliases").select("product_id, alias").order("id").range(from, to), 3),
+    loadInventoryStockHistory(supabase),
+    fetchQueuePages((from, to) => supabase.from("container_lines").select("product_id, on_order_qty, received_qty, container_id, containers (container_number, lifecycle_status, eta_confirmed_date, eta_estimated_date, port_date, entered_date)").order("id").range(from, to), 3),
+    fetchQueuePages((from, to) => supabase.from("inventory_display_groups").select("name, sort_order").order("name").range(from, to)),
+    fetchQueuePages((from, to) => supabase.from("old_erp_source_records").select("source_record_id, raw_payload").eq("source_container", "Products").order("id").range(from, to), 3),
   ]);
-  let products = productsResult.data as unknown as ProductRow[] | null;
-  if (productsResult.error) {
-    const fallback = await supabase.from("products").select("id, sku, canonical_name, source_record_id").neq("status", "Inactive").order("sku", { ascending: true });
-    products = fallback.data as unknown as ProductRow[] | null;
-  }
-  return { products, aliases: aliasesResult.data, transactions: transactionsResult.data, containerLines: containerLinesResult.data, displayGroupData: displayGroupResult.data, oldErpProducts: oldErpProductsResult.data };
-}, ["inventory-base-read-model-stock-routing-v2"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+  const products = (productData as unknown as ProductRow[]).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
+  return { products, aliases, transactions, containerLines, displayGroupData, oldErpProducts };
+}, ["inventory-base-read-model-complete-pages-v3"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];

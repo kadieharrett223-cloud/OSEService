@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth";
 import { createContainerAction } from "./actions";
 import { AddContainerModal } from "./add-container-modal";
+import { loadContainerProductOptions } from "@/lib/containers/product-options";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -55,7 +56,7 @@ export default async function ContainersPage({
   const supabase = getSupabaseAdmin();
   const params = await searchParams;
 
-  const [{ data: containers, error: containersError }, { data: products }] = await Promise.all([
+  const [{ data: containers, error: containersError }, productOptions] = await Promise.all([
     supabase
       .from("containers")
       .select(`
@@ -83,16 +84,8 @@ export default async function ContainersPage({
       `)
       .in("lifecycle_status", ["ORDERED", "PRODUCTION", "INBOUND", "RECEIVED"])
       .order("entered_date", { ascending: false }),
-    supabase
-      .from("products")
-      .select("id,sku,canonical_name,status")
-      .eq("status", "Active")
-      .order("sku", { ascending: true }),
+    loadContainerProductOptions(),
   ]);
-
-  const productOptions = (products ?? []).map(row => ({
-    id: row.id, sku: row.sku ?? "", name: row.canonical_name ?? "",
-  })).filter(row => row.sku);
 
   const errorMessage = containersError ? "Unable to load container data right now." : params.error ? params.error : null;
   const successMessage = params.success ? params.success : null;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { productLookupText, type ContainerProductOption } from "@/lib/containers/product-selection";
+import { matchingContainerProducts, type ContainerProductOption } from "@/lib/containers/product-selection";
 
 type AddContainerModalProps = {
   createAction: (formData: FormData) => void | Promise<void>;
@@ -129,16 +129,21 @@ export function AddContainerModal({ createAction, products }: AddContainerModalP
                       <div className="min-w-0 space-y-1">
                         <input id={`product-row-${index}`} className="input"
                           aria-label={`Search product for row ${index + 1}`}
-                          placeholder="Search existing products by SKU or name…"
-                          value={row.search} onChange={event => updateRow(row.id, "search", event.target.value)} />
+                          placeholder="Search inventory by product code or name…"
+                          value={row.search} onChange={event => {
+                            const search = event.target.value;
+                            setRows(current => current.map(item => item.id === row.id ? { ...item, search, productId: "" } : item));
+                          }} />
                         <select name="product_id" className="select"
                           aria-label={`Select product for row ${index + 1}`}
                           required={Boolean(row.search || row.qty || row.productId)}
                           value={row.productId} onChange={event => updateRow(row.id, "productId", event.target.value)}>
                           <option value="">Select an existing product</option>
-                          {products.filter(p => p.id === row.productId || productLookupText(`${p.sku} ${p.name}`).includes(productLookupText(row.search)))
-                            .map(p => <option key={p.id} value={p.id}>{p.sku} — {p.name}</option>)}
+                          {matchingContainerProducts(products, row.search)
+                            .map(p => <option key={p.id} value={p.id}>{p.sku}</option>)}
                         </select>
+                        {row.productId ? <p className="text-xs text-[#64748b]">{products.find(p => p.id === row.productId)?.name}</p> : null}
+                        {matchingContainerProducts(products, row.search).length === 0 ? <p className="text-xs text-[#8f030d]">No matching inventory product. Add it on Inventory first.</p> : null}
                       </div>
                       <input
                         name="product_qty"

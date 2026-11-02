@@ -4,6 +4,7 @@ import { updateContainerArrivalDatesAction } from "@/app/(protected)/containers/
 import { requireUser } from "@/lib/auth";
 import { loadContainerReceipt } from "@/lib/containers/container-coverage";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { loadContainerProductOptions } from "@/lib/containers/product-options";
 import { EditContainerManifestWorkspace } from "./edit-container-manifest-workspace";
 import { ReceiveContainerWorkspace } from "./receive-container-workspace";
 
@@ -136,14 +137,12 @@ export default async function ContainerDetailPage({
   const expectedTotal = coverage.lines.reduce((sum, line) => sum + line.expectedQty, 0);
   const receivedTotal = coverage.lines.reduce((sum, line) => sum + line.receivedQty, 0);
 
-  const { data: productOptionRows } = isReceived
-    ? { data: [] }
-    : await supabase.from("products").select("id, sku, canonical_name").order("sku", { ascending: true });
+  const productOptionRows = isReceived ? [] : await loadContainerProductOptions();
 
   const manifestProductIds = new Set(coverage.lines.map((line) => line.productId));
-  const productOptions = ((productOptionRows ?? []) as Array<{ id: string; sku: string | null; canonical_name: string | null }>)
+  const productOptions = productOptionRows
     .filter((product) => !manifestProductIds.has(product.id))
-    .map((product) => ({ id: product.id, sku: product.sku, name: product.canonical_name }));
+    .map((product) => ({ id: product.id, sku: product.sku, name: product.name }));
 
   return (
     <div className="space-y-6">

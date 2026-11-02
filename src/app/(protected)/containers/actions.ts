@@ -7,7 +7,8 @@ import { loadContainerReceipt, UNPLANNED_RECEIPT_REF } from "@/lib/containers/co
 import { computeCoverage } from "@/lib/containers/coverage-math";
 import { revalidateOrdersProjection } from "@/lib/orders/orders-projection-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { validateContainerProductRows, type ContainerProductOption } from "@/lib/containers/product-selection";
+import { validateContainerProductRows } from "@/lib/containers/product-selection";
+import { loadContainerProductOptions } from "@/lib/containers/product-options";
 
 function emptyToNull(value: FormDataEntryValue | null) {
   const raw = String(value ?? "").trim();
@@ -44,13 +45,9 @@ export async function createContainerAction(formData: FormData) {
 
   // Validate every catalog identity before creating anything. A typo must
   // never create a new product or silently omit part of the manifest.
-  const { data: catalog, error: catalogError } = await supabase.from("products").select("id,sku,canonical_name,status");
-  if (catalogError) redirect("/containers?error=Unable+to+validate+products");
   let selectedLines: Array<{ productId: string; qty: number }>;
   try {
-    selectedLines = validateContainerProductRows(formData, (catalog ?? []).map(p => ({
-      id: p.id, sku: p.sku ?? "", name: p.canonical_name ?? "", status: p.status,
-    })) as ContainerProductOption[]);
+    selectedLines = validateContainerProductRows(formData, await loadContainerProductOptions());
   } catch (error) {
     redirect(`/containers?error=${encodeURIComponent(error instanceof Error ? error.message : "Invalid products")}`);
   }
@@ -205,12 +202,13 @@ export async function updateContainerManifestAction(formData: FormData) {
   }
 
   if (payload.additions.length > 0) {
-    const { data: productRows, error: productError } = await supabase
-      .from("products")
-      .select("id")
-      .in("id", payload.additions.map((line) => line.productId));
-    if (productError || (productRows ?? []).length !== payload.additions.length) {
-      redirect(`/containers/${containerId}?error=${encodeURIComponent("One of the selected products no longer exists. Reload and try again.")}`);
+    try {
+      const allowed = new Set((await loadContainerProductOptions()).map(p => p.id));
+      if (payload.additions.some(line => !allowed.has(line.productId))) {
+        throw new Error("Select an existing inventory product. Reload and try again.");
+      }
+    } catch (error) {
+      redirect(`/containers/${containerId}?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to validate products.")}`);
     }
   }
 

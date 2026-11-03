@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
 import { dashboardStockSummary } from "@/lib/inventory/dashboard-stock";
+import { INVENTORY_READ_MODEL_CACHE_TAG } from "@/lib/inventory/inventory-read-cache";
 
 type ProductRow = {
   id: string;
@@ -58,7 +59,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
   ]);
 
   return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes };
-}, ["dashboard-read-model-stock-owners-v2"], { revalidate: 60 });
+}, ["dashboard-read-model-stock-owners-v3"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 type InventoryTransactionRow = {
   product_id: string | null;

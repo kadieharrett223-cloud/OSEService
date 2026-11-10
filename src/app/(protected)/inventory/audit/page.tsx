@@ -2,11 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { isAdminUnlockedForUser } from "@/lib/admin-access";
-import { canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { inventoryAuditPeriod } from "@/lib/inventory/audit-period";
 import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
+import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
+import { auditProductScope, auditCurrentFloor, auditRowsInPeriod, auditFulfillmentMovements, type AuditRoute } from "@/lib/inventory/audit-history";
 import { PrintAuditButton } from "./print-audit-button";
+import { AuditRefresh } from "./audit-refresh";
 import "./audit-print.css";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +29,14 @@ type InventoryTransaction = {
   created_at: string;
 };
 
+type FulfillmentRow = {
+  id: string; shipping_order_line_id: string; fulfilled_qty: number; fulfilled_at: string; created_at: string;
+  fulfillment_type: string; source_event_key: string | null; carrier: string | null; tracking_number: string | null;
+  shipping_order_lines: { product_id: string; shipping_order_id: string; shipping_orders: {
+    order_number: string; customers: { full_name: string | null; company_name: string | null } | null;
+  } | null };
+};
+
 function displayDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { timeZone: "America/Los_Angeles", dateStyle: "medium", timeStyle: "medium" });
@@ -41,23 +51,14 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
   const requestedSku = String(params.sku ?? "2PBP-8").trim().toUpperCase();
   const allProducts = requestedSku === "ALL" || requestedSku === "";
   const reportPeriod = inventoryAuditPeriod(params.period);
-  const targetKey = canonicalSkuKey(requestedSku);
   const supabase = getSupabaseAdmin();
-  const [products, aliases] = await Promise.all([
+  const [products, aliases, routeRows] = await Promise.all([
     fetchQueuePages((from, to) => supabase.from("products").select("id,sku,canonical_name").order("id").range(from, to)),
-    fetchQueuePages((from, to) => supabase.from("product_aliases").select("product_id,alias").order("product_id").order("alias").range(from, to)),
+    fetchQueuePages((from, to) => supabase.from("product_aliases").select("product_id,alias").order("product_id").order("alias").order("id").range(from, to)),
+    fetchQueuePages((from, to) => supabase.from("inventory_stock_routes").select("product_id,stock_product_id,operational_key").order("product_id").range(from, to)),
   ]);
-
-  const aliasKeysByProduct = new Map<string, Set<string>>();
-  for (const alias of (aliases ?? []) as AliasRow[]) {
-    if (!alias.product_id || !alias.alias) continue;
-    const keys = aliasKeysByProduct.get(alias.product_id) ?? new Set<string>();
-    keys.add(canonicalSkuKey(alias.alias));
-    aliasKeysByProduct.set(alias.product_id, keys);
-  }
-  const matchedProducts = ((products ?? []) as ProductRow[]).filter((product) => (
-    allProducts || canonicalSkuKey(product.sku) === targetKey || aliasKeysByProduct.get(product.id)?.has(targetKey)
-  ));
+  const routes = routeRows as AuditRoute[];
+  const matchedProducts = auditProductScope(products as ProductRow[], aliases as AliasRow[], routes, requestedSku);
   const productIds = matchedProducts.map((product) => product.id);
   const attempts = productIds.length ? await fetchQueuePages((from, to) => {
     let query = supabase.from("audit_log").select("id,entity_id,created_at,details")
@@ -66,17 +67,36 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
     if (reportPeriod.start) query = query.gte("created_at", reportPeriod.start).lte("created_at", reportPeriod.end);
     return query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
   }) : [];
+  // Read complete lifetime history for the current physical balance. Periods filter the history table only.
   const transactions = productIds.length ? await fetchQueuePages((from, to) => {
     let query = supabase
       .from("inventory_transactions")
       .select("id,product_id,bucket,delta,before_qty,after_qty,reason,source_type,source_event_key,actor_id,created_at");
     if (!allProducts) query = query.in("product_id", productIds);
-    if (reportPeriod.start) query = query.gte("created_at", reportPeriod.start).lte("created_at", reportPeriod.end);
+    query = query.lte("created_at", reportPeriod.end);
     return query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
   }) : [];
 
+  const [fulfillmentData, queue] = await Promise.all([
+    productIds.length ? fetchQueuePages((from, to) => {
+      let query = supabase.from("fulfillments").select("id,shipping_order_line_id,fulfilled_qty,fulfilled_at,created_at,fulfillment_type,source_event_key,carrier,tracking_number,shipping_order_lines!inner(product_id,shipping_order_id,shipping_orders(order_number,customers(full_name,company_name)))")
+        .lte("created_at", reportPeriod.end);
+      if (!allProducts) query = query.in("shipping_order_lines.product_id", productIds);
+      if (reportPeriod.start) query = query.gte("created_at", reportPeriod.start);
+      return query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
+    }) : Promise.resolve([]),
+    // Audit refresh must not redisplay the five-minute cached customer queue.
+    loadCanonicalCustomerQueue({ fresh: true }),
+  ]);
+
   const productById = new Map(matchedProducts.map((product) => [product.id, product]));
-  const rows = (transactions ?? []) as InventoryTransaction[];
+  const allMovements = (transactions ?? []) as InventoryTransaction[];
+  const rows = auditRowsInPeriod(allMovements, reportPeriod.start, reportPeriod.end);
+  const currentFloor = auditCurrentFloor(productIds, routes, allMovements);
+  const fulfillments = fulfillmentData as unknown as FulfillmentRow[];
+  const openOrders = [...new Map(productIds.flatMap(id => queue.queueByProductId.get(id) ?? []).map(row => [row.lineId, row])).values()];
+  const openQuantity = openOrders.reduce((sum, row) => sum + row.openQty, 0);
+  const checkedAt = new Date().toISOString();
   const onFloorByProduct = new Map<string, number>();
   for (const row of rows) {
     if (row.bucket !== "ON_FLOOR") continue;
@@ -91,7 +111,8 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
           <h1 className="text-3xl font-bold">Read-only stock trace</h1>
           <p className="mt-2 font-semibold">{allProducts ? "All products" : requestedSku} · {reportPeriod.label} · Pacific time</p>
           <p className="text-sm text-slate-600">{reportPeriod.start ? `${displayDate(reportPeriod.start)} – ` : "Through "}{displayDate(reportPeriod.end)} · {rows.length} stock movements · {attempts.length} edit attempts</p>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600">This page reports existing ledger entries only. It cannot adjust stock, fulfill an order, sync QuickBooks, or alter customer queues.</p>
+          <p className="mt-2 max-w-3xl text-sm text-slate-600">Saved stock movements, fulfillment records, and current open orders. Viewing this report does not change inventory or fulfill orders.</p>
+          <AuditRefresh checkedAt={checkedAt} />
         </div>
         <div className="audit-controls flex gap-2"><PrintAuditButton /><Link href="/inventory" className="rounded border px-4 py-2 text-sm font-medium">Back to Inventory</Link></div>
       </div>
@@ -105,13 +126,44 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
       </form>
 
       <section className="mb-6 rounded border bg-white p-5 shadow-sm">
+        <h2 className="text-xl font-semibold">Current stock and open orders</h2>
+        <p className="mt-2"><strong>Physical On Floor: {currentFloor}</strong> · Open customer quantity: {openQuantity}</p>
+        <p className="mt-1 text-sm text-slate-600">Open orders commit stock before shipment. They reduce Available Now but do not deduct physical On Floor until a warehouse shipment is saved. These current totals use all history, regardless of the history-period filter.</p>
+        <Link prefetch={false} href={allProducts ? "/inventory" : `/inventory?q=${encodeURIComponent(requestedSku)}`} className="mt-2 inline-block underline">View availability and incoming reservations in Inventory</Link>
+        {openOrders.length ? <ul className="mt-3 space-y-1 text-sm">{openOrders.map(row => <li key={row.lineId}><Link prefetch={false} className="underline" href={`/orders/${row.orderId}`}>Invoice {row.invoice}</Link> · {row.openQty} unshipped · Queue {row.position}</li>)}</ul> : <p className="mt-3 text-sm text-slate-500">No open customer obligations for this selection.</p>}
+      </section>
+
+      <section className="mb-6 rounded border bg-white p-5 shadow-sm">
+        <h2 className="text-xl font-semibold">Recorded fulfillments and shipment edits</h2>
+        <p className="mt-1 text-sm text-slate-600">Newest entries first. The period filter uses the recorded date; the physical shipment date is shown separately. External-source completions can have no warehouse stock movement.</p>
+        <div className="mt-3 overflow-x-auto"><table className="w-full text-left text-sm">
+          <thead className="border-b text-xs uppercase text-slate-500"><tr><th className="p-2">Recorded</th><th className="p-2">Physical shipment date</th><th className="p-2">Order / customer</th><th className="p-2">Product</th><th className="p-2">Quantity change</th><th className="p-2">Warehouse stock effect</th><th className="p-2">Tracking / evidence</th></tr></thead>
+          <tbody>{fulfillments.map(event => {
+            const line = event.shipping_order_lines;
+            const order = line.shipping_orders;
+            const linked = auditFulfillmentMovements(event.source_event_key, allMovements);
+            return <tr key={event.id} className="border-b align-top">
+              <td className="p-2 whitespace-nowrap">{displayDate(event.created_at)}</td>
+              <td className="p-2 whitespace-nowrap">{displayDate(event.fulfilled_at)}</td>
+              <td className="p-2"><Link prefetch={false} className="underline" href={`/orders/${line.shipping_order_id}`}>Invoice {order?.order_number ?? "Unknown"}</Link><div>{order?.customers?.company_name || order?.customers?.full_name}</div></td>
+              <td className="p-2">{productById.get(line.product_id)?.canonical_name ?? line.product_id}</td>
+              <td className="p-2">{event.fulfilled_qty} · {event.fulfillment_type}</td>
+              <td className="p-2">{linked.length ? linked.map(row => <div key={row.id}>{row.delta} ({row.before_qty} → {row.after_qty})</div>) : event.fulfillment_type === "OTHER" ? "External source: no warehouse deduction" : "No linked stock movement recorded"}</td>
+              <td className="p-2"><div>{event.carrier} {event.tracking_number}</div><div className="font-mono text-xs text-slate-500">Event: {event.id}</div></td>
+            </tr>;
+          })}{!fulfillments.length ? <tr><td colSpan={7} className="p-3 text-slate-500">No saved fulfillment events in this period. Open orders above are not completed shipments.</td></tr> : null}</tbody>
+        </table></div>
+      </section>
+
+      <section className="mb-6 rounded border bg-white p-5 shadow-sm">
         <h2 className="text-xl font-semibold">Stock edit attempts (including no changes)</h2>
         <p className="mt-1 text-sm text-slate-600">These are audit records, not stock movements. They never add to or subtract from inventory.</p>
         {(attempts ?? []).map((attempt) => {
-          const details = attempt.details as { actor_name?: string; displayed_qty?: number | null; current_qty?: number; requested_qty?: number; reason?: string; outcome?: string } | null;
+          const details = attempt.details as { actor_name?: string; displayed_qty?: number | null; current_qty?: number; requested_qty?: number; reason?: string; outcome?: string; request_id?: string } | null;
+          const posted = details?.request_id && allMovements.some(row => row.source_event_key === `manual-group:${details.request_id}`);
           return <article key={attempt.id} className="audit-attempt mt-3 rounded border p-3 text-sm">
             <p className="font-semibold">{productById.get(attempt.entity_id ?? "")?.sku ?? attempt.entity_id}</p>
-            <p>{displayDate(attempt.created_at)} · {details?.actor_name ?? "Admin"} · {details?.outcome ?? "Unknown"}</p>
+            <p>{displayDate(attempt.created_at)} · {details?.actor_name ?? "Admin"} · {posted ? "Count saved — matching stock movement recorded" : details?.outcome ?? "Unknown"}</p>
             <p>Displayed: {details?.displayed_qty ?? "unknown"} · Ledger: {details?.current_qty} · Requested: {details?.requested_qty}</p>
             <p>{details?.reason}</p>
             <p className="font-mono text-xs text-slate-500">Product ID: {attempt.entity_id}</p>
@@ -134,6 +186,7 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
                       <h3 className="font-semibold">{product.sku ?? "No SKU"}</h3>
                       <p className="text-sm text-slate-600">{product.canonical_name ?? "Unnamed product"}</p>
                       <p className="mt-1 font-mono text-xs text-slate-500">Product ID: {product.id}</p>
+                      {routes.find(route => route.product_id === product.id)?.stock_product_id !== product.id ? <p className="text-sm text-slate-600">Historical identity. Its separate ledger is excluded from current stock; the routed stock owner is included in the total above.</p> : null}
                     </div>
                     <p className="rounded bg-slate-100 px-3 py-1 text-sm font-semibold">Net on-floor movement in report: {onFloorByProduct.get(product.id) ?? 0}</p>
                   </div>

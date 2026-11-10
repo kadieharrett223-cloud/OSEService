@@ -48,6 +48,7 @@ import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionCo
 import { SourceAssignmentForm } from "./source-assignment-form";
 import { OrderHealthPanel } from "./order-health-panel";
 import { RefreshQuickbooksButton } from "./refresh-quickbooks-button";
+import { CancellationSubmit } from "./cancellation-submit";
 import { evaluateOrderHealth } from "@/lib/orders/order-health";
 
 type OrderDetailRow = {
@@ -796,7 +797,7 @@ function ManualOrderCancellation({
         <p className="mt-1 text-[#7f1d1d]">Open allocations and customer-list demand will be removed. Existing shipment history and shipped quantities will be preserved.</p>
         <label className="mt-3 block font-semibold text-[#7f1d1d]">Reason<input name="reason" className="input mt-1 bg-white" placeholder="Required cancellation reason" minLength={3} required /></label>
         <label className="mt-3 flex items-start gap-2 text-[#7f1d1d]"><input type="checkbox" name="confirmation" value="CONFIRM_CANCEL_ORDER" className="mt-0.5" required /><span>I confirm this order should be moved to Cancelled and removed from active customer lists.</span></label>
-        <button type="submit" className="mt-3 rounded-md border border-[#dc2626] px-3 py-1.5 font-semibold text-[#b91c1c] hover:bg-[#fee2e2]">Confirm cancellation</button>
+        <CancellationSubmit />
       </form>}
     </details>
   );

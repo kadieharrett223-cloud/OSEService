@@ -1712,33 +1712,34 @@ export default async function OrderDetailPage({
       ) : null}
 
       <ShipmentSelectionProvider>
-      <div className="rounded-2xl border border-[#e5e7eb] bg-white px-5 py-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-          <div className="min-w-0 flex-1">
+      <div className="overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
+          <div className="min-w-0 flex-1 basis-80">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h1 className="truncate text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</h1>
-              <span className="text-lg text-[#64748b]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span>
+              <h1 className="text-2xl font-semibold text-[#111827]">{orderRecord.customers?.company_name ?? orderRecord.customers?.full_name ?? orderRecord.legacy_customer_name ?? "Customer pending"}</h1>
+              <span className="text-sm text-[#64748b]">Invoice #{quickbooksSnapshot?.invoice_number ?? orderRecord.order_number ?? "—"}</span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
-              {isCancelled ? (
-                <span className="rounded-full bg-[#fee2e2] px-2 py-1 text-[#b91c1c]">Cancelled</span>
-              ) : (
-                <>
-                  <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
-                  {balanceOwed > 0 ? <span className="rounded-md border-2 border-orange-500 bg-orange-50 px-3 py-1.5 text-sm font-extrabold tracking-[0.07em] text-orange-800">UNPAID · BALANCE OWED {formatCurrency(balanceOwed)}</span> : null}
-                  {orderRecord.payment_hold ? <span className={`rounded-full px-2 py-1 ${quickbooksSnapshot?.payment_status === "Paid" ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fee2e2] text-[#b91c1c]"}`}>{quickbooksSnapshot?.payment_status === "Paid" ? "Payment hold cleared" : "Payment hold — do not ship"}</span> : null}
-                  <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span>
-                  <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : hasOpenWarehouseItems ? "In Warehouse" : "Orders"}</span>
-                  <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
-                </>
-              )}
-              <span className="font-normal text-[#64748b]">· {formatDate(orderRecord.created_at)} · {orderRecord.customers?.phone ?? "No phone"} · {orderRecord.customers?.email ?? "No email"}</span>
+            <p className="mt-1 text-xs leading-5 text-[#64748b]">
+              {[formatDate(orderRecord.created_at), orderRecord.customers?.phone, orderRecord.customers?.email, contactAddress !== "Shipping address unavailable" ? contactAddress : null].filter(Boolean).join(" · ")}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+              {isCancelled ? <span className="rounded-full bg-[#fee2e2] px-2 py-1 text-[#b91c1c]">Cancelled</span> : <>
+                <span className={`rounded-full px-2 py-1 ${metricStatusClass(quickbooksSnapshot?.payment_status)}`}>{quickbooksSnapshot?.payment_status ?? "Pending"}</span>
+                <span className={`rounded-full px-2 py-1 ${metricStatusClass(overallStatus)}`}>{overallStatus}</span>
+                {requiresMappingReview || hasOpenWarehouseItems ? <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{requiresMappingReview ? "Pending Review" : "In Warehouse"}</span> : null}
+                {highestPriority(orderLines.map((line) => line.priority)) !== "NORMAL" ? <span className="rounded-full bg-[#f1f5f9] px-2 py-1 text-[#475569]">{highestPriority(orderLines.map((line) => line.priority))}</span> : null}
+                {orderRecord.payment_hold ? <span className={`rounded-full px-2 py-1 ${quickbooksSnapshot?.payment_status === "Paid" ? "bg-[#e7f7ed] text-[#1b7a43]" : "bg-[#fee2e2] text-[#b91c1c]"}`}>{quickbooksSnapshot?.payment_status === "Paid" ? "Payment hold cleared" : "Payment hold — do not ship"}</span> : null}
+              </>}
+              <OrderHealthPanel issues={orderHealthIssues} />
             </div>
-            <p className="mt-1 truncate text-xs text-[#64748b]">{contactAddress}</p>
-            <div className="mt-3"><OrderHealthPanel issues={orderHealthIssues} /></div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="text-xs font-semibold text-[#64748b]">{totalEligibleInventoryUnits} Ordered · {totalUnitsShipped} Shipped · {totalUnitsNeeded} Remaining</div>
+          <div className="shrink-0 text-right">
+            {!isCancelled && balanceOwed > 0 ? <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-orange-900"><p className="text-[10px] font-bold uppercase tracking-wider">Unpaid · Balance owed</p><p className="mt-0.5 text-xl font-semibold tabular-nums">{formatCurrency(balanceOwed)}</p></div> : null}
+            <p className="mt-2 text-xs text-[#64748b]">{totalEligibleInventoryUnits} ordered · {totalUnitsShipped} shipped · <span className="font-semibold text-[#334155]">{totalUnitsNeeded} remaining</span></p>
+          </div>
+        </div>
+        <div className="border-t border-[#eef2f7] bg-[#fafbfc] px-5 py-3">
+          <div className="flex flex-wrap items-center gap-2">
             {!isCancelled && orderRecord.source_invoice_id ? (
               <form action={refreshOrderFromQuickbooksAction}>
                 <input type="hidden" name="orderId" value={orderRecord.id} />
@@ -1748,17 +1749,17 @@ export default async function OrderDetailPage({
             {orderRecord.source_invoice_id ? <DownloadInvoiceButton orderId={orderRecord.id} /> : null}
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
             {!isCancelled && shippingOrderColumnSet.has("fulfillment_method") ? (
-              <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">
+              <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2 sm:ml-auto">
                 <input type="hidden" name="orderId" value={orderRecord.id} />
-                <AutoSubmitSelect id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                <AutoSubmitSelect aria-label="Order location" id="warehouse_state" name="warehouse_state" defaultValue={hasOpenWarehouseItems ? "IN_WAREHOUSE" : "ORDERS"} className="h-10 rounded-lg border border-[#d1d5db] bg-white px-2 text-sm">
                   <option value="ORDERS">Orders</option>
                   <option value="IN_WAREHOUSE">In Warehouse</option>
                 </AutoSubmitSelect>
-                <AutoSubmitSelect id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} className="rounded-lg border border-[#d1d5db] px-2 py-1 text-sm">
+                <AutoSubmitSelect aria-label="Fulfillment method" id="fulfillment_method" name="fulfillment_method" defaultValue={orderRecord.fulfillment_method ?? "SHIP"} className="h-10 rounded-lg border border-[#d1d5db] bg-white px-2 text-sm">
                   <option value="SHIP">Ship</option>
                   <option value="WILL_CALL">Will Call</option>
                 </AutoSubmitSelect>
-                <button type="submit" className="btn-secondary text-xs">Save</button>
+                <button type="submit" className="btn-secondary h-10 text-xs">Save</button>
               </form>
             ) : null}
             {!isCancelled && (shippingOrderColumnSet.has("promised_ship_date") || shippingOrderColumnSet.has("shipping_method") || shippingOrderColumnSet.has("notes")) ? (

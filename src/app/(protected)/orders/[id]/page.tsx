@@ -19,6 +19,7 @@ import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
 import { canonicalInvoiceDisplayLineIds, getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
+import { customerQueueLabel } from "@/lib/orders/customer-queue-label";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { cancellationAwareOperationalTotals, cancellationAwareStatus, isCancelledOrder } from "@/lib/orders/cancellation-presentation";
 import {
@@ -2117,22 +2118,12 @@ export default async function OrderDetailPage({
                 const queueSku = queueLine?.products?.sku ?? item.sku ?? "Line item";
                 const queueDescription = queueLine?.products?.canonical_name ?? item.description;
                 const queuePosition = queueLine ? canonicalQueuePositionByLineId.get(queueLine.id) : null;
-                const requiresQueueApproval = queueLine
-                  && !["APPROVED", "PARTIAL"].includes(String(queueLine.approval_status ?? "").toUpperCase());
                 return (
                   <div key={`${item.key}-queue`} className="border-b border-[#eef2f7] pb-3 last:border-0 last:pb-0">
                     <p className="text-sm font-semibold text-[#111827]">Line item {index + 1} · {queueSku}</p>
                     <p className="mt-1 text-xs text-[#64748b]">{truncateText(queueDescription, 30)}</p>
                     <p className="mt-1 text-sm font-semibold text-[#356344]">
-                      {String(queueLine?.fulfillment_source ?? "").toUpperCase() === "CUSTOMER_NOT_READY"
-                        ? "Customer list: Excluded — Customer Not Ready"
-                        : String(queueLine?.fulfillment_source ?? "").toUpperCase() === "OTHER"
-                        ? "Customer list: Excluded — Other fulfillment"
-                        : queuePosition
-                        ? `Customer list position: #${queuePosition}`
-                        : requiresQueueApproval
-                          ? "Customer list: Needs mapping approval"
-                          : "Customer list: Queue assignment pending"}
+                      {customerQueueLabel(queueLine ?? {}, queuePosition)}
                     </p>
                   </div>
                 );

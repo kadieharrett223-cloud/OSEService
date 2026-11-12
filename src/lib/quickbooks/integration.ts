@@ -1402,6 +1402,22 @@ export async function syncQuickbooksInvoices() {
 }
 
 /** Fetch one invoice directly from QBO without advancing the global incremental-sync cursor. */
+/** Downloads the original QBO document without syncing or changing invoice/order state. */
+export async function downloadQuickbooksInvoicePdf(qboInvoiceId: string) {
+  if (!/^\d+$/.test(qboInvoiceId)) throw new Error("Invalid QuickBooks invoice identity.");
+  const connection = await loadConnectionForSync();
+  const accessToken = await ensureAccessToken(connection);
+  const response = await fetch(`${getQuickbooksApiBase(connection.environment)}/v3/company/${encodeURIComponent(connection.realm_id)}/invoice/${encodeURIComponent(qboInvoiceId)}/pdf`, {
+    headers: { Accept: "application/pdf", Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!response.ok) throw new Error("QuickBooks could not provide this invoice PDF. Please try again or check the QuickBooks connection in Settings.");
+  const pdf = await response.arrayBuffer();
+  if (new TextDecoder().decode(pdf.slice(0, 5)) !== "%PDF-") throw new Error("QuickBooks did not return a valid invoice PDF.");
+  return pdf;
+}
+
 export async function syncQuickbooksInvoice(qboInvoiceId: string) {
   const connection = await loadConnectionForSync();
   const accessToken = await ensureAccessToken(connection);

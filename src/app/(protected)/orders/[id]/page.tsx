@@ -48,6 +48,7 @@ import { ShipmentSelectionButton, ShipmentSelectionCheckbox, ShipmentSelectionCo
 import { SourceAssignmentForm } from "./source-assignment-form";
 import { OrderHealthPanel } from "./order-health-panel";
 import { RefreshQuickbooksButton } from "./refresh-quickbooks-button";
+import { DownloadInvoiceButton } from "./download-invoice-button";
 import { CancellationSubmit } from "./cancellation-submit";
 import { OrderNoteForm } from "./order-note-form";
 import { evaluateOrderHealth } from "@/lib/orders/order-health";
@@ -929,7 +930,7 @@ export default async function OrderDetailPage({
           <h1 className="mt-1 text-2xl font-semibold text-[#111827]">{customerName} <span className="font-normal text-[#64748b]">— Invoice #{invoiceNumber}</span></h1>
           <p className="mt-2 text-sm text-[#64748b]">QuickBooks order imported on {formatDate(orderRecord.created_at)}. {hasPhysicalInvoiceLine ? "Refresh the QuickBooks lines to create the mapped operational items before warehouse fulfillment begins." : "Complete this service invoice when the work has been performed."}</p>
           {!hasPhysicalInvoiceLine ? <div className="mt-4 rounded-lg border border-[#e5e7eb] bg-[#fafbfc] p-3"><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#64748b]">QuickBooks Invoice Lines</p><ul className="mt-2 space-y-1 text-sm text-[#334155]">{serviceItems.map((item, index) => <li key={`${item.sku ?? "service"}-${index}`}>{item.sku ?? "Service"} · {item.description} · Qty {item.qty}</li>)}</ul></div> : null}
-          <div className="mt-4 flex flex-wrap gap-2">{hasPhysicalInvoiceLine && orderRecord.source_invoice_id ? <form action={refreshOrderFromQuickbooksAction}><input type="hidden" name="orderId" value={orderRecord.id} /><RefreshQuickbooksButton /></form> : hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
+          <div className="mt-4 flex flex-wrap gap-2">{orderRecord.source_invoice_id ? <DownloadInvoiceButton orderId={orderRecord.id} /> : null}{hasPhysicalInvoiceLine && orderRecord.source_invoice_id ? <form action={refreshOrderFromQuickbooksAction}><input type="hidden" name="orderId" value={orderRecord.id} /><RefreshQuickbooksButton /></form> : hasPhysicalInvoiceLine ? <Link href={`/product-mappings?order_id=${encodeURIComponent(orderRecord.id)}`} className="btn-primary">Open Product Mappings</Link> : <form action={completeServiceOnlyOrderAction}><input type="hidden" name="orderId" value={orderRecord.id} /><button type="submit" className="btn-primary">Complete Service</button></form>}<Link href="/orders" className="btn-secondary">Back to orders</Link></div>
           <ManualOrderCancellation orderId={orderRecord.id} adminUnlocked={adminUnlocked} cancellationStatus={orderRecord.cancellation_status} cancellationReason={orderRecord.cancellation_reason} />
         </section>
       </div>
@@ -1744,6 +1745,7 @@ export default async function OrderDetailPage({
                 <RefreshQuickbooksButton compact />
               </form>
             ) : null}
+            {orderRecord.source_invoice_id ? <DownloadInvoiceButton orderId={orderRecord.id} /> : null}
             <Link href="/orders" className="btn-secondary inline-flex">← Back</Link>
             {!isCancelled && shippingOrderColumnSet.has("fulfillment_method") ? (
               <form action={updateOrderOperationsAction} className="flex flex-wrap items-center gap-2">

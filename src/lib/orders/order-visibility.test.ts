@@ -57,6 +57,24 @@ describe("orders visibility and activation", () => {
     expect(result.isNewOrder).toBe(false);
   });
 
+  it("archives a dormant historical import without inventing fulfillment or cancellation", () => {
+    const historical = order({
+      order_number: "9447",
+      review_status: "ARCHIVED",
+      shipping_order_lines: [line({ approval_status: "PENDING_REVIEW", warehouse_status: "PENDING_REVIEW", approved_qty: 0, fulfilled_qty: 0 })],
+    });
+    const before = structuredClone(historical);
+    const result = classifyOrder(historical);
+
+    expect(matchesOrderTab(result, "archived")).toBe(true);
+    for (const tab of ["orders", "new", "warehouse", "partial", "cancelled"]) {
+      expect(matchesOrderTab(result, tab)).toBe(false);
+    }
+    expect(result.isCancelled).toBe(false);
+    expect(historical).toEqual(before);
+    expect(historical.shipping_order_lines?.[0].fulfilled_qty).toBe(0);
+  });
+
   it("shows an explicitly entered QBO order as visible and New", () => {
     // Entering an invoice activates it (review_status leaves PENDING_REVIEW) and approves its lines.
     const result = classifyOrder(order({

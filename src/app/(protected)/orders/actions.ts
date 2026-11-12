@@ -1,6 +1,7 @@
 "use server";
 
 import crypto from "node:crypto";
+import { saveOrderNote } from "@/lib/orders/save-order-note";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -1353,39 +1354,9 @@ export async function updateOrderOperationsAction(formData: FormData) {
 
 export async function addOrderNoteAction(formData: FormData) {
   const user = await requireUser();
-  const orderId = formData.get("orderId")?.toString();
-  const lineId = formData.get("lineId")?.toString();
-  const sku = formData.get("sku")?.toString();
-  const message = formData.get("message")?.toString()?.trim();
-  const adminClient = getSupabaseAdmin();
-
-  if (!orderId || !message) {
-    redirect(`/orders/${orderId ?? ""}?error=Note+text+is+required`);
-  }
-
-  const { data: accessUser } = isUuid(user.id)
-    ? await adminClient.from("access_users").select("id").eq("id", user.id).maybeSingle()
-    : { data: null };
-  const savedAt = new Date().toISOString();
-  const { error } = await adminClient.from("audit_log").insert({
-    entity_type: "shipping_order",
-    entity_id: orderId,
-    action: "ORDER_NOTE_ADDED",
-    actor_id: accessUser?.id ?? null,
-    details: {
-      message,
-      note_text: message,
-      author_name: user.fullName ?? "Unknown user",
-      saved_at: savedAt,
-      line_id: lineId ?? null,
-      sku: sku ?? null,
-    },
-  });
-
-  if (error) {
-    redirect(`/orders/${orderId}?error=${encodeURIComponent(`Unable to save note: ${error.message}`)}`);
-  }
-
+  const orderId = String(formData.get("orderId") ?? "");
+  try { await saveOrderNote(user, formData); }
+  catch (error) { redirect(`/orders/${orderId}?error=${encodeURIComponent(error instanceof Error ? error.message : "Unable to save note")}`); }
   revalidateOrdersList();
   revalidatePath(`/orders/${orderId}`);
   redirect(`/orders/${orderId}`);

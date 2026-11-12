@@ -22,7 +22,6 @@ import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { resolveCanonicalOrderParent } from "@/lib/orders/order-identity";
 import { cancellationAwareOperationalTotals, cancellationAwareStatus, isCancelledOrder } from "@/lib/orders/cancellation-presentation";
 import {
-  addOrderNoteAction,
   refreshOrderFromQuickbooksAction,
   deleteOrderAttachmentAction,
   markOrderLinesPickedUpAction,
@@ -49,6 +48,7 @@ import { SourceAssignmentForm } from "./source-assignment-form";
 import { OrderHealthPanel } from "./order-health-panel";
 import { RefreshQuickbooksButton } from "./refresh-quickbooks-button";
 import { CancellationSubmit } from "./cancellation-submit";
+import { OrderNoteForm } from "./order-note-form";
 import { evaluateOrderHealth } from "@/lib/orders/order-health";
 
 type OrderDetailRow = {
@@ -1957,13 +1957,7 @@ export default async function OrderDetailPage({
 
                           <div className="rounded-xl border border-[#e5e7eb] bg-white p-4">
                             <h3 className="text-sm font-semibold text-[#111827]">Item Note</h3>
-                            <form action={addOrderNoteAction} className="mt-4 grid gap-2">
-                              <input type="hidden" name="orderId" value={lineOwnerOrderId} />
-                              <input type="hidden" name="lineId" value={line.id} />
-                              <input type="hidden" name="sku" value={item.sku ?? ""} />
-                              <textarea name="message" rows={4} className="textarea" placeholder="Add an item-specific note" />
-                              <button className="btn-secondary" type="submit">Save Note</button>
-                            </form>
+                            <OrderNoteForm orderId={lineOwnerOrderId} lineId={line.id} sku={item.sku ?? ""} />
                             <details className="mt-5 border-t border-[#eef2f7] pt-4">
                               <summary className="cursor-pointer text-sm font-semibold text-[#111827]">Advanced · Queue position</summary>
                               <p className="mt-1 text-xs text-[#64748b]">Automatic position: {line.queue_position_start ?? "—"} · Units: {line.queue_position_count ?? 0}</p>
@@ -2052,21 +2046,13 @@ export default async function OrderDetailPage({
             <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm" id="notes">
               <h2 className="text-xl font-semibold text-[#111827]">Order Notes</h2>
               <p className="mt-1 text-sm text-[#5a5a5a]">Notes record exceptions and customer-specific fulfillment instructions without repeating item data above.</p>
-              <form action={addOrderNoteAction} className="mt-4 space-y-3">
-                <input type="hidden" name="orderId" value={orderRecord.id} />
-                <textarea name="message" rows={4} className="w-full rounded-xl border border-[#d1d5db] p-3 text-sm" placeholder="Add a note..." />
-                <div className="flex justify-end">
-                  <button className="btn-primary" type="submit">Save Note</button>
-                </div>
-              </form>
-              <div className="mt-4 space-y-3">
-                {orderNotes.length === 0 ? <p className="text-sm text-[#6b7280]">No order notes yet.</p> : orderNotes.map((activity) => (
-                  <div key={activity.id} className="rounded-lg border border-[#eef2f7] bg-[#fafbfc] p-3 text-sm">
-                    <p className="font-semibold text-[#111827]">{formatDateTime(activity.created_at)} — {activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System"}</p>
-                    <p className="mt-1 text-[#5a5a5a]">{typeof activity.details?.message === "string" ? activity.details.message : "Note saved"}</p>
-                  </div>
-                ))}
-              </div>
+              <OrderNoteForm orderId={orderRecord.id} initialNotes={orderNotes.map(activity => ({
+                id: activity.id,
+                message: typeof activity.details?.message === "string" ? activity.details.message : "Note saved",
+                savedAt: activity.created_at,
+                author: typeof activity.details?.author_name === "string" ? activity.details.author_name : activity.actor_id ? actorNameById.get(activity.actor_id) ?? "System" : "System",
+                sku: typeof activity.details?.sku === "string" ? activity.details.sku : null,
+              }))} />
             </section>
 
             <section className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

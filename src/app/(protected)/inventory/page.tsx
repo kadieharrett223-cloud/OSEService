@@ -1,3 +1,4 @@
+import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
 import { getCommittedFloor } from "@/lib/inventory/floor-demand";
 import { unstable_cache } from "next/cache";
@@ -574,7 +575,7 @@ export default async function InventoryPage({
       approved_at: null,
       created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
-      fulfillment_source: line.fulfillment_source,
+      fulfillment_source: inventoryCoverageSource(line),
       warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
       container_reserved_quantities: containerReservedQuantities,
     });

@@ -1,4 +1,5 @@
 import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals } from "./physical-fulfillment";
+import { isMappingSourceBypass } from "./other-source-safety";
 
 export type HealthSeverity = "INFO" | "WARNING" | "ERROR";
 
@@ -103,6 +104,7 @@ export function evaluateOrderHealth(input: OrderHealthInput): OrderHealthIssue[]
     const fulfilledEvidence = fulfillmentEvidenceQtyByLine.get(line.id) ?? 0;
     const status = upper(line.fulfillment_status);
     const context = { lineId: line.id, warehouseStatus: line.warehouse_status };
+    if (isMappingSourceBypass(line)) issues.push({ ...context, severity: "ERROR", code: "OTHER_MAPPING_BYPASS", product, issue: "Mapping problem was saved as non-stock fulfillment", expected: "Verified physical source and shipment date", actual: "Other — mapping problem; no warehouse deduction implied", cause: "Open quantities remain in inventory demand. Review completed historical quantities against their physical dates and later recounts before any correction." });
     if (upper(line.fulfillment_source) === "DROPSHIP" && !line.fulfillment_supplier) issues.push({ ...context, severity: "WARNING", code: "DROPSHIP_SUPPLIER_MISSING", product, issue: "Dropship source has no supplier detail", expected: "Supplier/vendor", actual: "Missing", cause: "Add the supplier before relying on this fulfillment source." });
     if (upper(line.fulfillment_source) === "OTHER" && !line.fulfillment_notes) issues.push({ ...context, severity: "WARNING", code: "OTHER_SOURCE_NOTE_MISSING", product, issue: "Other fulfillment source has no note", expected: "Source note", actual: "Missing", cause: "Explain how this line will be fulfilled." });
     if (upper(line.fulfillment_source) === "WAREHOUSE" && !line.product_id) issues.push({ ...context, severity: "ERROR", code: "WAREHOUSE_SOURCE_UNMAPPED", product, issue: "Warehouse source has no product mapping", expected: "Mapped product", actual: "Unmapped", cause: "Warehouse fulfillment cannot identify physical inventory." });

@@ -1,3 +1,4 @@
+import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
 import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
@@ -192,7 +193,7 @@ export async function loadShippingGroupCandidates() {
       approved_at: null,
       created_at: l.shipping_orders?.created_at ?? "",
       has_live_allocation: allocations.length > 0,
-      fulfillment_source: l.fulfillment_source,
+      fulfillment_source: inventoryCoverageSource(l),
       warehouse_reserved_qty: Math.max(
         pinned,
         ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(

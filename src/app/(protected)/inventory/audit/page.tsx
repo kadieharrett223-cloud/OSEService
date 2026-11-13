@@ -148,7 +148,7 @@ export default async function InventoryAuditPage({ searchParams }: { searchParam
               <td className="p-2"><Link prefetch={false} className="underline" href={`/orders/${line.shipping_order_id}`}>Invoice {order?.order_number ?? "Unknown"}</Link><div>{order?.customers?.company_name || order?.customers?.full_name}</div></td>
               <td className="p-2">{productById.get(line.product_id)?.canonical_name ?? line.product_id}</td>
               <td className="p-2">{event.fulfilled_qty} · {event.fulfillment_type}</td>
-              <td className="p-2">{linked.length ? linked.map(row => <div key={row.id}>{row.delta} ({row.before_qty} → {row.after_qty})</div>) : event.fulfillment_type === "OTHER" ? "External source: no warehouse deduction" : "No linked stock movement recorded"}</td>
+              <td className="p-2">{linked.length ? linked.map(row => <div key={row.id}>{row.delta} ({row.before_qty} → {row.after_qty})</div>) : event.fulfillment_type === "OTHER" ? "Other completion: no linked warehouse deduction" : "No linked stock movement recorded"}</td>
               <td className="p-2"><div>{event.carrier} {event.tracking_number}</div><div className="font-mono text-xs text-slate-500">Event: {event.id}</div></td>
             </tr>;
           })}{!fulfillments.length ? <tr><td colSpan={7} className="p-3 text-slate-500">No saved fulfillment events in this period. Open orders above are not completed shipments.</td></tr> : null}</tbody>

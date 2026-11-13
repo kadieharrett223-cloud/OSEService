@@ -1,6 +1,7 @@
 "use server";
 
 import crypto from "node:crypto";
+import { hasMappingSourceProblem, MAPPING_SOURCE_ERROR } from "@/lib/orders/other-source-safety";
 import { saveOrderNote } from "@/lib/orders/save-order-note";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -533,6 +534,7 @@ async function writeOrderActivity(
   orderId: string,
   action: string,
   details: AuditDetails,
+  actor?: { id: string; fullName: string | null },
 ) {
   if (!orderId || !isUuid(orderId)) return;
 
@@ -540,7 +542,8 @@ async function writeOrderActivity(
     entity_type: "shipping_order",
     entity_id: orderId,
     action,
-    details: details as never,
+    ...(actor ? { actor_id: await safeAccessUserId(supabase, actor.id) } : {}),
+    details: (actor ? { ...details, actor_user_id: actor.id, actor_name: actor.fullName ?? "Unknown signed-in user" } : details) as never,
   });
 }
 
@@ -1637,7 +1640,7 @@ export async function remapOrderLineProductAction(formData: FormData) {
 }
 
 export async function updateOrderLineAssignmentAction(formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
 
   const orderId = getString(formData, "orderId");
   const lineId = getString(formData, "lineId");
@@ -1658,6 +1661,8 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
   const normalizedSource = normalizeFulfillmentSource(source);
   const isContainerAssignment = source === "CONTAINER";
   if (!normalizedSource && !isContainerAssignment) redirect(`/orders/${orderId}?error=Choose+Warehouse,+Container,+Dropship,+Other,+or+Customer+Not+Ready`);
+  if (normalizedSource === "OTHER" && hasMappingSourceProblem(fulfillmentNotes)) redirect(`/orders/${orderId}?error=${encodeURIComponent(MAPPING_SOURCE_ERROR)}`);
+  if (normalizedSource === "OTHER" && getString(formData, "acknowledge_no_stock") !== "yes") redirect(`/orders/${orderId}?error=Confirm+that+Other+does+not+use+warehouse+stock+and+removes+the+item+from+active+customer+lists`);
   if (normalizedSource === "OTHER" && !fulfillmentNotes) redirect(`/orders/${orderId}?error=Notes+are+required+for+Other+fulfillment`);
   if (normalizedSource === "DROPSHIP" && !supplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropshipping`);
   if (isContainerAssignment && !containerId) redirect(`/orders/${orderId}?error=Select+a+container+for+Container+assignment`);
@@ -1749,7 +1754,9 @@ export async function updateOrderLineAssignmentAction(formData: FormData) {
     notes: fulfillmentNotes,
     container_id: isContainerAssignment ? containerId : null,
     quantity: assignedQty,
-  });
+    warehouse_stock_effect: 0,
+    no_stock_acknowledged: normalizedSource === "OTHER",
+  }, user);
 
   revalidatePath("/inventory");
   revalidatePath("/order-queue");
@@ -1805,6 +1812,7 @@ export async function completeNonWarehouseFulfillmentAction(formData: FormData) 
   const finalTracking = tracking ?? lineRow.fulfillment_tracking ?? null;
   const finalNotes = notes ?? lineRow.fulfillment_notes ?? null;
   if (source === "DROPSHIP" && !finalSupplier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropship+completion`);
+  if (source === "OTHER" && hasMappingSourceProblem(finalNotes)) redirect(`/orders/${orderId}?error=${encodeURIComponent(MAPPING_SOURCE_ERROR)}`);
   if (source === "OTHER" && !finalNotes) redirect(`/orders/${orderId}?error=Explanation+is+required+for+Other+completion`);
 
   const approvedQty = Number(lineRow.approved_qty ?? 0);
@@ -2377,6 +2385,7 @@ export async function completeSelectedFulfillmentAction(formData: FormData) {
     const nextFulfilled = fulfilledQty + quantity;
     const isComplete = nextFulfilled >= approvedQty && approvedQty > 0;
     const finalNotes = notes || line.fulfillment_notes || (source === "DROPSHIP" ? "Dropship fulfillment completed" : null);
+    if (source === "OTHER" && hasMappingSourceProblem(finalNotes)) redirect(`/orders/${orderId}?error=${encodeURIComponent(MAPPING_SOURCE_ERROR)}`);
     if (source === "OTHER" && !finalNotes) redirect(`/orders/${orderId}?error=Explanation+is+required+for+Other+completion`);
     if (source === "DROPSHIP" && !line.fulfillment_supplier && !carrier) redirect(`/orders/${orderId}?error=Supplier+is+required+for+Dropship+completion`);
 

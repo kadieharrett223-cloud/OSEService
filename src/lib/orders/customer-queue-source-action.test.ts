@@ -3,7 +3,7 @@ const orderId = "11111111-1111-4111-8111-111111111111";
 const state = vi.hoisted(() => ({ calls: [] as Array<{ table: string; operation: string; payload?: Record<string, unknown> }>, saved: [{ id: "line" }] as Array<{ id: string }>, sourceError: null as null | { message: string } }));
 vi.mock("next/navigation", () => ({ redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ requireUser: vi.fn(async () => ({ fullName: "Operator" })) }));
+vi.mock("@/lib/auth", () => ({ requireUser: vi.fn(async () => ({ id: "test-session", fullName: "Operator" })) }));
 vi.mock("@/lib/product-queue", () => ({ recalculateProductQueues: vi.fn() }));
 vi.mock("@/lib/demand/canonical-customer-queue-cache", () => ({ revalidateCanonicalCustomerQueue: vi.fn() }));
 vi.mock("@/lib/orders/erp-health-cache", () => ({ revalidateErpHealth: vi.fn() }));
@@ -22,7 +22,7 @@ vi.mock("@/lib/supabase/admin", () => ({ getSupabaseAdmin: () => ({ from(table: 
 } }) }));
 import { updateOrderLineAssignmentAction } from "@/app/(protected)/orders/actions";
 import { revalidateOrdersProjection } from "./orders-projection-cache";
-const form = (notes = "Customer not ready") => { const data = new FormData(); data.set("orderId", orderId); data.set("lineId", "line"); data.set("assignment_source", "OTHER"); data.set("fulfillment_notes", notes); return data; };
+const form = (notes = "Customer not ready") => { const data = new FormData(); data.set("orderId", orderId); data.set("lineId", "line"); data.set("assignment_source", "OTHER"); data.set("fulfillment_notes", notes); data.set("acknowledge_no_stock", "yes"); return data; };
 beforeEach(() => { vi.clearAllMocks(); state.calls = []; state.saved = [{ id: "line" }]; state.sourceError = null; });
 it("Other saves its source and note, releases reservations, audits and refreshes all lists without a stock/shipment write", async () => {
   await expect(updateOrderLineAssignmentAction(form())).rejects.toThrow("Item+removed+from+active+Customer+Lists");
@@ -58,4 +58,19 @@ it("saves Customer Not Ready using the same source dropdown without requiring a 
   expect(state.calls[0].payload).toEqual({ fulfillment_source: "CUSTOMER_NOT_READY", fulfillment_supplier: null, fulfillment_reference: null, fulfillment_tracking: null, fulfillment_notes: null });
   expect(state.calls.some((call) => call.table === "inventory_transactions" || call.table === "fulfillments")).toBe(false);
   expect(revalidateOrdersProjection).toHaveBeenCalledOnce();
+});
+
+it("rejects a mapping workaround before changing source or reservations", async () => {
+  await expect(updateOrderLineAssignmentAction(form("OCC Mapping Error"))).rejects.toThrow("mapping%20problem");
+  expect(state.calls).toEqual([]);
+});
+it("requires explicit non-stock acknowledgment before any write", async () => {
+  const data=form(); data.delete("acknowledge_no_stock");
+  await expect(updateOrderLineAssignmentAction(data)).rejects.toThrow("Confirm+that+Other");
+  expect(state.calls).toEqual([]);
+});
+it("records the signed-in actor and non-stock choice in the assignment audit", async () => {
+  await expect(updateOrderLineAssignmentAction(form())).rejects.toThrow("Item+removed");
+  const audit=state.calls.find(x=>x.table==="audit_log")!;
+  expect(audit.payload).toEqual(expect.objectContaining({details:expect.objectContaining({actor_user_id:"test-session",actor_name:"Operator",no_stock_acknowledged:true,warehouse_stock_effect:0})}));
 });

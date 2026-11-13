@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { updateOrderLineAssignmentAction } from "../actions";
 import { AssignmentSubmitButton } from "./assignment-submit-button";
+import { hasMappingSourceProblem, MAPPING_SOURCE_ERROR } from "@/lib/orders/other-source-safety";
 
 type FulfillmentSource = "WAREHOUSE" | "CONTAINER" | "DROPSHIP" | "OTHER" | "CUSTOMER_NOT_READY";
 
@@ -30,6 +31,8 @@ export function SourceAssignmentForm({
   containers: Array<{ id: string; container_number: string | null; lifecycle_status: string | null; eta_confirmed_date: string | null; eta_estimated_date: string | null; available_qty?: number | null }>;
 }) {
   const [source, setSource] = useState<FulfillmentSource>(defaultSource);
+  const [otherNotes, setOtherNotes] = useState(notes);
+  const invalidOther = source === "OTHER" && hasMappingSourceProblem(otherNotes);
   const today = new Date();
 
   return (
@@ -41,7 +44,7 @@ export function SourceAssignmentForm({
         <option value="WAREHOUSE">Warehouse</option>
         <option value="CONTAINER">Container</option>
         <option value="DROPSHIP">Dropship</option>
-        <option value="OTHER">Other</option>
+        <option value="OTHER">Other — no warehouse stock deduction</option>
         <option value="CUSTOMER_NOT_READY">Customer Not Ready</option>
       </select>
 
@@ -91,8 +94,10 @@ export function SourceAssignmentForm({
       {source === "OTHER" ? (
         <>
           <label className="text-xs font-semibold uppercase tracking-[0.06em] text-[#64748b]">Required explanation</label>
-          <textarea name="fulfillment_notes" className="textarea" defaultValue={notes} placeholder="Explain the Other assignment, e.g. customer not ready" required />
-          <p className="text-xs text-[#64748b]">Other removes this item from active Customer Lists without marking it shipped or changing physical stock. Switch back to Warehouse or Container to restore its original queue priority.</p>
+          <textarea name="fulfillment_notes" className="textarea" value={otherNotes} onChange={(event) => setOtherNotes(event.target.value)} placeholder="Identify the actual non-warehouse source and supporting reference" required />
+          <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900">Other will NOT deduct warehouse stock. It also removes this open item from active Customer Lists. Use Warehouse or Container for goods supplied from our inventory.</p>
+          {invalidOther ? <p role="alert" className="text-sm font-semibold text-red-700">{MAPPING_SOURCE_ERROR}</p> : null}
+          <label className="flex items-start gap-2 text-sm text-[#334155]"><input type="checkbox" name="acknowledge_no_stock" value="yes" required className="mt-1" />I verified this item does not use warehouse stock and should be excluded from active Customer Lists.</label>
         </>
       ) : null}
 
@@ -103,7 +108,7 @@ export function SourceAssignmentForm({
         <p className="text-xs text-[#64748b]">Keeps this item owed but removes it from active Customer Lists and releases its reservation. Does not change physical stock or mark anything shipped. Change the source back when the customer is ready; original queue priority is retained.</p>
       </> : null}
 
-      <AssignmentSubmitButton label="Save Assignment" disabled={remainingQty <= 0} />
+      <AssignmentSubmitButton label="Save Assignment" disabled={remainingQty <= 0 || invalidOther} />
     </form>
   );
 }

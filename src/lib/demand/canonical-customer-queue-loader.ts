@@ -18,7 +18,7 @@ export type CanonicalQueueLine = {
   customer_queue_paused?: boolean | null;
   customer_queue_pause_reason?: string | null;
   approval_status: string | null; fulfillment_status: string | null; queue_position_start: number | null;
-  queue_position_count: number | null; queue_position_override?: number | null; queue_position_override_reason?: string | null; queue_position_override_at?: string | null; queue_position_override_by?: string | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
+  queue_position_count: number | null; queue_position_override?: number | null; queue_position_override_reason?: string | null; queue_position_override_at?: string | null; queue_position_override_by?: string | null; ordered_qty?: number | null; priority?: string | null; warehouse_status?: string | null; fulfillment_source?: string | null; fulfillment_notes?: string | null; legacy_item_code: string | null; qbo_invoice_line_id: string | null;
   source_record_id: string | null; logical_demand_key?: string | null;
   qbo_authoritative_absent?: boolean;
   qbo_invoice_lines?: { qbo_line_id?: string | null; qbo_sku?: string | null } | null;
@@ -92,7 +92,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
   const [products, aliases, rawLines, fulfillmentRows, reviewedResolutions, mappingRows, archivedIdentityBySourceRecordId] = await Promise.all([
     fetchAll((from, to) => supabase.from("products").select("id,sku,canonical_name,source_record_id").order("id", { ascending: true }).range(from, to)),
     fetchAll((from, to) => supabase.from("product_aliases").select("product_id,alias").order("id", { ascending: true }).range(from, to)),
-    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,customer_queue_paused,customer_queue_pause_reason,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,queue_position_override_at,queue_position_override_by,legacy_item_code,qbo_invoice_line_id,source_record_id,qbo_invoice_lines(qbo_line_id,qbo_sku),shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").order("id", { ascending: true }).range(from, to)),
+    fetchAll((from, to) => supabase.from("shipping_order_lines").select(`id,customer_queue_paused,customer_queue_pause_reason,product_id,ordered_qty,approved_qty,fulfilled_qty,approval_status,fulfillment_status,fulfillment_source,fulfillment_notes,priority,warehouse_status,queue_position_start,queue_position_count,queue_position_override,queue_position_override_reason,queue_position_override_at,queue_position_override_by,legacy_item_code,qbo_invoice_line_id,source_record_id,qbo_invoice_lines(qbo_line_id,qbo_sku),shipping_orders(id,source_invoice_id,source_type,order_number,duplicate_of_order_id,cancellation_status,review_status,created_at,first_payment_at,legacy_customer_name,fulfillment_method,qbo_invoices(invoice_number,invoice_date,raw_payload,customers(company_name,full_name))),products(sku,canonical_name),inventory_allocations(source_type,container_id,quantity,allocation_status,containers(container_number,lifecycle_status,eta_confirmed_date,eta_estimated_date))`).neq("fulfillment_status", "CANCELLED").order("id", { ascending: true }).range(from, to)),
     fetchAll((from, to) => supabase.from("fulfillments").select("shipping_order_line_id,fulfilled_qty").order("id", { ascending: true }).range(from, to)),
     fetchAll((from, to) => supabase.from("reviewed_obligation_resolutions").select("source_record_id,qbo_invoice_line_id,resolution_type,status").eq("status", "ACTIVE").order("id", { ascending: true }).range(from, to)),
     supabase.from("manual_product_mapping_queue").select("source_sku").eq("status", "OPEN"),
@@ -317,7 +317,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v9-other-source-exclusion"],
+  ["canonical-customer-queue-read-model-v10-mapping-source-safety"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

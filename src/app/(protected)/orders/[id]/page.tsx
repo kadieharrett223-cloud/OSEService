@@ -1,3 +1,4 @@
+import { inventoryCoverageSource, isMappingSourceBypass } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
@@ -270,6 +271,7 @@ type OpenQueueLineLookupRow = {
   approved_qty: number | null;
   fulfilled_qty: number | null;
   fulfillment_source?: string | null;
+  fulfillment_notes?: string | null;
   warehouse_status?: string | null;
   priority: string | null;
   queue_position_start: number | null;
@@ -1168,7 +1170,7 @@ export default async function OrderDetailPage({
           .in("product_id", coverageProductIds),
         supabase
           .from("shipping_order_lines")
-          .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, warehouse_status, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status, quantity, source_type)")
+          .select("id, product_id, approved_qty, fulfilled_qty, fulfillment_source, fulfillment_notes, warehouse_status, priority, queue_position_start, approved_at, created_at, inventory_allocations (id, allocation_status, quantity, source_type)")
           .in("product_id", coverageProductIds)
           .eq("approval_status", "APPROVED")
           .neq("fulfillment_status", "FULFILLED"),
@@ -1265,7 +1267,7 @@ export default async function OrderDetailPage({
       id: row.id,
       product_id: productKey,
       remaining_qty: remainingQty,
-        fulfillment_source: row.fulfillment_source,
+      fulfillment_source: inventoryCoverageSource(row),
       warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
       priority: row.priority,
       queue_position_start: Number.isFinite(queuePosition) ? queuePosition : null,
@@ -1608,6 +1610,8 @@ export default async function OrderDetailPage({
         ? "Partially Shipped"
         : fulfillmentSource === "DROPSHIP"
           ? "Dropship Assigned"
+        : isMappingSourceBypass(item.shippingLine ?? {})
+          ? "Source review required"
         : fulfillmentSource === "OTHER"
           ? "Other Assigned"
         : fulfillmentSource === "CUSTOMER_NOT_READY"
@@ -1867,7 +1871,7 @@ export default async function OrderDetailPage({
                           <span className="text-[12px]">{item.orderedQty}</span>
                           <span className="text-[12px]">{fulfilled}</span>
                           <span className="text-[12px]">{needed}</span>
-                          <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "CUSTOMER_NOT_READY" ? "Customer Not Ready" : line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
+                          <span className="text-[11px] font-medium text-[#111827]">{line?.fulfillment_source === "CUSTOMER_NOT_READY" ? "Customer Not Ready" : line?.fulfillment_source === "DROPSHIP" ? `Dropship${line.fulfillment_supplier ? ` — ${line.fulfillment_supplier}` : ""}` : line?.fulfillment_source === "OTHER" ? `Other · NO stock deduction${line.fulfillment_notes ? ` — ${truncateText(line.fulfillment_notes, 32)}` : ""}` : supply.comingFrom}</span>
                           <span className="self-center text-center text-[11px] text-[#475569]">{supply.availability.replace(/^ETA /, "")}</span>
                           <span className="self-center text-center"><span className={`inline-flex rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(status)}`}>{status}</span></span>
                           <span>

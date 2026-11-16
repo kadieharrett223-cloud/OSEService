@@ -2,7 +2,7 @@ import { projectCanonicalCustomerQueuesByProductKey, type ProjectedCustomerQueue
 import { customerQueueObligationQty, demandLineIdentity, getCanonicalOpenDemandLines, isOpenCustomerQueueLine, netRecordedFulfilledQty, withProvenFulfilledQty } from "./product-demand";
 import type { ReviewedObligationResolution } from "./reviewed-obligation-resolutions";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
-import { liveQuickBooksLineQuantities, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, liveQuickBooksLineQuantities, qboSkuCandidates, resolveKnownQboProductId } from "@/lib/orders/quickbooks-refresh";
 import { customerQueueProductKeys } from "./customer-queue-product-keys";
 import { getCachedOldErpProductIdentityBySourceRecordId } from "@/lib/products/old-erp-product-identity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -100,12 +100,10 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
   ]);
 
   const productRows = products as unknown as Array<{ id: string; sku: string | null; canonical_name: string | null; source_record_id: string | null }>;
-  const productIdByAlias = new Map<string, string>();
-  for (const product of productRows) if (product.sku) productIdByAlias.set(normalizeSku(product.sku), product.id);
-  for (const alias of aliases as Array<{ product_id: string | null; alias: string | null }>) {
-    if (!alias.product_id || !alias.alias) continue;
-    productIdByAlias.set(normalizeSku(alias.alias), alias.product_id);
-  }
+  const productIdByAlias = buildSafeQboProductIdByAlias(productRows,
+    (aliases as Array<{ product_id: string | null; alias: string | null }>).filter(
+      (alias): alias is { product_id: string; alias: string | null } => Boolean(alias.product_id),
+    ));
   const manualMappingSkus = new Set(((mappingRows.data ?? []) as unknown as Array<{ source_sku: string | null }>).map((row) => normalizeSku(row.source_sku)));
 
   const fulfillmentEventsByLineId = new Map<string, Array<{ fulfilled_qty: number | null }>>();
@@ -169,6 +167,7 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
       candidate.qbo_invoice_id === bridgeInvoiceId
       && qboSourceQty(candidate) > 0
       && (candidate.product_id === line.product_id
+        || (!candidate.product_id && resolveKnownQboProductId(candidate.qbo_sku, productIdByAlias) === line.product_id)
         || qboSkuCandidates(candidate.qbo_sku).map(normalizeSku).some((key) => qboSkuCandidates(line.legacy_item_code).map(normalizeSku).includes(key)))
     ));
     const sourceQty = candidates.length === 1 ? qboSourceQty(candidates[0]!) : 0;
@@ -317,7 +316,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v11-software-source-safety"],
+  ["canonical-customer-queue-read-model-v12-approved-alias-bridge"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

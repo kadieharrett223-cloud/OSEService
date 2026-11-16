@@ -6,11 +6,11 @@ import { customerQueueLabel } from "./customer-queue-label";
 import { evaluateOrderHealth } from "./order-health";
 
 describe("mapping problems cannot hide warehouse obligations", () => {
-  it.each(["OCC Mapping Error", "OCC Mapping issue", "Mapping fix", "Wrong product mapping", "Unmapped product"])("rejects the workaround %s", (note) => {
+  it.each(["OCC Mapping Error", "OCC Mapping issue", "Mapping fix", "Wrong product mapping", "Unmapped product", "OCC Issue", "OCC error", "ERP problem", "Software bug", "System issue", "QBO sync issue", "QuickBooks issue"])("rejects the workaround %s", (note) => {
     expect(hasMappingSourceProblem(note)).toBe(true);
   });
   it("restores only the open mapped obligation to shared inventory demand, without changing source, quantities or priority", () => {
-    const line = { id: "ap-line", qbo_invoice_line_id: "qbo-ap", product_id: "platform", fulfillment_source: "OTHER", fulfillment_notes: "OCC Mapping Error", ordered_qty: 1, approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", queue_position_start: 3 };
+    const line = { id: "ap-line", qbo_invoice_line_id: "qbo-ap", product_id: "platform", fulfillment_source: "OTHER", fulfillment_notes: "OCC Issue", ordered_qty: 1, approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", queue_position_start: 3 };
     const before = structuredClone(line);
     const canonical = getCanonicalOpenDemandLines([line], new Set(), new Set());
     expect(canonical).toHaveLength(1);

@@ -60,8 +60,8 @@ it("saves Customer Not Ready using the same source dropdown without requiring a 
   expect(revalidateOrdersProjection).toHaveBeenCalledOnce();
 });
 
-it("rejects a mapping workaround before changing source or reservations", async () => {
-  await expect(updateOrderLineAssignmentAction(form("OCC Mapping Error"))).rejects.toThrow("mapping%20problem");
+it.each(["OCC Mapping Error", "OCC Issue", "ERP problem"])("rejects %s before changing source or reservations", async (notes) => {
+  await expect(updateOrderLineAssignmentAction(form(notes))).rejects.toThrow("mapping%20or%20software%20problem");
   expect(state.calls).toEqual([]);
 });
 it("requires explicit non-stock acknowledgment before any write", async () => {

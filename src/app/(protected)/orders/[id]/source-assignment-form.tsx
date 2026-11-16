@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { updateOrderLineAssignmentAction } from "../actions";
 import { AssignmentSubmitButton } from "./assignment-submit-button";
 import { hasMappingSourceProblem, MAPPING_SOURCE_ERROR } from "@/lib/orders/other-source-safety";
@@ -33,7 +34,6 @@ export function SourceAssignmentForm({
   const [source, setSource] = useState<FulfillmentSource>(defaultSource);
   const [otherNotes, setOtherNotes] = useState(notes);
   const invalidOther = source === "OTHER" && hasMappingSourceProblem(otherNotes);
-  const today = new Date();
 
   return (
     <form action={updateOrderLineAssignmentAction} className="mt-4 grid gap-2">
@@ -57,11 +57,8 @@ export function SourceAssignmentForm({
                 <option value="">Select incoming container</option>
                 {containers.map((container) => {
                   const etaRaw = container.eta_confirmed_date ?? container.eta_estimated_date;
-                  const eta = etaRaw ? new Date(etaRaw) : null;
                   const availableQty = Math.max(0, Number(container.available_qty ?? 0));
-                  const etaLabel = eta && !Number.isNaN(eta.getTime())
-                    ? eta.toLocaleDateString("en-US", { month: "short", day: "numeric", year: today.getFullYear() === eta.getFullYear() ? undefined : "numeric" })
-                    : "Pending";
+                  const etaLabel = formatCalendarDate(etaRaw, { year: "numeric" });
                   return (
                     <option key={container.id} value={container.id}>
                       {(container.container_number ?? "Container")} · {availableQty} available · ETA {etaLabel}

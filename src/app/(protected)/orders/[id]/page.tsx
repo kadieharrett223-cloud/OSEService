@@ -1,3 +1,4 @@
+import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { inventoryCoverageSource, isMappingSourceBypass } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -316,10 +317,7 @@ function outstandingInvoiceBalance(rawPayload: unknown) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "Pending";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Pending";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
+  return formatCalendarDate(value, {}, "Pending");
 }
 
 function formatDateTime(value: string | null | undefined) {

@@ -1,3 +1,4 @@
+import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrivalDatesForm } from "./arrival-dates-form";
@@ -36,10 +37,7 @@ type ContainerDetailRow = {
 };
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatCalendarDate(value, { year: "numeric" }, "—");
 }
 
 function formatCurrency(value: number | string | null | undefined) {

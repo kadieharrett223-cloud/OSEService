@@ -1,3 +1,4 @@
+import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
 import { getCommittedFloor } from "@/lib/inventory/floor-demand";
@@ -211,10 +212,7 @@ function outstandingInvoiceBalance(rawPayload: unknown) {
 }
 
 function formatShortDate(value: string | null | undefined) {
-  if (!value) return "Pending";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Pending";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatCalendarDate(value, {}, "Pending");
 }
 
 function formatStatus(value: string | null | undefined) {

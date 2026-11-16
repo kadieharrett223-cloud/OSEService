@@ -1,3 +1,4 @@
+import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth";
@@ -6,10 +7,7 @@ import { AddContainerModal } from "./add-container-modal";
 import { loadContainerProductOptions } from "@/lib/containers/product-options";
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
-  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatCalendarDate(value, { year: "numeric" }, "—");
 }
 
 function getEtaDisplay(container: {

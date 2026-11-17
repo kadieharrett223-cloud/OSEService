@@ -290,7 +290,22 @@ export function getCanonicalPhysicalOrderSummary({
       physicalLineInvoiceSkuMatchRank(candidate, item.sku) === 0
       && Number(candidate.fulfilled_qty ?? 0) > Number(explicitLine?.fulfilled_qty ?? 0),
     ) ?? null;
-    const line = fulfilledExactSkuSibling ?? explicitLine ?? skuMatches[0] ?? null;
+    // Imported rows can lack any stored SKU, while their exact product identity
+    // is already linked to one live QBO obligation on this invoice. Preserve
+    // that completion without borrowing it across multiple same-product items.
+    const linkedProductItems = explicitLine?.product_id ? new Set(sourceLines
+      .filter((candidate) => candidate.product_id === explicitLine.product_id
+        && candidate.qbo_invoice_lines?.qbo_line_id
+        && invoiceItems.some((invoiceItem) => invoiceItem.key === candidate.qbo_invoice_lines?.qbo_line_id))
+      .map((candidate) => candidate.qbo_invoice_lines!.qbo_line_id)) : new Set();
+    const fulfilledProductSibling = linkedProductItems.size === 1 ? sourceLines
+      .filter((candidate) => candidate.product_id === explicitLine?.product_id
+        && !candidate.qbo_invoice_line_id
+        && isPhysicalFulfillmentLine(candidate, { manualMappingSkus })
+        && (!candidate.id || !usedLineIds.has(candidate.id))
+        && Number(candidate.fulfilled_qty ?? 0) > Number(explicitLine?.fulfilled_qty ?? 0))
+      .sort(prioritizePhysicalFulfillmentLine)[0] ?? null : null;
+    const line = fulfilledExactSkuSibling ?? fulfilledProductSibling ?? explicitLine ?? skuMatches[0] ?? null;
     if (line?.id) usedLineIds.add(line.id);
     const fulfilled = Math.min(item.quantity, Math.max(0, Number(line?.fulfilled_qty ?? 0)));
     return {
@@ -306,4 +321,9 @@ export function getCanonicalPhysicalOrderSummary({
   const fulfilled = items.reduce((sum, item) => sum + item.fulfilled, 0);
   const remaining = Math.max(0, ordered - fulfilled);
   return { items, ordered, fulfilled, remaining, lineCount: items.length, isPartiallyFulfilled: fulfilled > 0 && remaining > 0, isComplete: ordered > 0 && remaining === 0 };
+}
+
+/** A pending duplicate of a completed obligation must never be offered for shipment again. */
+export function remainingCanonicalPhysicalLineIds(summary: CanonicalPhysicalOrderSummary) {
+  return new Set(summary.items.filter((item) => item.remaining > 0 && item.line?.id).map((item) => item.line!.id!));
 }

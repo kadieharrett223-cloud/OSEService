@@ -18,7 +18,7 @@ import { buildShipmentEditLineState } from "@/lib/orders/shipment-edit-state";
 import { isAlwaysNonInventoryQuickbooksLine, qboSkuCandidates, quickbooksInventoryClassificationText } from "@/lib/orders/quickbooks-refresh";
 import { getAssignedSupplySnapshot } from "@/lib/orders/item-supply-snapshot";
 import { canonicalProductSkuKey } from "@/lib/products/canonical-sku";
-import { canonicalInvoiceDisplayLineIds, getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine } from "@/lib/orders/physical-fulfillment";
+import { canonicalInvoiceDisplayLineIds, getCanonicalPhysicalOrderSummary, isRemainingPhysicalFulfillmentLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, prioritizePhysicalFulfillmentLine, remainingCanonicalPhysicalLineIds } from "@/lib/orders/physical-fulfillment";
 import { groupLogicalShipments } from "@/lib/orders/logical-shipment";
 import { formatSavedFulfillmentSource } from "@/lib/orders/fulfillment-source";
 import { customerQueueLabel } from "@/lib/orders/customer-queue-label";
@@ -1646,8 +1646,9 @@ export default async function OrderDetailPage({
   const totalUnitsShipped = canonicalPhysicalSummary.fulfilled;
   const totalEligibleInventoryUnits = canonicalPhysicalSummary.ordered;
   // Fulfillment selection is independent of stock, allocation, and source assignment.
-  const selectablePhysicalLines = isCancelled ? [] : orderLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
-  const selectableSiblingPhysicalLines = isCancelled ? [] : siblingPhysicalLines.filter((line) => isRemainingPhysicalFulfillmentLine(line));
+  const selectableLineIds = remainingCanonicalPhysicalLineIds(canonicalPhysicalSummary);
+  const selectablePhysicalLines = isCancelled ? [] : orderLines.filter((line) => selectableLineIds.has(line.id) && isRemainingPhysicalFulfillmentLine(line));
+  const selectableSiblingPhysicalLines = isCancelled ? [] : siblingPhysicalLines.filter((line) => selectableLineIds.has(line.id) && isRemainingPhysicalFulfillmentLine(line));
   const hasShippableLines = selectablePhysicalLines.length > 0 || selectableSiblingPhysicalLines.length > 0;
   const showNoShippableLinesNotice = !hasShippableLines
     && !isServiceOnlyOrder

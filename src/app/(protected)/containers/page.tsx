@@ -65,6 +65,9 @@ export default async function ContainersPage({
         entered_date,
         payment_status,
         lifecycle_status,
+        rush_status,
+        china_port_handoff_eta_date,
+        us_port_eta_date,
         tracking_number,
         eta_confirmed_date,
         eta_estimated_date,
@@ -198,6 +201,9 @@ export default async function ContainersPage({
                     entered_date: string | null;
                     payment_status: string | null;
                     lifecycle_status: string;
+                    rush_status: string | null;
+                    china_port_handoff_eta_date: string | null;
+                    us_port_eta_date: string | null;
                     tracking_number: string | null;
                     eta_confirmed_date: string | null;
                     eta_estimated_date: string | null;
@@ -225,6 +231,7 @@ export default async function ContainersPage({
                         <span className="rounded-full bg-[#eef2f7] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#334155]">
                           {typedContainer.lifecycle_status}
                         </span>
+                        {typedContainer.rush_status === "ACCEPTED" ? <div className="mt-2 text-xs font-semibold text-[#9f0712]">Supplier agreed to rush</div> : typedContainer.rush_status === "REQUESTED" ? <div className="mt-2 text-xs text-[#92400e]">Rush requested</div> : null}
                       </td>
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{formatDate(typedContainer.order_date)}</div>
@@ -239,6 +246,8 @@ export default async function ContainersPage({
                             <span>{eta.label}</span>
                           )}
                         </div>
+                        {typedContainer.china_port_handoff_eta_date ? <div className="mt-1 text-xs text-[#6b7280]">China port est. {formatDate(typedContainer.china_port_handoff_eta_date)}</div> : null}
+                        {typedContainer.us_port_eta_date ? <div className="mt-1 text-xs text-[#6b7280]">U.S. port ETA {formatDate(typedContainer.us_port_eta_date)}</div> : null}
                       </td>
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{lineCount} line{lineCount === 1 ? "" : "s"}</div>

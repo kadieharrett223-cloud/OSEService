@@ -28,6 +28,13 @@ type ContainerDetailRow = {
   eta_estimated_date: string | null;
   port_date: string | null;
   notes: string | null;
+  rush_status: string | null;
+  china_port_handoff_eta_date: string | null;
+  china_departure_estimated_date: string | null;
+  us_port_eta_date: string | null;
+  schedule_source_url: string | null;
+  schedule_note: string | null;
+  schedule_checked_at: string | null;
   container_lines?: Array<{
     id: string;
     ordered_qty: number | null;
@@ -88,6 +95,13 @@ export default async function ContainerDetailPage({
         eta_estimated_date,
         port_date,
         notes,
+        rush_status,
+        china_port_handoff_eta_date,
+        china_departure_estimated_date,
+        us_port_eta_date,
+        schedule_source_url,
+        schedule_note,
+        schedule_checked_at,
         container_lines (
           id,
           ordered_qty,
@@ -407,6 +421,21 @@ export default async function ContainerDetailPage({
             </dl>
 
             <ArrivalDatesForm containerId={container.id} portDate={toDateInputValue(container.port_date)} confirmedDate={toDateInputValue(container.eta_confirmed_date)} estimatedDate={toDateInputValue(container.eta_estimated_date)} />
+          </div>
+
+          <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-[#111827]">Production &amp; Freight Schedule</h2>
+            <dl className="mt-4 space-y-3 text-sm text-[#374151]">
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">Rush request</dt><dd>{container.rush_status === "NONE" ? "No rush request recorded" : container.rush_status === "ACCEPTED" ? "Supplier agreed to rush" : container.rush_status === "REQUESTED" ? "Requested, awaiting supplier" : container.rush_status === "DECLINED" ? "Supplier declined" : "Unknown"}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">China port handoff estimate</dt><dd>{formatDate(container.china_port_handoff_eta_date)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">Planned vessel departure</dt><dd>{formatDate(container.china_departure_estimated_date)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">U.S. port ETA</dt><dd>{formatDate(container.us_port_eta_date)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">General arrival estimate</dt><dd>{formatDate(container.eta_estimated_date)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">Actual port arrival</dt><dd>{formatDate(container.port_date)}</dd></div>
+            </dl>
+            {container.schedule_note ? <p className="mt-4 whitespace-pre-wrap rounded-lg bg-[#f8fafc] p-3 text-sm text-[#334155]">{container.schedule_note}</p> : null}
+            {container.schedule_source_url ? <a href={container.schedule_source_url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-medium text-[#9f0712] underline">Schedule source</a> : null}
+            {container.schedule_checked_at ? <p className="mt-2 text-xs text-[#6b7280]">Checked {formatDate(container.schedule_checked_at)}</p> : null}
           </div>
 
           <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">

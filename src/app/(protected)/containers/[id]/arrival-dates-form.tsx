@@ -38,9 +38,9 @@ export function ArrivalDatesForm({ containerId, portDate, confirmedDate, estimat
   return <form onSubmit={save} className="mt-5 border-t border-[#e5e7eb] pt-4">
     <input type="hidden" name="container_id" value={containerId} />
     <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[#6b7280]">Update Arrival Dates</p>
-    <p className="mt-1 text-xs text-[#6b7280]">Drives Next Arrival on the Inventory page.</p>
+    <p className="mt-1 text-xs text-[#6b7280]">General arrival ETA drives Next Arrival on the Inventory page. Record the port date only after arrival actually occurs.</p>
     <fieldset disabled={saving || refreshing} className="mt-3 space-y-3">
-      <div><label className="label" htmlFor="port_date">Port Date</label><input id="port_date" name="port_date" type="date" className="input" defaultValue={portDate} /></div>
+      <div><label className="label" htmlFor="port_date">Actual U.S. Port Arrival</label><input id="port_date" name="port_date" type="date" className="input" defaultValue={portDate} /></div>
       <div><label className="label" htmlFor="eta_confirmed_date">Confirmed ETA</label><input id="eta_confirmed_date" name="eta_confirmed_date" type="date" className="input" defaultValue={confirmedDate} /></div>
       <div><label className="label" htmlFor="eta_estimated_date">Estimated ETA</label><input id="eta_estimated_date" name="eta_estimated_date" type="date" className="input" defaultValue={estimatedDate} /></div>
     </fieldset>

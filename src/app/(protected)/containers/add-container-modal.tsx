@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CreateContainerControls } from "./create-container-controls";
 import { matchingContainerProducts, type ContainerProductOption } from "@/lib/containers/product-selection";
 
 type AddContainerModalProps = {
@@ -175,10 +176,7 @@ export function AddContainerModal({ createAction, products }: AddContainerModalP
                 <textarea id="notes" name="notes" rows={4} className="textarea" />
               </div>
 
-              <div className="flex justify-end gap-2">
-                <button type="button" className="btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
-                <button type="submit" className="btn-primary">Save Container</button>
-              </div>
+              <CreateContainerControls onCancel={() => setOpen(false)} />
             </form>
           </div>
         </div>

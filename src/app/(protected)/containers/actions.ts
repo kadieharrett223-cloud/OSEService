@@ -75,7 +75,18 @@ export async function createContainerAction(formData: FormData) {
     .single();
 
   if (containerError || !container?.id) {
-    redirect("/containers?error=Could+not+create+container");
+    // A repeated submission can arrive after the first save committed. Open
+    // that record without replaying its manifest or overwriting its fields.
+    if (containerError?.code === "23505") {
+      const { data: existing, error: lookupError } = await supabase
+        .from("containers").select("id").eq("container_number", containerNumber).maybeSingle();
+      if (!lookupError && existing?.id) {
+        revalidatePath("/containers");
+        redirect(`/containers/${existing.id}?success=${encodeURIComponent(`Container ${containerNumber} already exists. Showing the saved container; this submission made no changes.`)}`);
+      }
+    }
+    console.error("Container save could not be confirmed", { containerNumber, code: containerError?.code ?? "NO_RESULT" });
+    redirect(`/containers?error=${encodeURIComponent(`Could not confirm the save for container ${containerNumber}. Check the Containers list before trying again.`)}`);
   }
 
   if (selectedLines.length > 0) {
@@ -95,7 +106,7 @@ export async function createContainerAction(formData: FormData) {
   revalidateOrdersProjection();
   revalidatePath("/inventory");
   revalidatePath("/containers");
-  redirect("/containers?success=Container+added");
+  redirect(`/containers/${container.id}?success=Container+added`);
 }
 
 type ReceiptEntry = {

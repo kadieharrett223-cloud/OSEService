@@ -73,6 +73,7 @@ export default async function ContainersPage({
         container_lines (
           id,
           ordered_qty,
+          on_order_qty,
           received_qty,
           product_id,
           product_mapping_status,
@@ -99,6 +100,7 @@ export default async function ContainersPage({
       container_lines?: Array<{
         id: string;
         ordered_qty: number | null;
+        on_order_qty: number | null;
         product_id: string | null;
         product_mapping_status?: string | null;
         source_line_ref?: string | null;
@@ -117,7 +119,7 @@ export default async function ContainersPage({
         sourceLineRef: line.source_line_ref ?? "—",
         mappingStatus: String(line.product_mapping_status ?? "UNMAPPED").toUpperCase(),
         sku: line.products?.sku ?? "Unknown SKU",
-        qty: Number(line.ordered_qty ?? 0),
+        qty: Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0),
       }));
   }).sort((a, b) => {
     const containerCompare = String(a.containerNumber).localeCompare(String(b.containerNumber), undefined, { numeric: true });
@@ -201,11 +203,14 @@ export default async function ContainersPage({
                     eta_estimated_date: string | null;
                     remaining_balance: number | null;
                     notes: string | null;
-                    container_lines?: Array<{ ordered_qty: number | null }>;
+                    container_lines?: Array<{ ordered_qty: number | null; on_order_qty: number | null }>;
                   };
                   const eta = getEtaDisplay(typedContainer);
                   const lineCount = typedContainer.container_lines?.length ?? 0;
-                  const totalUnits = (typedContainer.container_lines ?? []).reduce((sum, line) => sum + Number(line.ordered_qty ?? 0), 0);
+                  const totalUnits = (typedContainer.container_lines ?? []).reduce(
+                    (sum, line) => sum + (Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0)),
+                    0,
+                  );
                   const productSummary = (typedContainer.container_lines ?? [])
                     .map((line) => (line as { products?: { sku?: string | null } }).products?.sku)
                     .filter((sku): sku is string => Boolean(sku))

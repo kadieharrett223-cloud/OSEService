@@ -31,6 +31,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/inventory", label: "Inventory", matchPath: "/inventory", icon: "IV" },
       { href: "/containers", label: "Containers", matchPath: "/containers", icon: "CT" },
+      { href: "/purchasing", label: "PO Details", matchPath: "/purchasing", icon: "PO" },
     ],
   },
   {

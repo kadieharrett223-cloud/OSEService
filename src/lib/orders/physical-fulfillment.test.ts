@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { getCanonicalPhysicalOrderSummary, getPhysicalFulfillmentTotals, isNonInventoryPhysicalLine, matchesPhysicalLineToInvoiceDescription, matchesPhysicalLineToInvoiceSku, type PhysicalFulfillmentLine } from "./physical-fulfillment";
 import { isRemainingPhysicalFulfillmentLine } from "./physical-fulfillment";
 
+it("does not identify an accessory as the host lift named in its compatibility description", () => {
+  const accessory = { product_id: "jack", legacy_item_code: "YZRCJ-7", products: { sku: "000063", canonical_name: "YZRCJ-7 Rolling jack for 4PXL-10 / 4PHDA-11" } };
+  expect(matchesPhysicalLineToInvoiceSku(accessory, "4PXL-10")).toBe(false);
+  expect(matchesPhysicalLineToInvoiceDescription({ legacy_item_code: "4PXL-10" }, "YZRCJ-7 Rolling jack for 4PXL-10")).toBe(false);
+  expect(matchesPhysicalLineToInvoiceDescription(accessory, "YZRCJ-7 Rolling jack for 4PXL-10")).toBe(true);
+});
+
+it("uses an approved exact product alias for historical invoice variants", () => {
+  const motor = { product_id: "motor", legacy_item_code: "HPU2203", products: { sku: "HPU2203", canonical_name: "220V 3HP motor" } };
+  expect(matchesPhysicalLineToInvoiceSku(motor, "HPU2203-SP (deleted)", new Map([["HPU2203-SP", "motor"]]))).toBe(true);
+  expect(matchesPhysicalLineToInvoiceSku(motor, "HPU2203-SP (deleted)", new Map([["HPU2203-SP", "other-product"]]))).toBe(false);
+});
+
 function line(overrides: Partial<PhysicalFulfillmentLine> = {}): PhysicalFulfillmentLine {
   return {
     product_id: "product-1",

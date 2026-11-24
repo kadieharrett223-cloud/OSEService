@@ -6,8 +6,9 @@ export function itemSourceCoverage(items: Array<{ key: string; lineId: string; n
   const result = new Map<string, LineCoverage>();
   for (const item of items) {
     if (!item.coverage) continue;
-    const budget = budgets.get(item.lineId) ?? item.coverage.allocations.map(a => ({ ...a }));
-    budgets.set(item.lineId, budget);
+    const identity = item.coverage.line.id;
+    const budget = budgets.get(identity) ?? item.coverage.allocations.map(a => ({ ...a }));
+    budgets.set(identity, budget);
     let needed = Math.max(0, item.needed);
     const allocations: CoverageAllocation[] = [];
     for (const source of budget) {

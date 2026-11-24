@@ -1,7 +1,14 @@
 import { expect, it } from "vitest";
-import { lineSourceReservations } from "./line-source-reservations";
+import { lineSourceReservations, mergedLineSourceReservations } from "./line-source-reservations";
 import { resolveProductCoverage } from "./suggested-allocation";
 import { classifyQboForwardIntakeLine } from "../orders/qbo-forward-intake";
+
+it("retains saved source pins from every constituent of a merged customer row", () => {
+  expect(mergedLineSourceReservations(3, [
+    {remainingQty:1,warehouseStatus:"IN_WAREHOUSE",allocations:[]},
+    {remainingQty:2,warehouseStatus:"IN_WAREHOUSE",allocations:[{source_type:"CONTAINER",container_id:"260",quantity:2,allocation_status:"ALLOCATED"}]},
+  ])).toEqual({warehouse_reserved_qty:1,container_reserved_quantities:[{container_id:"260",quantity:2}]});
+});
 
 it("keeps a container-assigned order incoming despite a stale warehouse flag and available floor stock", () => {
   const reservation = lineSourceReservations(2, "IN_WAREHOUSE", [

@@ -1,4 +1,4 @@
-import { lineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
+import { mergedLineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import { getCommittedFloor } from "@/lib/inventory/floor-demand";
@@ -12,7 +12,7 @@ import { getWarehouseDemandDisplay } from "@/lib/demand/display-status";
 import { resolveProductCoverage, type LineCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { getAfterIncomingInventory } from "@/lib/inventory/after-incoming";
 import { getBackorderedNow } from "@/lib/inventory/backordered-now";
-import { qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
+import { buildSafeQboProductIdByAlias, qboSkuCandidates } from "@/lib/orders/quickbooks-refresh";
 import { getCachedPackageDimensionsBySku } from "@/lib/products/package-dimensions-data";
 import { type PackageDimensions } from "@/lib/products/package-dimensions";
 import { authoritativeStockProductIds, canonicalSkuKey } from "@/lib/products/canonical-sku";
@@ -535,28 +535,29 @@ export function projectInventoryDisplayModel(
   }
 
   const coverageQueueByProduct = new Map<string, OpenQueueLine[]>();
-  for (const line of dedupedQueueLineRows) {
-    if (!line.product_id || !isOpenQueueLine(line)) continue;
-    const sharedQueueRow = sharedCanonicalQueue.queueByLineId.get(line.id);
-    if (!sharedQueueRow) continue;
+  const canonicalCoverageLineById = new Map(sharedCanonicalQueue.canonicalLines.map(line => [line.id, line]));
+  for (const sharedQueueRow of sharedCanonicalQueue.queue) {
+    const line = canonicalCoverageLineById.get(sharedQueueRow.lineId);
+    if (!line?.product_id) continue;
     const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
     const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
     // The canonical queue can reconcile several invoice representations into a
     // larger obligation than the surviving local line. Use its remaining units
     // for coverage too, so Inventory and container forecasts consume the same supply.
-    const remainingQty = Math.max(0, sharedQueueRow.openQty ?? (customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0)));
+    const remainingQty = Math.max(0, sharedQueueRow.openQty);
+    const sourceLines = sharedCanonicalQueue.canonicalLines.filter(candidate => sharedCanonicalQueue.queueByLineId.get(candidate.id)?.lineId === sharedQueueRow.lineId);
     const rows = coverageQueueByProduct.get(productKey) ?? [];
     rows.push({
       id: line.id,
       product_id: productKey,
       remaining_qty: remainingQty,
-      priority: line.priority,
+      priority: line.priority ?? null,
       queue_position_start: Number.isFinite(queuePosition) ? queuePosition : null,
       approved_at: null,
       created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
       fulfillment_source: inventoryCoverageSource(line),
-      ...lineSourceReservations(remainingQty, line.warehouse_status, line.inventory_allocations),
+      ...mergedLineSourceReservations(remainingQty, sourceLines.map(source => ({ remainingQty: Math.max(0, customerQueueObligationQty(source) - Number(source.fulfilled_qty ?? 0)), warehouseStatus: source.warehouse_status, allocations: source.inventory_allocations }))),
     });
     coverageQueueByProduct.set(productKey, rows);
   }
@@ -758,6 +759,7 @@ export function projectInventoryDisplayModel(
   }
   return { displayRows, groupNames, coverageByLineId, coverageByProduct,
     containerSupplyByProduct: coverageContainerSupplyByProduct,
-    canonicalProductKeyById: canonicalInventoryKeyByProductId, canonicalQueue: sharedCanonicalQueue };
+    canonicalProductKeyById: canonicalInventoryKeyByProductId, canonicalQueue: sharedCanonicalQueue,
+    productIdBySku: buildSafeQboProductIdByAlias(productRows, productAliasRows as Array<{ product_id: string; alias: string | null }>) };
 
 }

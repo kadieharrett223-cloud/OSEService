@@ -1,5 +1,6 @@
 import { itemWarehouseCoverage } from "@/lib/orders/item-warehouse-coverage";
 import { itemSourceCoverage } from "@/lib/orders/item-source-coverage";
+import { completedItemStatus } from "@/lib/orders/completed-item-status";
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { isMappingSourceBypass } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
@@ -1095,7 +1096,6 @@ export default async function OrderDetailPage({
       normalizeSkuKey(line.products?.sku),
       normalizeSkuKey(line.legacy_item_code),
       normalizeSkuKey(line.legacy_matched_item_code),
-      normalizeSkuKey(line.legacy_container_assignment),
     ].filter(Boolean) as string[];
     if ((line as { legacy_item_code?: string | null }).legacy_item_code) {
       keys.push(normalizeSkuKey((line as { legacy_item_code?: string | null }).legacy_item_code) as string);
@@ -1112,25 +1112,10 @@ export default async function OrderDetailPage({
 
   const bestCanonicalLineMatch = (skuKey: string | null, description: string) => {
     if (!skuKey) return null;
-    const descriptionKey = normalizeSkuKey(description);
-    return operationalLines
-      .map((candidate) => {
-        const candidateKeys = [
-          normalizeSkuKey(candidate.products?.canonical_name),
-          normalizeSkuKey(candidate.legacy_item_code),
-          normalizeSkuKey(candidate.legacy_matched_item_code),
-          normalizeSkuKey(candidate.legacy_container_assignment),
-        ].filter(Boolean) as string[];
-        const directIndex = candidateKeys.findIndex((key) => key.includes(skuKey) || skuKey.includes(key));
-        const descriptionIndex = candidateKeys
-          .map((key) => descriptionKey?.indexOf(key) ?? -1)
-          .filter((index) => index >= 0)
-          .sort((left, right) => left - right)[0] ?? -1;
-        if (directIndex < 0 && descriptionIndex < 0 && !matchesPhysicalLineToInvoiceDescription(candidate, description)) return null;
-        return { candidate, score: directIndex >= 0 ? directIndex : 10000 + descriptionIndex };
-      })
-      .filter((match): match is { candidate: NonNullable<OrderDetailRow["shipping_order_lines"]>[number]; score: number } => Boolean(match))
-      .sort((left, right) => left.score - right.score || prioritizePhysicalFulfillmentLine(left.candidate, right.candidate))[0]?.candidate ?? null;
+    return operationalLines.filter(candidate =>
+      matchesPhysicalLineToInvoiceSku(candidate, skuKey, inventoryModel.productIdBySku)
+      || matchesPhysicalLineToInvoiceDescription(candidate, description),
+    ).sort(prioritizePhysicalFulfillmentLine)[0] ?? null;
   };
 
   const lineForInvoiceSku = (skuKey: string | null, description: string) => {
@@ -1142,13 +1127,13 @@ export default async function OrderDetailPage({
       const byProduct = shippingLineByProductId.get(resolved.id);
       if (byProduct) return byProduct;
     }
-    const physicalMatch = operationalLines.find((candidate) => matchesPhysicalLineToInvoiceSku(candidate, skuKey));
+    const physicalMatch = operationalLines.find((candidate) => matchesPhysicalLineToInvoiceSku(candidate, skuKey, inventoryModel.productIdBySku));
     if (physicalMatch) return physicalMatch;
     // Old-ERP lines can retain a numeric SKU while the invoice uses the model code in its description.
     return bestCanonicalLineMatch(skuKey, description);
   };
 
-  const canonicalDisplayLineIds = canonicalInvoiceDisplayLineIds(quickbooksSnapshot?.raw_payload, operationalLines);
+  const canonicalDisplayLineIds = canonicalInvoiceDisplayLineIds(quickbooksSnapshot?.raw_payload, operationalLines, inventoryModel.productIdBySku);
   const operationalLineById = new Map(operationalLines.map((line) => [line.id, line]));
   const visibleItems: InvoiceItem[] = (parsedInvoiceItems.length > 0 ? parsedInvoiceItems : orderLines.map((line) => ({
     qboLineId: null,
@@ -1170,9 +1155,8 @@ export default async function OrderDetailPage({
     const shippingLine = canonicalDisplayLine ?? (skuKey
       ? skuKeys.map((key) => lineForInvoiceSku(key, item.description)).find(Boolean)
         ?? lineForInvoiceSku(skuKey, item.description)
-        ?? operationalLines.find((candidate) => normalizeSkuKey(candidate.products?.canonical_name)?.includes(skuKey))
         ?? null
-      : item.description === "Invoice line" ? null : orderLines[index] ?? null);
+      : item.description === "Invoice line" ? null : operationalLines.find(candidate => matchesPhysicalLineToInvoiceDescription(candidate, item.description)) ?? null);
     // A saved alias can be useful for a genuine historical Misc Charge item,
     // but it must not make a documented accounting-only adjustment look like
     // product demand.  The same strict classifier drives QBO intake and the
@@ -1373,12 +1357,11 @@ export default async function OrderDetailPage({
     const needed = isCancelled ? 0 : Math.max(0, orderedQty - fulfilled);
     const inStock = Math.min(needed, warehouseCoverageByItemKey.get(item.key) ?? 0);
     const fulfillmentSource = String(item.shippingLine?.fulfillment_source ?? "").toUpperCase();
+    const completedStatus = completedItemStatus(orderedQty, needed, item.isNonInventory);
     const status = isCancelled
       ? "Cancelled"
-      : item.isNonInventory
-      ? "N/A"
-      : needed === 0 && orderedQty > 0
-      ? "Shipped"
+      : completedStatus !== null
+      ? completedStatus
       : requiresMappingReview && !item.productId && !item.shippingLine?.product_id
         ? "Pending Review"
       : fulfilled > 0
@@ -1404,7 +1387,7 @@ export default async function OrderDetailPage({
   });
 
   const canonicalPhysicalSummary = cancellationAwareOperationalTotals(
-    getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: operationalLines }),
+    getCanonicalPhysicalOrderSummary({ rawPayload: quickbooksSnapshot?.raw_payload, lines: operationalLines, productIdBySku: inventoryModel.productIdBySku }),
     isCancelled,
   );
   const visibleOpenTotal = canonicalPhysicalSummary.remaining;
@@ -1600,7 +1583,7 @@ export default async function OrderDetailPage({
                   <span>Act.</span>
                 </div>
                 <div>
-                  {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }, rowIndex) => {
+                  {itemStockSummary.map(({ item, supply, needed, inStock, fulfilled, status }) => {
                     const invoiceLine = item.shippingLine;
                     const fallbackShipmentLine = [...orderLines, ...siblingPhysicalLines].find((candidate) => {
                         const candidateSku = normalizeSkuKey(candidate.legacy_item_code);
@@ -1610,17 +1593,9 @@ export default async function OrderDetailPage({
                           && Math.max(Number(candidate.approved_qty ?? 0), Number(candidate.ordered_qty ?? 0)) > Number(candidate.fulfilled_qty ?? 0)
                           && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(candidate.fulfillment_status ?? "").toUpperCase());
                       }) ?? null;
-                    const indexedShipmentLine = orderLines[rowIndex] ?? orderRecord.shipping_order_lines?.[rowIndex] ?? null;
-                    const indexedOpenShipmentLine = indexedShipmentLine
-                      && Math.max(Number(indexedShipmentLine.approved_qty ?? 0), Number(indexedShipmentLine.ordered_qty ?? 0)) > Number(indexedShipmentLine.fulfilled_qty ?? 0)
-                      && !["FULFILLED", "CANCELLED", "REMOVED", "DENIED"].includes(String(indexedShipmentLine.fulfillment_status ?? "").toUpperCase())
-                      ? indexedShipmentLine
-                      : null;
                     const lineRemainingQty = invoiceLine ? Math.max(0, Math.max(Number(invoiceLine.approved_qty ?? 0), Number(invoiceLine.ordered_qty ?? 0)) - Number(invoiceLine.fulfilled_qty ?? 0)) : 0;
                     const shipmentLine = (invoiceLine && lineRemainingQty > 0 ? invoiceLine : fallbackShipmentLine)
                       ?? invoiceLine
-                      ?? indexedOpenShipmentLine
-                      ?? orderRecord.shipping_order_lines?.[rowIndex]
                       ?? null;
                     const line = shipmentLine;
                     const lineOwnerOrderId = line && "shipping_order_id" in line && typeof line.shipping_order_id === "string"
@@ -1640,7 +1615,7 @@ export default async function OrderDetailPage({
                       <details id={shipmentLine ? `line-${shipmentLine.id}` : undefined} key={item.key} className="border-b border-[#f1f5f9] group">
                         <summary className="grid cursor-pointer grid-cols-[minmax(150px,2fr)_54px_54px_60px_minmax(90px,1fr)_74px_72px_74px] items-center gap-1.5 px-2 py-2.5 text-[13px] text-[#1f2937] list-none">
                           <span>
-                            {!isCancelled && shipmentLine && !item.isNonInventory && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault }} /> : null}
+                            {!isCancelled && shipmentLine && !item.isNonInventory && isRemainingPhysicalFulfillmentLine(shipmentLine) && remainingQty > 0 ? <ShipmentSelectionCheckbox line={{ id: shipmentLine.id, ownerOrderId: lineOwnerOrderId, sku: item.sku ?? shipmentLine.products?.sku ?? "Item", remainingQty, defaultQty: Math.max(1, Math.min(remainingQty, inStock || remainingQty)), inStock, isReserved: ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(shipmentLine.warehouse_status ?? "").toUpperCase()), fulfillmentSource: assignmentSourceDefault }} /> : null}
                             <span className="font-semibold text-[#111827]">{item.sku ?? "—"}</span>
                             <span className="mt-1 block text-xs text-[#64748b]">{descriptionSummary}</span>
                           </span>

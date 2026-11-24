@@ -1,8 +1,8 @@
-import { lineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
+import { mergedLineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import type { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
-import { dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
+import { customerQueueObligationQty, dedupeDemandLines, isOpenDemandLine } from "@/lib/demand/product-demand";
 import { resolveProductCoverage, type OpenQueueLine, type ProductContainerSupply } from "@/lib/fulfillment/suggested-allocation";
 import { authoritativeStockProductIds, canonicalSkuKey } from "@/lib/products/canonical-sku";
 import { customerQueueProductKeys } from "@/lib/demand/customer-queue-product-keys";
@@ -168,7 +168,8 @@ async function loadContainerForecast(supabase: SupabaseAdmin, containerId: strin
       const start = Number.parseInt(queueRow.position.split("-")[0] ?? "", 10);
       queuePositionLabelByLineId.set(queueRow.lineId, queueRow.position);
       const actual = (line.inventory_allocations ?? []).filter((allocation) => allocation.allocation_status !== "RELEASED" && allocation.source_type === "CONTAINER" && allocation.container_id === containerId).reduce((sum, allocation) => sum + Math.max(0, Number(allocation.quantity ?? 0)), 0);
-      demandByKey.set(key, [...(demandByKey.get(key) ?? []), { id: queueRow.lineId, product_id: key, remaining_qty: queueRow.openQty, priority: "NORMAL", queue_position_start: Number.isFinite(start) ? start : null, approved_at: null, created_at: queueRow.orderCreatedAt ?? new Date(0).toISOString(), has_live_allocation: actual > 0, fulfillment_source: inventoryCoverageSource(line), ...lineSourceReservations(queueRow.openQty, line.warehouse_status, line.inventory_allocations) }]);
+      const sourceLines = canonicalQueue.canonicalLines.filter(candidate => canonicalQueue.queueByLineId.get(candidate.id)?.lineId === queueRow.lineId);
+      demandByKey.set(key, [...(demandByKey.get(key) ?? []), { id: queueRow.lineId, product_id: key, remaining_qty: queueRow.openQty, priority: "NORMAL", queue_position_start: Number.isFinite(start) ? start : null, approved_at: null, created_at: queueRow.orderCreatedAt ?? new Date(0).toISOString(), has_live_allocation: actual > 0, fulfillment_source: inventoryCoverageSource(line), ...mergedLineSourceReservations(queueRow.openQty, sourceLines.map(source => ({ remainingQty: Math.max(0, customerQueueObligationQty(source) - Number(source.fulfilled_qty ?? 0)), warehouseStatus: source.warehouse_status, allocations: source.inventory_allocations }))) }]);
       metadata.set(queueRow.lineId, { lineId: queueRow.lineId, orderId: queueRow.orderId, productId, invoice: queueRow.invoice, customer: line.shipping_orders?.qbo_invoices?.customers?.company_name ?? line.shipping_orders?.qbo_invoices?.customers?.full_name ?? line.shipping_orders?.legacy_customer_name ?? "Customer pending", sku: line.products?.sku ?? "SKU pending", remainingQty: queueRow.openQty, queuePosition: Number.isFinite(start) ? start : null, currentWarehouse: formatStatus(line.warehouse_status), isAssigned: actual > 0, createdAt: queueRow.orderCreatedAt ?? new Date(0).toISOString(), actuallyAssignedQty: actual });
     }
   }

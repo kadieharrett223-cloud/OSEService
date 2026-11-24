@@ -21,7 +21,8 @@ it("keeps Dashboard and Inventory availability aligned across complete stock, de
   };
   const queue = {
     canonicalLines: [line], qboInvoiceLines: [],
-    queueByLineId: new Map([[line.id, { position: "1", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED" }]]),
+    queue: [{ lineId: line.id, openQty: line.ordered_qty === 3 ? 3 : 2, position: "1" }],
+    queueByLineId: new Map([[line.id, { lineId: line.id, openQty: 3, position: "1", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED" }]]),
   } as unknown as Parameters<typeof projectInventoryDisplayModel>[2];
   const base = {
     products, aliases: [{ product_id: "shadow", alias: "LIFT" }], oldErpProducts: [], displayGroupData: [],
@@ -64,7 +65,8 @@ it("covers the canonical remaining quantity when the surviving local invoice lin
   };
   const queue = {
     canonicalLines: [line], qboInvoiceLines: [],
-    queueByLineId: new Map([[line.id, { openQty: 2, position: "1-2", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED" }]]),
+    queue: [{ lineId: line.id, openQty: line.ordered_qty === 3 ? 3 : 2, position: "1" }],
+    queueByLineId: new Map([[line.id, { lineId: line.id, openQty: 2, position: "1-2", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED" }]]),
   } as unknown as Parameters<typeof projectInventoryDisplayModel>[2];
   const base = {
     products: [{ id: "jack", sku: "HLCJ-6", canonical_name: "HLCJ-6 Jack" }], aliases: [], oldErpProducts: [], displayGroupData: [],
@@ -77,4 +79,17 @@ it("covers the canonical remaining quantity when the surviving local invoice lin
   expect(model.coverageByLineId.get(line.id)).toMatchObject({ warehouseQty: 0, incomingQty: 2, unassignedQty: 0 });
   expect(model.coverageByLineId.get(line.id)?.allocations).toEqual([expect.objectContaining({ sourceId: "incoming", quantity: 2 })]);
   expect(JSON.stringify({ base, line })).toBe(before);
+});
+
+it("consumes one merged customer obligation once across distinct constituent invoice-line aliases", () => {
+  const parent = { id: "order", source_invoice_id: "invoice", legacy_customer_name: "Customer", created_at: "2026-11-01" };
+  const first = { id: "one", product_id: "jack", ordered_qty: 1, approved_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "PENDING", warehouse_status: "WAITING", inventory_allocations: [], shipping_orders: parent };
+  const second = { ...first, id: "two" };
+  const merged = { lineId: "one", openQty: 2, position: "1-2" };
+  const queue = { canonicalLines: [first, second], qboInvoiceLines: [], queue: [merged], queueByLineId: new Map([["one", merged], ["two", merged]]) } as unknown as Parameters<typeof projectInventoryDisplayModel>[2];
+  const base = { products: [{ id: "jack", sku: "JACK", canonical_name: "Jack" }], aliases: [], oldErpProducts: [], displayGroupData: [], transactions: [{product_id:"jack",bucket:"ON_FLOOR",delta:1,source_type:"RECOUNT"}], containerLines: [{ product_id:"jack",container_id:"incoming",on_order_qty:1,received_qty:0,containers:{container_number:"260",lifecycle_status:"PRODUCTION",eta_confirmed_date:null,eta_estimated_date:null,port_date:null,entered_date:null} }] };
+  const model = projectInventoryDisplayModel(base, {}, queue);
+  expect(model.coverageByLineId.get("one")).toMatchObject({warehouseQty:1,incomingQty:1,unassignedQty:0});
+  expect(model.coverageByLineId.get("two")).toBe(model.coverageByLineId.get("one"));
+  expect(model.coverageByProduct.get("JACK")?.demand).toHaveLength(1);
 });

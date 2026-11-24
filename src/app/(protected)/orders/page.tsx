@@ -6,9 +6,12 @@ import { classifyOrder, matchesOrderTab } from "@/lib/orders/order-visibility";
 import { getExactInvoiceSearchTab } from "@/lib/orders/orders-search";
 import { getCanonicalPhysicalOrderSummary } from "@/lib/orders/physical-fulfillment";
 import { cancellationAwareOperationalTotals } from "@/lib/orders/cancellation-presentation";
-import { resolveProductCoverage, type LineCoverage, type OpenQueueLine } from "@/lib/fulfillment/suggested-allocation";
+import { loadInventoryDisplayModel } from "@/lib/inventory/inventory-display-model";
+import { orderWarehouseCoverage } from "@/lib/orders/order-warehouse-coverage";
 import { buildLogicalOrdersProjection } from "@/lib/orders/logical-orders-projection";
 import { ORDERS_PROJECTION_CACHE_TAG } from "@/lib/orders/orders-projection-cache";
+import { INVENTORY_READ_MODEL_CACHE_TAG } from "@/lib/inventory/inventory-read-cache";
+import { CANONICAL_CUSTOMER_QUEUE_CACHE_TAG } from "@/lib/demand/canonical-customer-queue-cache";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { OrdersBrowser } from "./orders-browser";
 import { recommendWarehouseOrderIds } from "@/lib/orders/warehouse-recommendations";
@@ -146,7 +149,7 @@ async function getOrdersDatasetFromDatabase() {
       .eq("status", "OPEN");
     const manualMappingSkus = (manualMappingRows ?? []).map((row) => String((row as { source_sku?: string | null }).source_sku ?? "").trim().toUpperCase());
 
-    const [directLines, qboParentRows, onFloorTransactions] = await Promise.all([
+    const [directLines, qboParentRows, inventoryModel] = await Promise.all([
       fetchAllRows((from, to) => supabase
         .from("shipping_order_lines")
         .select(`
@@ -180,11 +183,7 @@ async function getOrdersDatasetFromDatabase() {
         .eq("source_type", "QBO_INVOICE")
         .order("created_at", { ascending: false })
         .range(from, to)),
-      fetchAllRows((from, to) => supabase
-        .from("inventory_transactions")
-        .select("product_id, delta")
-        .eq("bucket", "ON_FLOOR")
-        .range(from, to)),
+      loadInventoryDisplayModel(),
     ]);
     const parentIds = [...new Set([
       ...(directLines as Array<{ shipping_order_id?: string }>).map((line) => line.shipping_order_id),
@@ -215,75 +214,30 @@ async function getOrdersDatasetFromDatabase() {
       if (leftCreated !== rightCreated) return rightCreated - leftCreated;
       return right.id.localeCompare(left.id);
     });
-    const floorQuantityByProduct = new Map<string, number>();
-    for (const transaction of onFloorTransactions as Array<{ product_id: string | null; delta: number | null }>) {
-      if (!transaction.product_id) continue;
-      floorQuantityByProduct.set(transaction.product_id, (floorQuantityByProduct.get(transaction.product_id) ?? 0) + Number(transaction.delta ?? 0));
-    }
-    const allocationsByLineId = new Map<string, NonNullable<OrderSummary["shipping_order_lines"]>[number]["inventory_allocations"]>();
-    for (const order of allOrders) {
-      for (const line of order.shipping_order_lines ?? []) {
-        allocationsByLineId.set(line.id, line.inventory_allocations);
-      }
-    }
-    const queueLinesByProduct = new Map<string, OpenQueueLine[]>();
-    for (const order of allOrders) {
-      const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
-      const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
-      for (const item of canonicalSummary.items) {
-        const line = item.line;
-        const productId = line?.product_id ?? null;
-        const remaining = Math.max(0, item.quantity - Number(line?.fulfilled_qty ?? 0));
-        if (remaining <= 0) continue;
-        if (!productId || !line?.id || !classification.isVisibleOperationalOrder) continue;
-        const floorReservedQty = (allocationsByLineId.get(line.id) ?? [])
-          .filter((allocation) => String(allocation.allocation_status ?? "ALLOCATED").toUpperCase() !== "RELEASED" && String(allocation.source_type ?? "").toUpperCase() === "FLOOR")
-          .reduce((sum, allocation) => sum + Math.max(0, Number(allocation.quantity ?? 0)), 0);
-        const stagedQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) ? remaining : 0;
-        const queueLine: OpenQueueLine = {
-          id: line.id,
-          product_id: productId,
-          remaining_qty: remaining,
-          priority: line.priority ?? null,
-          queue_position_start: line.queue_position_override ?? line.queue_position_start ?? null,
-          approved_at: line.approved_at ?? null,
-          created_at: line.created_at ?? order.created_at,
-          has_live_allocation: (allocationsByLineId.get(line.id) ?? []).some((allocation) => String(allocation.allocation_status ?? "ALLOCATED").toUpperCase() !== "RELEASED"),
-          fulfillment_source: line.fulfillment_source,
-          warehouse_reserved_qty: Math.max(floorReservedQty, stagedQty),
-        };
-        queueLinesByProduct.set(productId, [...(queueLinesByProduct.get(productId) ?? []), queueLine]);
-      }
-    }
-    const coverageByLineId = new Map<string, LineCoverage>();
-    for (const productId of queueLinesByProduct.keys()) {
-      const coverage = resolveProductCoverage(productId, {
-        floorAvailableByProduct: floorQuantityByProduct,
-        queueLinesByProduct,
-        containerSupplyByProduct: new Map(),
-      });
-      for (const [lineId, lineCoverage] of coverage.lines) coverageByLineId.set(lineId, lineCoverage);
-    }
+    const { coverageByLineId, coverageByProduct, canonicalProductKeyById } = inventoryModel;
+    const floorQuantityByProduct = new Map([...coverageByProduct].map(([key, coverage]) => [key, coverage.currentSupply]));
+    const reservedQuantityByProduct = new Map([...coverageByProduct].map(([key, coverage]) => [key,
+      coverage.demand.reduce((sum, line) => sum + Number(line.warehouse_reserved_qty ?? 0), 0),
+    ]));
     const projectedOrders: ProjectedOrderRow[] = allOrders.map((order) => {
       const customerName = order.customers?.company_name ?? order.customers?.full_name ?? order.legacy_customer_name ?? "Customer pending";
       const invoiceNumber = order.qbo_invoices?.invoice_number ?? order.order_number ?? "—";
       const classification = classifyOrder(order, { manualMappingSkus: manualMappingSkuSet });
-      const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines });
+      const canonicalSummary = getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines, productIdBySku: inventoryModel.productIdBySku });
       const operationalTotals = cancellationAwareOperationalTotals(canonicalSummary, classification.isCancelled);
       const totalQty = operationalTotals.ordered;
       const hasPhysicalLines = canonicalSummary.lineCount > 0;
-      const inStockQty = canonicalSummary.items.reduce((sum, { line }) => sum + (line?.id ? coverageByLineId.get(line.id)?.warehouseQty ?? 0 : 0), 0);
-      const warehouseQty = canonicalSummary.items
-        .filter(({ line }) => line && ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()))
-        .reduce((sum, { line, quantity }) => sum + Math.max(0, quantity - Number(line?.fulfilled_qty ?? 0)), 0);
+      const { inStockQty, stagedQty: warehouseQty, incomingQty, fullyWarehouseCovered } = orderWarehouseCoverage(canonicalSummary.items, coverageByLineId);
       const shippedQty = operationalTotals.fulfilled;
       const remainingQty = operationalTotals.remaining;
       const remainingInWarehouse = Math.min(remainingQty, Math.max(0, warehouseQty));
       const remainingAvailable = Math.min(Math.max(0, remainingQty - remainingInWarehouse), Math.max(0, inStockQty - warehouseQty));
-      const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable);
+      const remainingIncoming = Math.min(Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable), incomingQty);
+      const remainingWaiting = Math.max(0, remainingQty - remainingInWarehouse - remainingAvailable - remainingIncoming);
       const remainingStatusParts: string[] = [];
       if (remainingAvailable > 0) remainingStatusParts.push(`${remainingAvailable} available`);
       if (remainingInWarehouse > 0) remainingStatusParts.push(`${remainingInWarehouse} in warehouse`);
+      if (remainingIncoming > 0) remainingStatusParts.push(`${remainingIncoming} incoming`);
       if (remainingWaiting > 0) remainingStatusParts.push(`${remainingWaiting} waiting`);
       const remainingStatus = classification.isCancelled ? "Cancelled" : remainingQty === 0 ? "Complete" : remainingStatusParts.length > 0 ? remainingStatusParts.join(" · ") : "Not in stock";
       const tabs = ["orders", "new", "warehouse", "partial", "archived", "cancelled"].filter((tab) => matchesOrderTab(classification, tab));
@@ -295,22 +249,18 @@ async function getOrdersDatasetFromDatabase() {
         order.qbo_invoices?.invoice_number,
         ...(order.shipping_order_lines ?? []).flatMap((line) => [line.products?.sku, line.products?.canonical_name]),
       ].filter(Boolean).join(" ").toLowerCase();
-      const fullyCoveredByWarehouse = remainingQty > 0 && canonicalSummary.items.every(({ line, remaining }) => remaining <= 0 || Boolean(line?.id && (coverageByLineId.get(line.id)?.warehouseQty ?? 0) >= remaining));
-      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, quickbooksInvoiceDate: order.qbo_invoices?.invoice_date ?? null, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs, recommendedForWarehouse: classification.isNewOrder && fullyCoveredByWarehouse };
+
+      return { id: order.id, invoiceNumber, customerName, createdAt: order.created_at, quickbooksInvoiceDate: order.qbo_invoices?.invoice_date ?? null, updatedAt: order.updated_at, searchable, hasPhysicalLines, itemCount: canonicalSummary.lineCount, totalQty, shippedQty, remainingQty, remainingStatus, tabs, recommendedForWarehouse: classification.isNewOrder && fullyWarehouseCovered };
     });
     const eligibleIds = new Set(projectedOrders.filter((order) => order.recommendedForWarehouse).map((order) => order.id));
-    const reservedQuantityByProduct = new Map<string, number>();
-    for (const [productId, lines] of queueLinesByProduct) {
-      reservedQuantityByProduct.set(productId, lines.reduce((sum, line) => sum + Number(line.warehouse_reserved_qty ?? 0), 0));
-    }
     const recommendedIds = new Set(recommendWarehouseOrderIds({
       candidates: allOrders.filter((order) => eligibleIds.has(order.id)).map((order) => ({
         id: order.id,
         createdAt: order.created_at,
         quickbooksInvoiceDate: order.qbo_invoices?.invoice_date,
-        requirements: getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines }).items
+        requirements: getCanonicalPhysicalOrderSummary({ rawPayload: order.qbo_invoices?.raw_payload, lines: order.shipping_order_lines, productIdBySku: inventoryModel.productIdBySku }).items
           .filter((item) => item.remaining > 0 && item.line?.product_id)
-          .map((item) => ({ productId: item.line!.product_id!, quantity: item.remaining })),
+          .map((item) => ({ productId: canonicalProductKeyById.get(item.line!.product_id!) ?? item.line!.product_id!, quantity: item.remaining })),
       })),
       floorQuantityByProduct,
       reservedQuantityByProduct,
@@ -334,8 +284,8 @@ async function getOrdersDatasetFromDatabase() {
 // orders route, and the source records remain the sole inventory and fulfillment authority.
 const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
-  ["orders-list-read-model-v2-oldest-warehouse"],
-  { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG] },
+  ["orders-list-read-model-v3-shared-source-coverage"],
+  { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG, INVENTORY_READ_MODEL_CACHE_TAG, CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 
 export default async function OrdersPage({

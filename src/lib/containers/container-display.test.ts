@@ -14,6 +14,7 @@ const line = {
 vi.mock("@/lib/demand/canonical-customer-queue-loader", () => ({
   loadCanonicalCustomerQueue: async () => ({
     canonicalLines: [line],
+    queueByLineId: new Map([[line.id, { lineId: line.id }]]),
     queueByProductId: new Map([["lift", [{ lineId: "line", orderId: "order", invoice: "123", openQty: 8, position: "5-12", orderCreatedAt: "2026-01-01" }]]]),
   }),
 }));

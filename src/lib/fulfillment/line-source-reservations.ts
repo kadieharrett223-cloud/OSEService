@@ -20,3 +20,13 @@ export function lineSourceReservations(remainingQty: number, warehouseStatus: st
     container_reserved_quantities: containerReservedQuantities,
   };
 }
+
+/** Several real invoice lines can share one Customer List row and coverage budget. */
+export function mergedLineSourceReservations(remainingQty: number, parts: Array<{ remainingQty: number; warehouseStatus?: string | null; allocations?: Allocation[] }>) {
+  const reservations = parts.map(p => lineSourceReservations(p.remainingQty, p.warehouseStatus, p.allocations));
+  const incoming = new Map<string, number>();
+  for (const part of reservations) for (const pin of part.container_reserved_quantities) incoming.set(pin.container_id, (incoming.get(pin.container_id) ?? 0) + pin.quantity);
+  const container_reserved_quantities = [...incoming].map(([container_id, quantity]) => ({ container_id, quantity }));
+  const incomingQty = container_reserved_quantities.reduce((sum, pin) => sum + pin.quantity, 0);
+  return { warehouse_reserved_qty: Math.min(Math.max(0, remainingQty - incomingQty), reservations.reduce((sum, part) => sum + part.warehouse_reserved_qty, 0)), container_reserved_quantities };
+}

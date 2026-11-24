@@ -22,7 +22,7 @@ vi.mock("@/lib/products/old-erp-product-identity", () => ({
   getCachedOldErpProductIdentityBySourceRecordId: async () => ({ "recycled-pml": "4PC-6", "recycled-pc": "2PDDA-10" }),
 }));
 vi.mock("@/lib/demand/canonical-customer-queue-loader", () => ({
-  loadCanonicalCustomerQueue: async () => ({ canonicalLines, queueByProductId: new Map(products.map((p) => [p.id,
+  loadCanonicalCustomerQueue: async () => ({ canonicalLines, queueByLineId: new Map(canonicalLines.map(line => [line.id, { lineId: line.id }])), queueByProductId: new Map(products.map((p) => [p.id,
     demands.filter(([, id]) => id === p.id).map(([lineId, , openQty, position]) => ({ lineId, orderId: lineId, invoice: lineId, openQty, position, orderCreatedAt: "2026-01-01" })),
   ])) }),
 }));

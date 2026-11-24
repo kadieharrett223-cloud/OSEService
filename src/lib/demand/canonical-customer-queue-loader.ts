@@ -11,6 +11,7 @@ import { unstable_cache } from "next/cache";
 import { createQueueReadPool, fetchQueuePages } from "./queue-query-pages";
 import { decodeQueueCache, encodeQueueCache } from "./queue-cache-codec";
 import { otherFulfillmentQueueIdentities } from "./customer-queue-source";
+import { withoutDuplicateInvoiceRepresentations } from "./duplicate-invoice-representations";
 
 export type CanonicalQueueLine = {
   id: string; product_id: string | null; approved_qty: number | null; fulfilled_qty: number | null;
@@ -252,9 +253,10 @@ async function loadCanonicalCustomerQueueFromDatabase(): Promise<CachedCanonical
     );
     return { invoice: parent?.qbo_invoices?.invoice_number ?? parent?.order_number ?? "—", orderId: parent?.id ?? "", sourceInvoiceId: parent?.source_invoice_id ?? null, lineId: line.id, logicalDemandKey: demandLineIdentity(line), openQty: Math.max(0, approvedQty - fulfilledQty), warehouseQty: 0, waitingQty: Math.max(0, approvedQty - fulfilledQty), inWarehouse: false, willCall: false, qty: approvedQty, approvedQty, shippedQty: fulfilledQty, invoiceOrderedQty: null, provenInvoiceShippedQty: 0, invoiceFullyShipped: false, firstPaymentAt, invoiceDate, priorityDate, priorityDateSource, orderCreatedAt, storedPosition: line.queue_position_start, manualPosition: hasAuditedManualPosition ? line.queue_position_override ?? null : null, excludedFromQueue: false };
   }
-  for (const line of canonicalLines) {
-    if (otherSourceIdentities.has(demandLineIdentity(line))) continue;
-    if (!line.product_id || !isOpenCustomerQueueLine(line)) continue;
+  const activeQueueLines = withoutDuplicateInvoiceRepresentations(canonicalLines.filter(line =>
+    !otherSourceIdentities.has(demandLineIdentity(line)) && line.product_id && isOpenCustomerQueueLine(line)), productQueueKeyById);
+  for (const line of activeQueueLines) {
+    if (!line.product_id) continue;
     queueRows.push(toCustomerQueueRow(line));
     lineProductIdByLineId.set(line.id, line.product_id);
   }
@@ -316,7 +318,7 @@ const getCachedCanonicalCustomerQueue = unstable_cache(
   // data cache can survive a deployment, so reusing the old key would keep
   // projecting a stale pre-fix queue for up to five minutes after a safe
   // identity-only correction ships.
-  ["canonical-customer-queue-read-model-v13-historical-fulfillment-siblings"],
+  ["canonical-customer-queue-read-model-v14-exact-source-families"],
   { revalidate: 300, tags: [CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
 

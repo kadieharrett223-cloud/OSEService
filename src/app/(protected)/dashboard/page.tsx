@@ -3,7 +3,8 @@ import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { fetchQueuePages } from "@/lib/demand/queue-query-pages";
-import { dashboardStockSummary } from "@/lib/inventory/dashboard-stock";
+import { dashboardAvailabilitySummary, dashboardStockSummary } from "@/lib/inventory/dashboard-stock";
+import { loadInventoryDisplayModel } from "@/lib/inventory/inventory-display-model";
 import { INVENTORY_READ_MODEL_CACHE_TAG } from "@/lib/inventory/inventory-read-cache";
 
 type ProductRow = {
@@ -59,7 +60,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
   ]);
 
   return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes };
-}, ["dashboard-read-model-stock-owners-v3"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+}, ["dashboard-read-model-shared-availability-v4"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -181,7 +182,11 @@ function getContainerEtaDate(container: ContainerRow) {
 
 export default async function DashboardPage() {
   await requireUser();
-  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes } = await getCachedDashboardDataset();
+  const [dataset, { displayRows }] = await Promise.all([
+    getCachedDashboardDataset(),
+    loadInventoryDisplayModel(),
+  ]);
+  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes } = dataset;
 
   const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
@@ -192,7 +197,8 @@ export default async function DashboardPage() {
   const installationRows = (installations ?? []) as InstallationRow[];
   const auditRows = (audits ?? []) as AuditRow[];
 
-  const { availableInventory, onFloorInventory, lowOutOfStock } = dashboardStockSummary(productRows, allInventoryTransactions, stockRoutes);
+  const { onFloorInventory } = dashboardStockSummary(productRows, allInventoryTransactions, stockRoutes);
+  const { availableInventory, lowOutOfStock } = dashboardAvailabilitySummary(displayRows);
 
   const activeContainerIds = new Set(
     containerRows

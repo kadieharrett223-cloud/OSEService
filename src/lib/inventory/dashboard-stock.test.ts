@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dashboardStockSummary } from "./dashboard-stock";
+import { dashboardAvailabilitySummary, dashboardStockSummary } from "./dashboard-stock";
 
 describe("dashboard stock owners", () => {
   it("excludes positive and negative shadow ledgers without losing real stock or standalone products", () => {
@@ -14,15 +14,23 @@ describe("dashboard stock owners", () => {
         { product_id: "owner", bucket: "ON_FLOOR", delta: 3 },
         { product_id: "shadow", bucket: "ON_FLOOR", delta: obsolete },
         { product_id: "other", bucket: "ON_FLOOR", delta: 7 },
-      ], routes)).toEqual({ onFloorInventory: 10, availableInventory: 10, lowOutOfStock: 1 });
+      ], routes)).toEqual({ onFloorInventory: 10 });
     }
   });
   it("groups multiple valid owners of a reviewed identity for the low-stock count", () => {
     expect(dashboardStockSummary([{ id: "a", sku: "000013" }, { id: "b", sku: "000235" }], [
       { product_id: "a", bucket: "ON_FLOOR", delta: 4 }, { product_id: "b", bucket: "ON_FLOOR", delta: 4 },
-    ], [{ product_id: "a", stock_product_id: "a", operational_key: "4PC6" }, { product_id: "b", stock_product_id: "b", operational_key: "4PC6" }])).toEqual({ onFloorInventory: 8, availableInventory: 8, lowOutOfStock: 0 });
+    ], [{ product_id: "a", stock_product_id: "a", operational_key: "4PC6" }, { product_id: "b", stock_product_id: "b", operational_key: "4PC6" }])).toEqual({ onFloorInventory: 8 });
   });
   it("refuses to substitute partial routing totals", () => {
     expect(() => dashboardStockSummary([{ id: "missing", sku: "LIFT" }], [], [])).toThrow(/routing is incomplete/);
   });
+});
+
+it("uses per-product available now, excluding reserved stock and incoming supply", () => {
+  expect(dashboardAvailabilitySummary([
+    { availableNow: 0 }, // Physical stock 3, open obligations 5; shortage cannot offset other stock.
+    { availableNow: 6 }, // Physical stock 8, open obligations 2.
+    { availableNow: 0 }, // Incoming stock is not available now.
+  ])).toEqual({ availableInventory: 6, lowOutOfStock: 2 });
 });

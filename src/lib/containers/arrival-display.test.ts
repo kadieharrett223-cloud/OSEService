@@ -1,5 +1,15 @@
 import { expect, it } from "vitest";
-import { containerSummaryUnits, savedContainerArrival } from "./arrival-display";
+import { containerArrivalSortKey, containerSummaryUnits, savedContainerArrival } from "./arrival-display";
+
+it("puts every unconfirmed arrival below confirmed dates, then pending below estimates", () => {
+  const rows = [
+    { id: "pending", eta_confirmed_date: null, eta_estimated_date: null },
+    { id: "estimate", eta_confirmed_date: null, eta_estimated_date: "2026-12-01" },
+    { id: "confirmed", eta_confirmed_date: "2027-02-01", eta_estimated_date: null },
+    { id: "invalid", eta_confirmed_date: "invalid", eta_estimated_date: null },
+  ];
+  expect(rows.sort((a,b) => containerArrivalSortKey(a).localeCompare(containerArrivalSortKey(b))).map(r=>r.id)).toEqual(["confirmed", "estimate", "pending", "invalid"]);
+});
 
 it("leaves warehouse ETA pending when only entry and port milestones exist", () => {
   const container = { entered_date: "2026-11-18", us_port_eta_date: "2027-01-06", eta_confirmed_date: null, eta_estimated_date: null };

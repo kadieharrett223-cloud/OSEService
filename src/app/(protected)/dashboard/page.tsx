@@ -1,6 +1,6 @@
 import { getCachedOrdersDataset } from "@/lib/orders/orders-list-read-model";
 import Link from "next/link";
-import { savedContainerArrival } from "@/lib/containers/arrival-display";
+import { containerArrivalSortKey, savedContainerArrival } from "@/lib/containers/arrival-display";
 import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -53,7 +53,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
   ]);
 
   return { products, inventoryTransactions, allInventoryTransactions, containers, cases, installations, audits, stockRoutes };
-}, ["dashboard-read-model-dated-incoming-first-v6"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+}, ["dashboard-read-model-confirmed-arrivals-first-v7"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -172,7 +172,7 @@ export default async function DashboardPage() {
     })
     .map((container) => ({ container, eta: getContainerEtaDate(container) }))
     .filter((entry): entry is { container: ContainerRow; eta: Date } => Boolean(entry.eta))
-    .sort((a, b) => a.eta.getTime() - b.eta.getTime())[0];
+    .sort((a, b) => containerArrivalSortKey(a.container).localeCompare(containerArrivalSortKey(b.container)))[0];
 
   const openCases = caseRows.filter((row) => !isResolvedCase(row.status)).length;
   const highPriorityCases = caseRows.filter((row) => row.priority === "High" && !isResolvedCase(row.status)).length;

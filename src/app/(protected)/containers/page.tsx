@@ -1,5 +1,5 @@
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
-import { containerSummaryUnits, savedContainerArrival } from "@/lib/containers/arrival-display";
+import { containerArrivalSortKey, containerSummaryUnits, savedContainerArrival } from "@/lib/containers/arrival-display";
 import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth";
@@ -167,7 +167,7 @@ export default async function ContainersPage({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#e5e7eb] bg-white">
-                {containers.map((container) => {
+                {[...containers].sort((a, b) => containerArrivalSortKey(a).localeCompare(containerArrivalSortKey(b))).map((container) => {
                   const typedContainer = container as {
                     id: string;
                     container_number: string;

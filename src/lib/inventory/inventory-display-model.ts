@@ -1,3 +1,4 @@
+import { containerArrivalSortKey } from "@/lib/containers/arrival-display";
 import { mergedLineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
@@ -436,7 +437,7 @@ export function projectInventoryDisplayModel(
       committed,
       available: Math.max(0, qty - committed),
       eta: formatShortDate(eta),
-      etaSort: (line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date) || "9999-12-31",
+      etaSort: containerArrivalSortKey({ eta_confirmed_date: line.containers?.eta_confirmed_date ?? null, eta_estimated_date: line.containers?.eta_estimated_date ?? null }),
       status: formatStatus(line.containers?.lifecycle_status),
     });
     incomingContainersByProduct.set(line.product_id, rows);

@@ -1,3 +1,5 @@
+import { containerArrivalSortKey } from "@/lib/containers/arrival-display";
+
 export type SuggestedSourceType = "WAREHOUSE" | "CONTAINER" | "UNASSIGNED";
 export type SuggestedEtaType = "CONFIRMED" | "ESTIMATED" | "AVAILABLE_NOW" | "NONE";
 
@@ -143,14 +145,8 @@ function sortQueueLines(lines: OpenQueueLine[]) {
 
 function sortContainersByEta(containers: ProductContainerSupply[]) {
   return [...containers].sort((left, right) => {
-    // An entry date is not an arrival estimate. Undated supply follows dated
-    // supply; chronology only breaks ties within the same arrival bucket.
-    const leftArrival = getContainerEta(left).etaDate;
-    const rightArrival = getContainerEta(right).etaDate;
-    const leftTime = leftArrival ? new Date(leftArrival).getTime() : Number.MAX_SAFE_INTEGER;
-    const rightTime = rightArrival ? new Date(rightArrival).getTime() : Number.MAX_SAFE_INTEGER;
-
-    if (leftTime !== rightTime) return leftTime - rightTime;
+    const arrivalOrder = containerArrivalSortKey(left).localeCompare(containerArrivalSortKey(right));
+    if (arrivalOrder) return arrivalOrder;
     const leftEntered = left.entered_date ? new Date(left.entered_date).getTime() : Number.MAX_SAFE_INTEGER;
     const rightEntered = right.entered_date ? new Date(right.entered_date).getTime() : Number.MAX_SAFE_INTEGER;
     if (leftEntered !== rightEntered) return leftEntered - rightEntered;

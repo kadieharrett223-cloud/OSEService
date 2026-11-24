@@ -278,6 +278,6 @@ async function getOrdersDatasetFromDatabase() {
 // orders route, and the source records remain the sole inventory and fulfillment authority.
 export const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
-  ["orders-list-read-model-v5-dated-incoming-first"],
+  ["orders-list-read-model-v6-confirmed-arrivals-first"],
   { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG, INVENTORY_READ_MODEL_CACHE_TAG, CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );

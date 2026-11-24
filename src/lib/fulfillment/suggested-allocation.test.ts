@@ -24,6 +24,20 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
+  it("forecasts confirmed arrivals before an earlier estimate and before pending supply", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("customer", 3, 1)]]]),
+      containerSupplyByProduct: new Map([[productId, [
+        container("pending", "262", 1, null, { entered_date: "2025-01-01" }),
+        container("estimate", "256", 1, null, { eta_estimated_date: "2026-12-01" }),
+        container("confirmed", "260", 1, "2027-02-01"),
+      ]]]),
+    });
+    expect(result.allocations.map(a=>a.sourceId)).toEqual(["confirmed", "estimate", "pending"]);
+    expect(result.lines.get("customer")?.completeEtaDate).toBeNull();
+    expect(validateProductCoverage(result)).toEqual([]);
+  });
   it("fills YZRCJ-7 container256 before undated262 and leaves only the later surplus", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map(),

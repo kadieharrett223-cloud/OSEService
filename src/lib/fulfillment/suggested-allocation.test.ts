@@ -24,6 +24,24 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
+  it("keeps an unknown arrival pending instead of inventing an ETA from the entry date", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("incoming", 1, 1)]]]),
+      containerSupplyByProduct: new Map([[productId, [container("251", "251", 1, null, { entered_date: "2026-07-31" })]]]),
+    });
+    expect(result.lines.get("incoming")).toMatchObject({ warehouseQty: 0, incomingQty: 1, completeEtaDate: null, completeEtaType: "NONE" });
+    expect(result.allocations[0]).toMatchObject({ sourceId: "251", etaDate: null, etaType: "NONE" });
+  });
+
+  it("does not promise a complete ETA when part of an incoming split has no arrival date", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("split", 2, 1)]]]),
+      containerSupplyByProduct: new Map([[productId, [container("unknown", "251", 1, null), container("known", "260", 1, "2027-01-15")]]]),
+    });
+    expect(result.lines.get("split")).toMatchObject({ incomingQty: 2, completeEtaDate: null, completeEtaType: "NONE" });
+  });
   it("uses the saved estimated arrival before a stale entered-date lead-time fallback", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map(),

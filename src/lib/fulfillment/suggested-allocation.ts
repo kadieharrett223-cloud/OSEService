@@ -33,6 +33,7 @@ export type ProductContainerSupply = {
   eta_confirmed_date: string | null;
   eta_estimated_date: string | null;
   entered_date: string | null;
+  lifecycle_status?: string | null;
 };
 
 export type SuggestedAllocationContext = {
@@ -117,15 +118,7 @@ function getContainerEta(container: ProductContainerSupply): { etaDate: string |
     }
   }
 
-  // An operator's saved ETA supersedes the original lead-time calculation.
-  if (container.entered_date) {
-    const entered = new Date(container.entered_date);
-    if (!Number.isNaN(entered.getTime())) {
-      entered.setDate(entered.getDate() + 75);
-      return { etaDate: isoDateOnly(entered), etaType: "ESTIMATED" };
-    }
-  }
-
+  // Entry dates establish chronology, not a promised warehouse arrival.
   return { etaDate: null, etaType: "NONE" };
 }
 
@@ -202,7 +195,7 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
   const pinnedWarehouseByLine = new Map<string, number>();
   let pinnedWarehouseQty = 0;
   for (const line of demand) {
-    const pinned = Math.min(Math.max(0, line.remaining_qty), Math.max(0, Number(line.warehouse_reserved_qty ?? 0)));
+    const pinned = Math.min(Math.max(0, line.remaining_qty), Math.max(0, Number(line.warehouse_reserved_qty ?? 0)), Math.max(0, currentSupply - pinnedWarehouseQty));
     if (pinned <= 0) continue;
     pinnedWarehouseByLine.set(line.id, pinned);
     pinnedWarehouseQty += pinned;
@@ -316,8 +309,8 @@ export function resolveProductCoverage(productId: string, context: SuggestedAllo
       warehouseQty,
       incomingQty,
       unassignedQty,
-      completeEtaDate: completeEta.etaDate,
-      completeEtaType: completeEta.etaType,
+      completeEtaDate: lineAllocations.some(a => a.sourceType === "UNASSIGNED" || (a.sourceType === "CONTAINER" && !a.etaDate)) ? null : completeEta.etaDate,
+      completeEtaType: lineAllocations.some(a => a.sourceType === "UNASSIGNED" || (a.sourceType === "CONTAINER" && !a.etaDate)) ? "NONE" : completeEta.etaType,
     });
   }
 

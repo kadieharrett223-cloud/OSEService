@@ -1,3 +1,4 @@
+import { lineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import { getCommittedFloor } from "@/lib/inventory/floor-demand";
@@ -541,13 +542,6 @@ export function projectInventoryDisplayModel(
     const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
     const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
     const remainingQty = Math.max(0, customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0));
-    const floorReservedQty = (line.inventory_allocations ?? [])
-      .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "FLOOR")
-      .reduce((sum, allocation) => sum + Number(allocation.quantity ?? 0), 0);
-    const containerReservedQuantities = (line.inventory_allocations ?? [])
-      .filter((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED" && allocation.source_type === "CONTAINER" && allocation.container_id)
-      .map((allocation) => ({ container_id: allocation.container_id as string, quantity: Number(allocation.quantity ?? 0) }));
-    const stagedWarehouseQty = ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(String(line.warehouse_status ?? "").toUpperCase()) ? remainingQty : 0;
     const rows = coverageQueueByProduct.get(productKey) ?? [];
     rows.push({
       id: line.id,
@@ -559,8 +553,7 @@ export function projectInventoryDisplayModel(
       created_at: line.shipping_orders?.created_at ?? new Date().toISOString(),
       has_live_allocation: (line.inventory_allocations ?? []).some((allocation) => (allocation.allocation_status ?? "ALLOCATED") === "ALLOCATED"),
       fulfillment_source: inventoryCoverageSource(line),
-      warehouse_reserved_qty: Math.max(floorReservedQty, stagedWarehouseQty),
-      container_reserved_quantities: containerReservedQuantities,
+      ...lineSourceReservations(remainingQty, line.warehouse_status, line.inventory_allocations),
     });
     coverageQueueByProduct.set(productKey, rows);
   }
@@ -585,6 +578,7 @@ export function projectInventoryDisplayModel(
       eta_confirmed_date: line.containers?.eta_confirmed_date ?? null,
       eta_estimated_date: line.containers?.eta_estimated_date ?? line.containers?.port_date ?? null,
       entered_date: line.containers?.entered_date ?? null,
+      lifecycle_status: line.containers?.lifecycle_status ?? null,
     });
   }
   for (const [supplyKey, supply] of coverageSupplyByProductContainer) {
@@ -592,6 +586,7 @@ export function projectInventoryDisplayModel(
     coverageContainerSupplyByProduct.set(productKey, [...(coverageContainerSupplyByProduct.get(productKey) ?? []), supply]);
   }
 
+  const coverageByProduct = new Map<string, ReturnType<typeof resolveProductCoverage>>();
   const coverageByLineId = new Map<string, LineCoverage>();
   for (const productKey of new Set([...coverageFloorByProduct.keys(), ...coverageQueueByProduct.keys(), ...coverageContainerSupplyByProduct.keys()])) {
     const coverage = resolveProductCoverage(productKey, {
@@ -599,6 +594,7 @@ export function projectInventoryDisplayModel(
       queueLinesByProduct: coverageQueueByProduct,
       containerSupplyByProduct: coverageContainerSupplyByProduct,
     });
+    coverageByProduct.set(productKey, coverage);
     for (const [lineId, lineCoverage] of coverage.lines) coverageByLineId.set(lineId, lineCoverage);
   }
 
@@ -752,5 +748,13 @@ export function projectInventoryDisplayModel(
       return left.sku.localeCompare(right.sku, undefined, { numeric: true });
     });
 
-  return { displayRows, groupNames };
+  // Local and imported representations must resolve to the same physical obligation.
+  for (const [lineId, queueRow] of sharedCanonicalQueue.queueByLineId) {
+    const coverage = coverageByLineId.get(queueRow.lineId);
+    if (coverage && !coverageByLineId.has(lineId)) coverageByLineId.set(lineId, coverage);
+  }
+  return { displayRows, groupNames, coverageByLineId, coverageByProduct,
+    containerSupplyByProduct: coverageContainerSupplyByProduct,
+    canonicalProductKeyById: canonicalInventoryKeyByProductId, canonicalQueue: sharedCanonicalQueue };
+
 }

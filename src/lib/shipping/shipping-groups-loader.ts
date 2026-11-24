@@ -1,3 +1,4 @@
+import { lineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { loadCanonicalCustomerQueue } from "@/lib/demand/canonical-customer-queue-loader";
@@ -180,9 +181,6 @@ export async function loadShippingGroupCandidates() {
     const allocations = (l.inventory_allocations ?? []).filter(
       (a) => (a.allocation_status ?? "ALLOCATED") === "ALLOCATED",
     );
-    const pinned = allocations
-      .filter((a) => a.source_type === "FLOOR")
-      .reduce((s, a) => s + Number(a.quantity ?? 0), 0);
     const row: OpenQueueLine = {
       id: l.id,
       product_id: key,
@@ -194,20 +192,7 @@ export async function loadShippingGroupCandidates() {
       created_at: l.shipping_orders?.created_at ?? "",
       has_live_allocation: allocations.length > 0,
       fulfillment_source: inventoryCoverageSource(l),
-      warehouse_reserved_qty: Math.max(
-        pinned,
-        ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(
-          l.warehouse_status ?? "",
-        )
-          ? remaining
-          : 0,
-      ),
-      container_reserved_quantities: allocations
-        .filter((a) => a.source_type === "CONTAINER" && a.container_id)
-        .map((a) => ({
-          container_id: a.container_id!,
-          quantity: Number(a.quantity ?? 0),
-        })),
+      ...lineSourceReservations(remaining, l.warehouse_status, allocations),
     };
     demand.set(key, [...(demand.get(key) ?? []), row]);
   }

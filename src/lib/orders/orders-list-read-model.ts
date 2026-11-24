@@ -158,6 +158,8 @@ async function getOrdersDatasetFromDatabase() {
         approved_qty,
         fulfilled_qty,
         legacy_item_code,
+        legacy_matched_item_code,
+        source_record_id,
         source_system,
         fulfillment_source,
         queue_position_start,
@@ -276,7 +278,6 @@ async function getOrdersDatasetFromDatabase() {
 // orders route, and the source records remain the sole inventory and fulfillment authority.
 export const getCachedOrdersDataset = unstable_cache(
   getOrdersDatasetFromDatabase,
-  ["orders-list-read-model-v3-shared-source-coverage"],
+  ["orders-list-read-model-v4-complete-identity-fields"],
   { revalidate: 300, tags: [ORDERS_PROJECTION_CACHE_TAG, INVENTORY_READ_MODEL_CACHE_TAG, CANONICAL_CUSTOMER_QUEUE_CACHE_TAG] },
 );
-

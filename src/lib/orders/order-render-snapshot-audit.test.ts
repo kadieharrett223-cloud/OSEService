@@ -18,6 +18,15 @@ import {loadInventoryDisplayModel} from '@/lib/inventory/inventory-display-model
 import {getCanonicalPhysicalOrderSummary} from '@/lib/orders/physical-fulfillment';
 const dir=process.env.OCC_RECONCILIATION_SNAPSHOT ?? ''; // Required for this opt-in read-only snapshot audit.
 const read=(name:string)=>JSON.parse(fs.readFileSync(path.join(dir,name+'.json'),'utf8'));
+function selectedFields(row:any, selection:string):any {
+ if(row==null||!selection||selection.trim()==='*')return row;
+ const fields:string[]=[];let depth=0,start=0;
+ for(let i=0;i<selection.length;i++){if(selection[i]==='(')depth++;if(selection[i]===')')depth--;if(selection[i]===','&&depth===0){fields.push(selection.slice(start,i).trim());start=i+1;}}
+ fields.push(selection.slice(start).trim());const output:any={};
+ for(const field of fields){if(!field)continue;const open=field.indexOf('(');if(open<0){if(field==='*')Object.assign(output,row);else output[field]=row[field];continue;}
+  const name=field.slice(0,open).trim().split(':')[0];const inner=field.slice(open+1,field.lastIndexOf(')'));const value=row[name];output[name]=Array.isArray(value)?value.map(child=>selectedFields(child,inner)):selectedFields(value,inner);
+ }return output;
+}
 const text=(e:any):string=>typeof e==='string'||typeof e==='number'?String(e):Array.isArray(e)?e.map(text).join(''):e?.props?text(e.props.children):'';
 it.skipIf(!process.env.OCC_RECONCILIATION_SNAPSHOT)('renders every stored order and checks each invoice row against its own canonical coverage',async()=>{
  vi.stubGlobal('React',React);
@@ -34,8 +43,8 @@ it.skipIf(!process.env.OCC_RECONCILIATION_SNAPSHOT)('renders every stored order 
  for(const s of data.order_shipments){s.creator=data.access_users.find((u:any)=>u.id===s.created_by)??null;s.lines=data.order_shipment_lines.filter((l:any)=>l.order_shipment_id===s.id||l.shipment_id===s.id).map((l:any)=>({...l,shipping_order_lines:by('shipping_order_lines',l.shipping_order_line_id)}));}
  fixture.db={storage:{from(){return {createSignedUrl:async()=>({data:null,error:null})}}},from(table:string){
   if(!data[table])throw Error('Missing real snapshot table '+table);
-  let rows=[...data[table]],from=0,to=999,detail=false;
-  const q:any={select(fields:string){detail=table==='shipping_orders'&&fields.includes('shipping_order_lines');return q},eq(k:string,v:any){rows=rows.filter(r=>r[k]===v);return q},neq(k:string,v:any){rows=rows.filter(r=>r[k]!==v);return q},in(k:string,v:any[]){rows=rows.filter(r=>v.includes(r[k]));return q},limit(n:number){to=n-1;return q},order(k:string,options:any={}){rows.sort((a,b)=>(options.ascending===false?-1:1)*String(a[k]??'').localeCompare(String(b[k]??'')));return q},range(a:number,b:number){from=a;to=b;return q},maybeSingle(){return Promise.resolve({data:rows[0]?(detail?detailOrders.get(rows[0].id):rows[0]):null,error:null})},then(resolve:any,reject:any){return Promise.resolve({data:rows.slice(from,to+1).map(r=>detail?detailOrders.get(r.id):r),error:null}).then(resolve,reject)}};return q;
+  let rows=[...data[table]],from=0,to=999,detail=false,selection='*';
+  const q:any={select(fields:string){selection=fields;detail=table==='shipping_orders'&&fields.includes('shipping_order_lines');return q},eq(k:string,v:any){rows=rows.filter(r=>r[k]===v);return q},neq(k:string,v:any){rows=rows.filter(r=>r[k]!==v);return q},in(k:string,v:any[]){rows=rows.filter(r=>v.includes(r[k]));return q},limit(n:number){to=n-1;return q},order(k:string,options:any={}){rows.sort((a,b)=>(options.ascending===false?-1:1)*String(a[k]??'').localeCompare(String(b[k]??'')));return q},range(a:number,b:number){from=a;to=b;return q},maybeSingle(){return Promise.resolve({data:rows[0]?selectedFields(detail?detailOrders.get(rows[0].id):rows[0],selection):null,error:null})},then(resolve:any,reject:any){return Promise.resolve({data:rows.slice(from,to+1).map(r=>selectedFields(detail?detailOrders.get(r.id):r,selection)),error:null}).then(resolve,reject)}};return q;
  }};
  const model=await loadInventoryDisplayModel();
  const reports:any[]=[];const issues:any[]=[];

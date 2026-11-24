@@ -21,5 +21,5 @@ it("initializes routing inside the product insert transaction, with no physical 
 it("expires the dashboard dataset when product or stock changes invalidate inventory", () => {
   const page = readFileSync("src/app/(protected)/dashboard/page.tsx", "utf8");
   expect(page).toContain("tags: [INVENTORY_READ_MODEL_CACHE_TAG]");
-  expect(page).toContain("dashboard-read-model-shared-availability-v4");
+  expect(page).toContain("dashboard-read-model-shared-order-totals-v5");
 });

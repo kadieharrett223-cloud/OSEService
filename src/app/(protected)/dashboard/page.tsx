@@ -1,3 +1,4 @@
+import { getCachedOrdersDataset } from "@/lib/orders/orders-list-read-model";
 import Link from "next/link";
 import { savedContainerArrival } from "@/lib/containers/arrival-display";
 import { unstable_cache } from "next/cache";
@@ -36,8 +37,6 @@ const getCachedDashboardDataset = unstable_cache(async () => {
     { data: inventoryTransactions },
     allInventoryTransactions,
     { data: containers },
-    { data: containerLines },
-    { data: orders },
     { data: cases },
     { data: installations },
     { data: audits },
@@ -46,22 +45,15 @@ const getCachedDashboardDataset = unstable_cache(async () => {
     supabase.from("products").select("id, sku, canonical_name"),
     supabase.from("inventory_transactions").select("product_id, bucket, delta, created_at").order("created_at", { ascending: false }).limit(120),
     loadAllInventoryTransactions(),
-    supabase.from("containers").select("id, container_number, lifecycle_status, created_at, updated_at, entered_date, eta_confirmed_date, eta_estimated_date").order("updated_at", { ascending: false }).limit(120),
-    supabase.from("container_lines").select("container_id, on_order_qty"),
-    supabase.from("shipping_orders").select(`
-      id,
-      review_status,
-      qbo_invoices (payment_status, invoice_date, raw_payload),
-      shipping_order_lines (approval_status, warehouse_status, fulfillment_status)
-    `).order("created_at", { ascending: false }).limit(220),
+    fetchQueuePages((from, to) => supabase.from("containers").select("id, container_number, lifecycle_status, created_at, updated_at, entered_date, eta_confirmed_date, eta_estimated_date").order("id").range(from, to)).then(data => ({ data })),
     supabase.from("customer_service_cases").select("id, case_number, status, priority, updated_at").order("updated_at", { ascending: false }).limit(120),
     supabase.from("installation_jobs").select("id, status").order("updated_at", { ascending: false }).limit(120),
     supabase.from("audit_log").select("id, entity_type, entity_id, action, created_at").order("created_at", { ascending: false }).limit(120),
     fetchQueuePages((from, to) => supabase.from("inventory_stock_routes").select("product_id,stock_product_id,operational_key").order("product_id").range(from, to)),
   ]);
 
-  return { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes };
-}, ["dashboard-read-model-shared-availability-v4"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+  return { products, inventoryTransactions, allInventoryTransactions, containers, cases, installations, audits, stockRoutes };
+}, ["dashboard-read-model-shared-order-totals-v5"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 type InventoryTransactionRow = {
   product_id: string | null;
@@ -79,26 +71,6 @@ type ContainerRow = {
   entered_date: string | null;
   eta_confirmed_date: string | null;
   eta_estimated_date: string | null;
-};
-
-type ContainerLineRow = {
-  container_id: string | null;
-  on_order_qty: number | null;
-};
-
-type OrderRow = {
-  id: string;
-  review_status: string | null;
-  qbo_invoices?: {
-    payment_status: string | null;
-    invoice_date: string | null;
-    raw_payload?: { PrivateNote?: string | null } | null;
-  } | null;
-  shipping_order_lines?: Array<{
-    approval_status: string | null;
-    warehouse_status: string | null;
-    fulfillment_status: string | null;
-  }>;
 };
 
 type CaseRow = {
@@ -166,17 +138,16 @@ function getContainerEtaDate(container: ContainerRow) {
 
 export default async function DashboardPage() {
   await requireUser();
-  const [dataset, { displayRows }] = await Promise.all([
+  const [dataset, { displayRows }, { tabCounts }] = await Promise.all([
     getCachedDashboardDataset(),
     loadInventoryDisplayModel(),
+    getCachedOrdersDataset(),
   ]);
-  const { products, inventoryTransactions, allInventoryTransactions, containers, containerLines, orders, cases, installations, audits, stockRoutes } = dataset;
+  const { products, inventoryTransactions, allInventoryTransactions, containers, cases, installations, audits, stockRoutes } = dataset;
 
   const productRows = ((products ?? []) as ProductRow[]).filter(isOperationalInventoryProduct);
   const transactionRows = (inventoryTransactions ?? []) as InventoryTransactionRow[];
   const containerRows = (containers ?? []) as ContainerRow[];
-  const containerLineRows = (containerLines ?? []) as ContainerLineRow[];
-  const orderRows = ((orders ?? []) as unknown as OrderRow[]).filter((order) => String(order.qbo_invoices?.raw_payload?.PrivateNote ?? "").trim().toUpperCase() !== "VOIDED");
   const caseRows = (cases ?? []) as CaseRow[];
   const installationRows = (installations ?? []) as InstallationRow[];
   const auditRows = (audits ?? []) as AuditRow[];
@@ -184,54 +155,8 @@ export default async function DashboardPage() {
   const { onFloorInventory } = dashboardStockSummary(productRows, allInventoryTransactions, stockRoutes);
   const { availableInventory, lowOutOfStock } = dashboardAvailabilitySummary(displayRows);
 
-  const activeContainerIds = new Set(
-    containerRows
-      .filter((container) => {
-        const status = container.lifecycle_status ?? "";
-        return status === "ORDERED" || status === "PRODUCTION" || status === "INBOUND";
-      })
-      .map((container) => container.id),
-  );
-
-  const incomingInventory = containerLineRows.reduce((sum, line) => {
-    if (!line.container_id || !activeContainerIds.has(line.container_id)) return sum;
-    return sum + Number(line.on_order_qty ?? 0);
-  }, 0);
-
-  const newOrders = orderRows.filter((order) => {
-    const lines = order.shipping_order_lines ?? [];
-    const hasOpenLine = lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED");
-    const hasWarehouseLine = lines.some((line) => ["IN_WAREHOUSE", "PICKED", "READY_TO_SHIP"].includes(line.warehouse_status ?? ""));
-    const hasShippedLine = lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED" || line.fulfillment_status === "FULFILLED");
-    return hasOpenLine && !hasWarehouseLine && !hasShippedLine;
-  }).length;
-
-  const openQueuedOrders = orderRows.filter((order) => {
-    const lines = order.shipping_order_lines ?? [];
-    const fulfilled = lines.length > 0 && lines.every((line) => line.fulfillment_status === "FULFILLED");
-    return lines.some((line) => line.fulfillment_status !== "FULFILLED" && line.fulfillment_status !== "CANCELLED") && !fulfilled;
-  }).length;
-
-  const inWarehouseOrderIds = new Set<string>();
-  const shippedOrderIds = new Set<string>();
-  const fulfilledOrderIds = new Set<string>();
-
-  for (const order of orderRows) {
-    const lines = order.shipping_order_lines ?? [];
-    if (lines.some((line) => line.warehouse_status === "IN_WAREHOUSE" || line.warehouse_status === "PICKED" || line.warehouse_status === "READY_TO_SHIP")) {
-      inWarehouseOrderIds.add(order.id);
-    }
-    if (lines.some((line) => line.fulfillment_status === "PARTIALLY_FULFILLED" || line.fulfillment_status === "FULFILLED")) {
-      shippedOrderIds.add(order.id);
-    }
-    if (lines.length > 0 && lines.every((line) => line.fulfillment_status === "FULFILLED")) {
-      fulfilledOrderIds.add(order.id);
-    }
-  }
-
-  const inWarehouse = inWarehouseOrderIds.size;
-  const shippedInTransit = shippedOrderIds.size;
-  const fulfilledOrders = fulfilledOrderIds.size;
+  const incomingInventory = displayRows.reduce((sum, row) => sum + row.incoming, 0);
+  const { new: newOrders, orders: openQueuedOrders, warehouse: inWarehouse, partial: shippedInTransit, archived: fulfilledOrders } = tabCounts;
 
   const activeContainers = containerRows.filter((container) => {
     const status = container.lifecycle_status ?? "";

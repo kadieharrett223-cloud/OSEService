@@ -24,6 +24,33 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
+  it("fills YZRCJ-7 container256 before undated262 and leaves only the later surplus", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("first", 14, 1), line("next", 10, 15)]]]),
+      containerSupplyByProduct: new Map([[productId, [
+        container("262", "262", 10, null, { entered_date: "2026-11-02" }),
+        container("256", "256", 15, null, { entered_date: "2026-08-31", eta_estimated_date: "2026-12-02" }),
+      ]]]),
+    });
+    expect(result.allocations.map(a => [a.orderLineId, a.sourceId, a.quantity])).toEqual([
+      ["first", "256", 14], ["next", "256", 1], ["next", "262", 9],
+    ]);
+    expect(result.lines.get("next")?.completeEtaDate).toBeNull();
+    expect(validateProductCoverage(result)).toEqual([]);
+    const wrong = { ...result, allocations: result.allocations.map(a => a.orderLineId === "next" && a.sourceId === "256" ? { ...a, sourceId: "262" } : a) };
+    expect(validateProductCoverage(wrong)).toContainEqual(expect.objectContaining({ code: "EARLIER_INCOMING_SUPPLY_SKIPPED", sourceId: "256", actual: 1 }));
+  });
+
+  it("preserves an explicit reservation on undated supply while forecasting dated supply first", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("first", 1, 1), line("reserved", 1, 2, { container_reserved_quantities: [{ container_id: "unknown", quantity: 1 }] })]]]),
+      containerSupplyByProduct: new Map([[productId, [container("unknown", "262", 2, null, { entered_date: "2026-01-01" }), container("known", "256", 2, "2026-12-02")]]]),
+    });
+    expect(result.lines.get("first")?.allocations[0].sourceId).toBe("known");
+    expect(result.lines.get("reserved")?.allocations[0].sourceId).toBe("unknown");
+  });
   it("keeps an unknown arrival pending instead of inventing an ETA from the entry date", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map(),
@@ -106,7 +133,7 @@ describe("shared product coverage resolver", () => {
     ]);
   });
 
-  it("uses older container chronology before a newer dated container when ETA is missing", () => {
+  it("uses dated supply before an older undated container without inventing an arrival", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map([[productId, 0]]),
       queueLinesByProduct: new Map([[productId, [line("A", 24, 1), line("B", 12, 25)]]]),
@@ -117,8 +144,9 @@ describe("shared product coverage resolver", () => {
     });
 
     expect(result.allocations.map((allocation) => `${allocation.orderLineId}:${allocation.quantity}:${allocation.sourceLabel}`)).toEqual([
-      "A:24:240",
-      "B:12:254",
+      "A:12:254",
+      "A:12:240",
+      "B:12:240",
     ]);
   });
 

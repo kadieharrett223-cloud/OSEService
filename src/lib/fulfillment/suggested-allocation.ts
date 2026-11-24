@@ -78,7 +78,7 @@ export type ProductCoverageResolution = {
 };
 
 export type CoverageDiagnostic = {
-  code: "WAREHOUSE_COVERAGE_EXCEEDS_ON_FLOOR" | "CONTAINER_COVERAGE_EXCEEDS_SUPPLY" | "NON_INVENTORY_SOURCE_CONSUMED_SUPPLY";
+  code: "WAREHOUSE_COVERAGE_EXCEEDS_ON_FLOOR" | "CONTAINER_COVERAGE_EXCEEDS_SUPPLY" | "NON_INVENTORY_SOURCE_CONSUMED_SUPPLY" | "EARLIER_INCOMING_SUPPLY_SKIPPED";
   severity: "WARNING" | "ERROR";
   productId: string;
   sourceId: string | null;
@@ -143,10 +143,10 @@ function sortQueueLines(lines: OpenQueueLine[]) {
 
 function sortContainersByEta(containers: ProductContainerSupply[]) {
   return [...containers].sort((left, right) => {
-    const leftReliableEta = left.eta_confirmed_date ?? left.eta_estimated_date;
-    const rightReliableEta = right.eta_confirmed_date ?? right.eta_estimated_date;
-    const leftArrival = leftReliableEta ?? left.entered_date;
-    const rightArrival = rightReliableEta ?? right.entered_date;
+    // An entry date is not an arrival estimate. Undated supply follows dated
+    // supply; chronology only breaks ties within the same arrival bucket.
+    const leftArrival = getContainerEta(left).etaDate;
+    const rightArrival = getContainerEta(right).etaDate;
     const leftTime = leftArrival ? new Date(leftArrival).getTime() : Number.MAX_SAFE_INTEGER;
     const rightTime = rightArrival ? new Date(rightArrival).getTime() : Number.MAX_SAFE_INTEGER;
 
@@ -352,6 +352,33 @@ export function validateProductCoverage(resolution: ProductCoverageResolution, a
   }
 
   const consumedLineIds = new Set(resolution.allocations.filter((allocation) => allocation.sourceType !== "UNASSIGNED").map((allocation) => allocation.orderLineId));
+  const usedByContainer = new Map<string, number>();
+  const unreservedByContainer = new Map<string, number>();
+  for (const allocation of resolution.allocations) {
+    if (allocation.sourceType !== "CONTAINER" || !allocation.sourceId) continue;
+    usedByContainer.set(allocation.sourceId, (usedByContainer.get(allocation.sourceId) ?? 0) + allocation.quantity);
+  }
+  for (const line of resolution.demand) {
+    const reserved = new Map((line.container_reserved_quantities ?? []).map(r => [r.container_id, r.quantity]));
+    for (const allocation of resolution.allocations.filter(a => a.orderLineId === line.id && a.sourceType === "CONTAINER" && a.sourceId)) {
+      const id = allocation.sourceId!;
+      const pinned = Math.min(allocation.quantity, reserved.get(id) ?? 0);
+      reserved.set(id, Math.max(0, (reserved.get(id) ?? 0) - pinned));
+      unreservedByContainer.set(id, (unreservedByContainer.get(id) ?? 0) + allocation.quantity - pinned);
+    }
+  }
+  const orderedSupply = sortContainersByEta(resolution.incomingSupply);
+  for (let i = 0; i < orderedSupply.length; i++) {
+    const earlier = orderedSupply[i];
+    const spare = Math.max(0, earlier.available_qty - (usedByContainer.get(earlier.container_id) ?? 0));
+    if (!spare) continue;
+    const laterForecast = orderedSupply.slice(i + 1).reduce((sum, source) => sum + (unreservedByContainer.get(source.container_id) ?? 0), 0);
+    if (laterForecast > 0) diagnostics.push({
+      code: "EARLIER_INCOMING_SUPPLY_SKIPPED", severity: "ERROR", productId: resolution.productId,
+      sourceId: earlier.container_id, expected: 0, actual: Math.min(spare, laterForecast),
+      message: "Later or undated forecast demand bypassed available earlier incoming supply without an explicit reservation.",
+    });
+  }
   for (const line of allDemand) {
     if (!consumedLineIds.has(line.id)) continue;
     if (!isInventoryDemand(line)) {

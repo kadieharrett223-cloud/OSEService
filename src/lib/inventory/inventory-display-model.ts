@@ -436,7 +436,7 @@ export function projectInventoryDisplayModel(
       committed,
       available: Math.max(0, qty - committed),
       eta: formatShortDate(eta),
-      etaSort: eta ? new Date(eta).toISOString() : line.containers?.entered_date ? new Date(line.containers.entered_date).toISOString() : "9999-12-31",
+      etaSort: (line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date) || "9999-12-31",
       status: formatStatus(line.containers?.lifecycle_status),
     });
     incomingContainersByProduct.set(line.product_id, rows);

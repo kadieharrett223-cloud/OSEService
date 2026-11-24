@@ -541,7 +541,10 @@ export function projectInventoryDisplayModel(
     if (!sharedQueueRow) continue;
     const queuePosition = Number.parseInt(sharedQueueRow.position.split("-")[0] ?? "", 10);
     const productKey = canonicalInventoryKeyByProductId.get(line.product_id) ?? line.product_id;
-    const remainingQty = Math.max(0, customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0));
+    // The canonical queue can reconcile several invoice representations into a
+    // larger obligation than the surviving local line. Use its remaining units
+    // for coverage too, so Inventory and container forecasts consume the same supply.
+    const remainingQty = Math.max(0, sharedQueueRow.openQty ?? (customerQueueObligationQty(line) - Number(line.fulfilled_qty ?? 0)));
     const rows = coverageQueueByProduct.get(productKey) ?? [];
     rows.push({
       id: line.id,

@@ -54,3 +54,27 @@ it("keeps Dashboard and Inventory availability aligned across complete stock, de
   expect(second.displayRows.find(row => row.sku === "LIFT")?.availableNow).toBe(0);
   expect(dashboardAvailabilitySummary(second.displayRows).availableInventory).toBe(6);
 });
+
+it("covers the canonical remaining quantity when the surviving local invoice line understates the obligation", () => {
+  const line = {
+    id: "reconciled", product_id: "jack", approved_qty: 1, ordered_qty: 1, fulfilled_qty: 0,
+    approval_status: "APPROVED", fulfillment_status: "UNFULFILLED", warehouse_status: "WAITING",
+    fulfillment_source: "WAREHOUSE", inventory_allocations: [],
+    shipping_orders: { id: "order", created_at: "2026-08-13T00:00:00Z" },
+  };
+  const queue = {
+    canonicalLines: [line], qboInvoiceLines: [],
+    queueByLineId: new Map([[line.id, { openQty: 2, position: "1-2", firstPaymentAt: null, invoiceDate: null, priorityDate: null, priorityDateSource: "ORDER_CREATED" }]]),
+  } as unknown as Parameters<typeof projectInventoryDisplayModel>[2];
+  const base = {
+    products: [{ id: "jack", sku: "HLCJ-6", canonical_name: "HLCJ-6 Jack" }], aliases: [], oldErpProducts: [], displayGroupData: [],
+    transactions: [{ product_id: "jack", bucket: "ON_FLOOR", delta: 0, source_type: "RECOUNT" }],
+    containerLines: [{ product_id: "jack", container_id: "incoming", on_order_qty: 2, received_qty: 0,
+      containers: { container_number: "260", lifecycle_status: "PRODUCTION", eta_estimated_date: "2027-01-15", eta_confirmed_date: null, port_date: null, entered_date: null } }],
+  };
+  const before = JSON.stringify({ base, line });
+  const model = projectInventoryDisplayModel(base, {}, queue);
+  expect(model.coverageByLineId.get(line.id)).toMatchObject({ warehouseQty: 0, incomingQty: 2, unassignedQty: 0 });
+  expect(model.coverageByLineId.get(line.id)?.allocations).toEqual([expect.objectContaining({ sourceId: "incoming", quantity: 2 })]);
+  expect(JSON.stringify({ base, line })).toBe(before);
+});

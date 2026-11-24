@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { savedContainerArrival } from "@/lib/containers/arrival-display";
 import { unstable_cache } from "next/cache";
 import { requireUser } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -159,25 +160,8 @@ function needsInstallationAttention(status: string) {
 }
 
 function getContainerEtaDate(container: ContainerRow) {
-  if (container.eta_confirmed_date) {
-    const confirmed = new Date(container.eta_confirmed_date);
-    if (!Number.isNaN(confirmed.getTime())) return confirmed;
-  }
-
-  if (container.eta_estimated_date) {
-    const estimated = new Date(container.eta_estimated_date);
-    if (!Number.isNaN(estimated.getTime())) return estimated;
-  }
-
-  if (container.entered_date) {
-    const entered = new Date(container.entered_date);
-    if (!Number.isNaN(entered.getTime())) {
-      entered.setDate(entered.getDate() + 75);
-      return entered;
-    }
-  }
-
-  return null;
+  const { date } = savedContainerArrival(container);
+  return date ? new Date(`${date.slice(0, 10)}T12:00:00Z`) : null;
 }
 
 export default async function DashboardPage() {

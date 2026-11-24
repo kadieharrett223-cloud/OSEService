@@ -1,4 +1,5 @@
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
+import { containerSummaryUnits, savedContainerArrival } from "@/lib/containers/arrival-display";
 import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/auth";
@@ -15,34 +16,8 @@ function getEtaDisplay(container: {
   eta_confirmed_date: string | null;
   eta_estimated_date: string | null;
 }) {
-  if (container.eta_confirmed_date) {
-    return {
-      label: formatDate(container.eta_confirmed_date),
-      isEstimate: false,
-    };
-  }
-
-  if (container.eta_estimated_date) {
-    return {
-      label: formatDate(container.eta_estimated_date),
-      isEstimate: true,
-    };
-  }
-
-  const baseDate = container.entered_date ? new Date(container.entered_date) : null;
-  if (baseDate && !Number.isNaN(baseDate.getTime())) {
-    const estimated = new Date(baseDate);
-    estimated.setDate(estimated.getDate() + 75);
-    return {
-      label: formatDate(estimated.toISOString()),
-      isEstimate: true,
-    };
-  }
-
-  return {
-    label: "Pending",
-    isEstimate: false,
-  };
+  const arrival = savedContainerArrival(container);
+  return { label: arrival.date ? formatDate(arrival.date) : "Pending", isEstimate: arrival.isEstimate };
 }
 
 export default async function ContainersPage({
@@ -209,14 +184,11 @@ export default async function ContainersPage({
                     eta_estimated_date: string | null;
                     remaining_balance: number | null;
                     notes: string | null;
-                    container_lines?: Array<{ ordered_qty: number | null; on_order_qty: number | null }>;
+                    container_lines?: Array<{ ordered_qty: number | null; on_order_qty: number | null; received_qty: number | null }>;
                   };
                   const eta = getEtaDisplay(typedContainer);
                   const lineCount = typedContainer.container_lines?.length ?? 0;
-                  const totalUnits = (typedContainer.container_lines ?? []).reduce(
-                    (sum, line) => sum + (Number(line.ordered_qty ?? 0) || Number(line.on_order_qty ?? 0)),
-                    0,
-                  );
+                  const totalUnits = containerSummaryUnits(typedContainer.lifecycle_status, typedContainer.container_lines ?? []);
                   const productSummary = (typedContainer.container_lines ?? [])
                     .map((line) => (line as { products?: { sku?: string | null } }).products?.sku)
                     .filter((sku): sku is string => Boolean(sku))
@@ -251,7 +223,7 @@ export default async function ContainersPage({
                       </td>
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{lineCount} line{lineCount === 1 ? "" : "s"}</div>
-                        <div className="text-xs text-[#6b7280]">{totalUnits} total units</div>
+                        <div className="text-xs text-[#6b7280]">{totalUnits} {typedContainer.lifecycle_status === "RECEIVED" ? "received" : "incoming"} units</div>
                         <div className="mt-2 text-xs text-[#6b7280]">{productSummary || "No SKU lines yet"}</div>
                       </td>
                       <td className="px-3 py-3">

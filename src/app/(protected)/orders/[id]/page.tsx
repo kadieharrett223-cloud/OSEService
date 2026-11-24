@@ -1,4 +1,5 @@
 import { itemWarehouseCoverage } from "@/lib/orders/item-warehouse-coverage";
+import { itemSourceCoverage } from "@/lib/orders/item-source-coverage";
 import { formatCalendarDate } from "@/lib/containers/calendar-date";
 import { isMappingSourceBypass } from "@/lib/orders/other-source-safety";
 import Link from "next/link";
@@ -1259,6 +1260,13 @@ export default async function OrderDetailPage({
     orderRecord.customers?.email,
   );
 
+  const coverageByVisibleItemKey = itemSourceCoverage(visibleItems.map(item => ({
+    key: item.key,
+    lineId: item.shippingLine?.id ?? item.key,
+    needed: isCancelled || item.isNonInventory ? 0 : Math.max(0, item.orderedQty - (fulfilledByVisibleItemKey.get(item.key) ?? 0)),
+    coverage: item.shippingLine ? coverageByLineId.get(item.shippingLine.id) ?? null : null,
+  })));
+
   function getItemSupplySnapshot(item: InvoiceItem): ItemSupplySnapshot {
     if (item.isNonInventory) {
       return {
@@ -1282,9 +1290,7 @@ export default async function OrderDetailPage({
       };
     }
 
-    const remainingQty = line
-      ? Math.max(0, Math.max(Number(line.approved_qty ?? 0), Number(line.ordered_qty ?? 0)) - Number(line.fulfilled_qty ?? 0))
-      : Math.max(0, item.orderedQty);
+    const remainingQty = Math.max(0, item.orderedQty - (fulfilledByVisibleItemKey.get(item.key) ?? 0));
 
     if (!line || remainingQty <= 0) {
       return {
@@ -1296,7 +1302,7 @@ export default async function OrderDetailPage({
       };
     }
 
-    const coverage = coverageByLineId.get(line.id) ?? null;
+    const coverage = coverageByVisibleItemKey.get(item.key) ?? null;
     if (coverage) {
       const parts = coverage.allocations.map((allocation) => {
         if (allocation.sourceType === "WAREHOUSE") return `${allocation.quantity} Warehouse · Available now`;

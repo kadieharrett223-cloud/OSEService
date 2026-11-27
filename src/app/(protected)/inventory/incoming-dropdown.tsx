@@ -73,7 +73,7 @@ export function IncomingDropdown({ total, containers }: IncomingDropdownProps) {
                 <div key={container.containerNumber} className="grid gap-2 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] p-3 text-xs sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
                   <div>
                     <div className="font-semibold text-[#1e293b]">Container {container.containerNumber}</div>
-                    <div className="mt-1 text-[#64748b]">ETA/Port {container.eta} · {container.status}</div>
+                    <div className="mt-1 text-[#64748b]">ETA {container.eta} · {container.status}</div>
                   </div>
                   <div className="text-[#475569]">Qty {container.qty}</div>
                   <div className="text-right text-[#475569]">{container.committed} forecast committed · <span className="font-semibold text-[#1e293b]">{container.available} forecast available</span></div>

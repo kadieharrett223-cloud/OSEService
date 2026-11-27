@@ -39,8 +39,8 @@ export async function createContainerAction(formData: FormData) {
   const paymentStatus = emptyToNull(formData.get("payment_status")) ?? "Pending";
   const lifecycleStatus = emptyToNull(formData.get("lifecycle_status")) ?? "ORDERED";
   const trackingNumber = emptyToNull(formData.get("tracking_number"));
-  const etaEstimatedDate = emptyToNull(formData.get("eta_estimated_date"));
-  const etaConfirmedDate = emptyToNull(formData.get("eta_confirmed_date"));
+  const etaEstimatedDate = emptyToNull(formData.get(formData.has("eta_date") ? "eta_date" : "eta_estimated_date"));
+  const etaConfirmedDate = formData.has("eta_date") ? null : emptyToNull(formData.get("eta_confirmed_date"));
   const notes = emptyToNull(formData.get("notes"));
 
   // Validate every catalog identity before creating anything. A typo must
@@ -67,6 +67,7 @@ export async function createContainerAction(formData: FormData) {
       payment_status: paymentStatus,
       lifecycle_status: lifecycleStatus,
       tracking_number: trackingNumber,
+      port_date: emptyToNull(formData.get("port_date")),
       eta_estimated_date: etaEstimatedDate,
       eta_confirmed_date: etaConfirmedDate,
       notes,
@@ -507,8 +508,8 @@ export async function updateContainerArrivalDatesAction(formData: FormData) {
   }
 
   const portDate = emptyToNull(formData.get("port_date"));
-  const etaConfirmedDate = emptyToNull(formData.get("eta_confirmed_date"));
-  const etaEstimatedDate = emptyToNull(formData.get("eta_estimated_date"));
+  const etaConfirmedDate = formData.has("eta_date") ? null : emptyToNull(formData.get("eta_confirmed_date"));
+  const etaEstimatedDate = emptyToNull(formData.get(formData.has("eta_date") ? "eta_date" : "eta_estimated_date"));
 
   for (const value of [portDate, etaConfirmedDate, etaEstimatedDate]) {
     if (value && Number.isNaN(new Date(value).getTime())) {

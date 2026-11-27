@@ -93,3 +93,14 @@ it("consumes one merged customer obligation once across distinct constituent inv
   expect(model.coverageByLineId.get("two")).toBe(model.coverageByLineId.get("one"));
   expect(model.coverageByProduct.get("JACK")?.demand).toHaveLength(1);
 });
+
+it("keeps confirmed port arrival separate from ETA in incoming details and customer forecasts", () => {
+  const line = { id: "open", product_id: "lift", approved_qty: 1, ordered_qty: 1, fulfilled_qty: 0, approval_status: "APPROVED", fulfillment_status: "UNFULFILLED", warehouse_status: "WAITING", fulfillment_source: "WAREHOUSE", inventory_allocations: [], shipping_orders: { id: "order", created_at: "2026-11-01" } };
+  const entry = { lineId: "open", openQty: 1, position: "1" };
+  const queue = { canonicalLines: [line], qboInvoiceLines: [], queue: [entry], queueByLineId: new Map([["open", entry]]) } as unknown as Parameters<typeof projectInventoryDisplayModel>[2];
+  const base = { products: [{ id: "lift", sku: "LIFT", canonical_name: "Lift" }], aliases: [], oldErpProducts: [], displayGroupData: [], transactions: [], containerLines: [{ product_id: "lift", container_id: "incoming", on_order_qty: 1, received_qty: 0, containers: { container_number: "256", lifecycle_status: "INBOUND", eta_estimated_date: null, eta_confirmed_date: null, port_date: "2026-12-06", entered_date: null } }] };
+  const model = projectInventoryDisplayModel(base, {}, queue);
+  const incoming = model.displayRows.find(row => row.sku === "LIFT")!.incomingContainers[0];
+  expect(incoming.eta).not.toContain("Dec 6");
+  expect(model.coverageByLineId.get("open")?.allocations[0].etaDate).toBeNull();
+});

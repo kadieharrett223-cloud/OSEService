@@ -24,7 +24,7 @@ function container(container_id: string, container_number: string, available_qty
 }
 
 describe("shared product coverage resolver", () => {
-  it("forecasts confirmed arrivals before an earlier estimate and before pending supply", () => {
+  it("forecasts earlier ETA256 before later confirmed ETA260 and pending supply", () => {
     const result = resolveProductCoverage(productId, {
       floorAvailableByProduct: new Map(),
       queueLinesByProduct: new Map([[productId, [line("customer", 3, 1)]]]),
@@ -34,8 +34,21 @@ describe("shared product coverage resolver", () => {
         container("confirmed", "260", 1, "2027-02-01"),
       ]]]),
     });
-    expect(result.allocations.map(a=>a.sourceId)).toEqual(["confirmed", "estimate", "pending"]);
+    expect(result.allocations.map(a=>a.sourceId)).toEqual(["estimate", "confirmed", "pending"]);
     expect(result.lines.get("customer")?.completeEtaDate).toBeNull();
+    expect(validateProductCoverage(result)).toEqual([]);
+  });
+  it("fills the ten earlier 256 units before forecasting the two remaining units on 260", () => {
+    const result = resolveProductCoverage(productId, {
+      floorAvailableByProduct: new Map(),
+      queueLinesByProduct: new Map([[productId, [line("customers", 12, 1)]]]),
+      containerSupplyByProduct: new Map([[productId, [
+        container("260", "260", 11, "2026-12-30"),
+        container("256", "256", 10, null, { eta_estimated_date: "2026-12-06" }),
+        container("262", "262", 10, null),
+      ]]]),
+    });
+    expect(result.allocations.map(a => [a.sourceId, a.quantity])).toEqual([["256", 10], ["260", 2]]);
     expect(validateProductCoverage(result)).toEqual([]);
   });
   it("fills YZRCJ-7 container256 before undated262 and leaves only the later surplus", () => {

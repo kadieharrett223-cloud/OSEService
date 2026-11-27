@@ -6,10 +6,10 @@ export function savedContainerArrival(container: { eta_confirmed_date: string | 
   return { date: null, isEstimate: false };
 }
 
-/** Confirmed arrivals first, estimates next, pending last. Entry dates are not ETAs. */
+/** Earliest saved ETA first, pending last. Confirmation does not outrank chronology. */
 export function containerArrivalSortKey(container: { eta_confirmed_date: string | null; eta_estimated_date: string | null }) {
   const arrival = savedContainerArrival(container);
-  return arrival.date ? `${arrival.isEstimate ? 1 : 0}|${new Date(arrival.date).toISOString()}` : "2|9999-12-31";
+  return arrival.date ? `0|${new Date(arrival.date).toISOString()}` : "2|9999-12-31";
 }
 
 export function containerSummaryUnits(lifecycle: string | null, lines: Array<{ on_order_qty: number | null; received_qty: number | null }>) {

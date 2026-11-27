@@ -103,12 +103,12 @@ export function AddContainerModal({ createAction, products }: AddContainerModalP
                   <input id="tracking_number" name="tracking_number" className="input" />
                 </div>
                 <div>
-                  <label className="label" htmlFor="eta_estimated_date">Estimated ETA</label>
-                  <input id="eta_estimated_date" name="eta_estimated_date" type="date" className="input" />
+                  <label className="label" htmlFor="eta_date">ETA Date</label>
+                  <input id="eta_date" name="eta_date" type="date" className="input" />
                 </div>
                 <div>
-                  <label className="label" htmlFor="eta_confirmed_date">Confirmed ETA</label>
-                  <input id="eta_confirmed_date" name="eta_confirmed_date" type="date" className="input" />
+                  <label className="label" htmlFor="port_date">Confirmed Port Arrival</label>
+                  <input id="port_date" name="port_date" type="date" className="input" />
                 </div>
               </div>
 

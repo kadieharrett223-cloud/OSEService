@@ -261,7 +261,7 @@ const getCachedInventoryBaseDataset = unstable_cache(async (): Promise<Inventory
   ]);
   const products = (productData as unknown as ProductRow[]).sort((a, b) => String(a.sku).localeCompare(String(b.sku)));
   return { products, aliases, transactions, containerLines, displayGroupData, oldErpProducts } as unknown as InventoryBaseDataset;
-}, ["inventory-base-read-model-complete-pages-v4"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+}, ["inventory-base-read-model-single-eta-v5"], { revalidate: 300, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 function getAssignmentLabel(line: QueueLine) {
   const allocations = line.inventory_allocations ?? [];
@@ -425,7 +425,7 @@ export function projectInventoryDisplayModel(
     if (!line.product_id || !isActiveIncomingContainer(line.containers?.lifecycle_status)) continue;
     const qty = Math.max(0, Number(line.on_order_qty ?? 0) - Number(line.received_qty ?? 0));
     if (qty <= 0) continue;
-    const eta = line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date ?? line.containers?.port_date;
+    const eta = line.containers?.eta_confirmed_date ?? line.containers?.eta_estimated_date;
     const number = line.containers?.container_number;
 
     if (!number) continue;
@@ -581,7 +581,7 @@ export function projectInventoryDisplayModel(
       container_number: line.containers?.container_number ?? null,
       available_qty: qty,
       eta_confirmed_date: line.containers?.eta_confirmed_date ?? null,
-      eta_estimated_date: line.containers?.eta_estimated_date ?? line.containers?.port_date ?? null,
+      eta_estimated_date: line.containers?.eta_estimated_date ?? null,
       entered_date: line.containers?.entered_date ?? null,
       lifecycle_status: line.containers?.lifecycle_status ?? null,
     });

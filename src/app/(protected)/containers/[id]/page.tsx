@@ -415,7 +415,7 @@ export default async function ContainerDetailPage({
                 <dd>{container.tracking_number ?? "—"}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="font-medium text-[#6b7280]">ETA</dt>
+                <dt className="font-medium text-[#6b7280]">ETA Date</dt>
                 <dd>{container.eta_confirmed_date ? formatDate(container.eta_confirmed_date) : container.eta_estimated_date ? formatDate(container.eta_estimated_date) : "Pending"}</dd>
               </div>
             </dl>
@@ -424,7 +424,8 @@ export default async function ContainerDetailPage({
           </div>
 
           <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-[#111827]">Production &amp; Freight Schedule</h2>
+            <details>
+            <summary className="cursor-pointer text-sm font-semibold text-[#374151]">Schedule history &amp; source notes</summary>
             <dl className="mt-4 space-y-3 text-sm text-[#374151]">
               <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">Rush request</dt><dd>{container.rush_status === "NONE" ? "No rush request recorded" : container.rush_status === "ACCEPTED" ? "Supplier agreed to rush" : container.rush_status === "REQUESTED" ? "Requested, awaiting supplier" : container.rush_status === "DECLINED" ? "Supplier declined" : "Unknown"}</dd></div>
               <div className="flex justify-between gap-4"><dt className="font-medium text-[#6b7280]">China port handoff estimate</dt><dd>{formatDate(container.china_port_handoff_eta_date)}</dd></div>
@@ -436,6 +437,7 @@ export default async function ContainerDetailPage({
             {container.schedule_note ? <p className="mt-4 whitespace-pre-wrap rounded-lg bg-[#f8fafc] p-3 text-sm text-[#334155]">{container.schedule_note}</p> : null}
             {container.schedule_source_url ? <a href={container.schedule_source_url} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block text-sm font-medium text-[#9f0712] underline">Schedule source</a> : null}
             {container.schedule_checked_at ? <p className="mt-2 text-xs text-[#6b7280]">Checked {formatDate(container.schedule_checked_at)}</p> : null}
+            </details>
           </div>
 
           <div className="rounded-2xl border border-[#e5e7eb] bg-white p-6 shadow-sm">
@@ -448,10 +450,6 @@ export default async function ContainerDetailPage({
               <div className="flex justify-between gap-4">
                 <dt className="font-medium text-[#6b7280]">Remaining Balance</dt>
                 <dd>{formatCurrency(container.remaining_balance)}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="font-medium text-[#6b7280]">Port Date</dt>
-                <dd>{formatDate(container.port_date)}</dd>
               </div>
             </dl>
           </div>

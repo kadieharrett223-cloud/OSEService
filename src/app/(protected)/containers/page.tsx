@@ -218,8 +218,6 @@ export default async function ContainersPage({
                             <span>{eta.label}</span>
                           )}
                         </div>
-                        {typedContainer.china_port_handoff_eta_date ? <div className="mt-1 text-xs text-[#6b7280]">China port est. {formatDate(typedContainer.china_port_handoff_eta_date)}</div> : null}
-                        {typedContainer.us_port_eta_date ? <div className="mt-1 text-xs text-[#6b7280]">U.S. port ETA {formatDate(typedContainer.us_port_eta_date)}</div> : null}
                       </td>
                       <td className="px-3 py-3 text-[#374151]">
                         <div>{lineCount} line{lineCount === 1 ? "" : "s"}</div>

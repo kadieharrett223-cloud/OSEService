@@ -1,14 +1,14 @@
 import { expect, it } from "vitest";
 import { containerArrivalSortKey, containerSummaryUnits, savedContainerArrival } from "./arrival-display";
 
-it("puts every unconfirmed arrival below confirmed dates, then pending below estimates", () => {
+it("sorts the single ETA chronologically across legacy date fields, with pending last", () => {
   const rows = [
     { id: "pending", eta_confirmed_date: null, eta_estimated_date: null },
     { id: "estimate", eta_confirmed_date: null, eta_estimated_date: "2026-12-01" },
     { id: "confirmed", eta_confirmed_date: "2027-02-01", eta_estimated_date: null },
     { id: "invalid", eta_confirmed_date: "invalid", eta_estimated_date: null },
   ];
-  expect(rows.sort((a,b) => containerArrivalSortKey(a).localeCompare(containerArrivalSortKey(b))).map(r=>r.id)).toEqual(["confirmed", "estimate", "pending", "invalid"]);
+  expect(rows.sort((a,b) => containerArrivalSortKey(a).localeCompare(containerArrivalSortKey(b))).map(r=>r.id)).toEqual(["estimate", "confirmed", "pending", "invalid"]);
 });
 
 it("leaves warehouse ETA pending when only entry and port milestones exist", () => {

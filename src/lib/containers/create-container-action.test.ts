@@ -72,6 +72,13 @@ describe("container save retries", () => {
     ]);
   });
 
+  it("creates a container with one ETA and independent confirmed port arrival", async () => {
+    state.insertResult = { data: { id: "new-267" }, error: null };
+    const data = form(); data.set("eta_date", "2026-12-30"); data.set("port_date", "2026-12-20");
+    await expect(createContainerAction(data)).rejects.toThrow("REDIRECT:/containers/new-267?success=Container+added");
+    expect(state.headerInsert).toHaveBeenCalledWith(expect.objectContaining({ eta_confirmed_date: null, eta_estimated_date: "2026-12-30", port_date: "2026-12-20" }));
+  });
+
   it("rejects invalid quantities before creating a container", async () => {
     const invalid = form(); invalid.set("product_qty", "1.5");
     await expect(createContainerAction(invalid)).rejects.toThrow(/REDIRECT:\/containers\?error=/);

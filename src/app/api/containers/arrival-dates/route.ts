@@ -19,7 +19,11 @@ export async function POST(request: Request) {
   }
   const dates = { port_date: null, eta_confirmed_date: null, eta_estimated_date: null } as { port_date: string | null; eta_confirmed_date: string | null; eta_estimated_date: string | null };
   for (const key of ["port_date", "eta_confirmed_date", "eta_estimated_date"] as const) {
-    const value = String(form.get(key) ?? "").trim();
+    // New forms submit one ETA; accept already-open legacy forms too.
+    const input = form.has("eta_date") && key !== "port_date"
+      ? (key === "eta_estimated_date" ? form.get("eta_date") : null)
+      : form.get(key);
+    const value = String(input ?? "").trim();
     if (value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)) {
       return Response.json({ error: "Enter a valid date." }, { status: 400 });
     }

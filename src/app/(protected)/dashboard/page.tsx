@@ -53,7 +53,7 @@ const getCachedDashboardDataset = unstable_cache(async () => {
   ]);
 
   return { products, inventoryTransactions, allInventoryTransactions, containers, cases, installations, audits, stockRoutes };
-}, ["dashboard-read-model-confirmed-arrivals-first-v7"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
+}, ["dashboard-read-model-single-eta-v8"], { revalidate: 60, tags: [INVENTORY_READ_MODEL_CACHE_TAG] });
 
 type InventoryTransactionRow = {
   product_id: string | null;

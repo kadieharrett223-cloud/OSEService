@@ -43,3 +43,17 @@ it("never reports success when the container is missing or the update fails", as
   expect(state.projections).toBe(0);
   expect(state.paths).toEqual([]);
 });
+
+it("saves one ETA independently from confirmed port arrival and clears the obsolete ETA alternative", async () => {
+  const result = await POST(request({ eta_date: "2026-12-06", eta_confirmed_date: "2026-12-30" }));
+  expect(result.status).toBe(200);
+  expect(state.writes[0]).toEqual({ table: "containers", values: { port_date: "2026-12-23", eta_confirmed_date: null, eta_estimated_date: "2026-12-06" } });
+});
+it("clears the unified ETA without reusing the stale legacy date", async () => {
+  expect((await POST(request({ eta_date: "", eta_confirmed_date: "2026-12-30" }))).status).toBe(200);
+  expect(state.writes[0]).toMatchObject({ values: { eta_confirmed_date: null, eta_estimated_date: null } });
+});
+it("validates the unified ETA before writing", async () => {
+  expect((await POST(request({ eta_date: "2026-02-30" }))).status).toBe(400);
+  expect(state.writes).toEqual([]);
+});

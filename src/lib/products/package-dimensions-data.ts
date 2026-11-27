@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { SHIPPING_PACKAGE_SPECIFICATIONS } from "./shipping-package-specifications";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { formatPackageDimensions, getPackageDimensions, type PackageDimensions } from "./package-dimensions";
 
@@ -44,5 +45,15 @@ export const getCachedPackageDimensionsBySku = unstable_cache(async () => {
       if (!existing || (!formatPackageDimensions(existing) && formatPackageDimensions(dimensions)) || (existing.weightPounds === null && dimensions.weightPounds !== null)) lookup[key] = dimensions;
     }
   }
+  return applyShippingPackageSpecifications(lookup);
+}, ["inventory-package-dimensions-kadie-20261127-v2"], { revalidate: 300 });
+
+
+/** Current supplied specifications override preserved legacy shipping metadata only. */
+export function applyShippingPackageSpecifications(legacy: Record<string, PackageDimensions>) {
+  const lookup = { ...legacy };
+  for (const [sku, dimensions] of Object.entries(SHIPPING_PACKAGE_SPECIFICATIONS)) {
+    lookup[packageDimensionsLookupKey(sku)] = dimensions;
+  }
   return lookup;
-}, ["inventory-package-dimensions"], { revalidate: 300 });
+}

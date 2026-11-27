@@ -162,3 +162,10 @@ it("excludes payment-held and pickup orders without changing them", async () => 
   state.method = "WILL_CALL";
   expect((await loadShippingGroupCandidates()).candidates).toEqual([]);
 });
+
+
+it("uses the current supplied package specification in the actual shipping workflow", async () => {
+  const result = await loadShippingGroupCandidates();
+  expect(result.candidates[0].lifts[0].packageLabel).toBe("154 × 22 × 24 in · 1,215 lb");
+  expect(result.candidates[0].lifts[0].unitWeight).toBe(1215);
+});

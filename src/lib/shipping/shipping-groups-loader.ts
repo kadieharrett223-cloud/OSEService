@@ -1,3 +1,4 @@
+import { getShippingPackageSpecification } from "@/lib/products/shipping-package-specifications";
 import { lineSourceReservations } from "@/lib/fulfillment/line-source-reservations";
 import { inventoryCoverageSource } from "@/lib/orders/other-source-safety";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -347,9 +348,8 @@ export async function loadShippingGroupCandidates() {
         other.source_record_id &&
         sourceById.has(other.source_record_id),
     );
-    const dimensions = getPackageDimensions(
-      sourceById.get(sourceProduct?.source_record_id ?? ""),
-    );
+    const dimensions = getShippingPackageSpecification(operationalSkuByProduct.get(p.id) ?? p.sku)
+      ?? getPackageDimensions(sourceById.get(sourceProduct?.source_record_id ?? ""));
     candidate.lifts.push({
       sku: operationalSkuByProduct.get(p.id) ?? p.sku,
       quantity: qty,
